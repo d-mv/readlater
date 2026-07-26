@@ -1,4 +1,5 @@
-export function domainFromUrl(url: string): string {
+export function domainFromUrl(url: string | null): string {
+  if (!url) return "Note";
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
@@ -7,7 +8,7 @@ export function domainFromUrl(url: string): string {
 }
 
 interface ListRowMetaInput {
-  url: string;
+  url: string | null;
   reading_time: number | null;
   read_at: string | null;
 }

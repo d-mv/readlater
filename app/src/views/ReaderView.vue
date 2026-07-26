@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, useTemplateRef } from "vue";
+import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import { useRouter } from "vue-router";
 import { IconLoader2, IconAlertTriangle } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
@@ -10,6 +10,8 @@ import ReaderHeader from "../components/reader/ReaderHeader.vue";
 import ReaderProgressBar from "../components/reader/ReaderProgressBar.vue";
 import ArticleContent from "../components/reader/ArticleContent.vue";
 import ReaderActions from "../components/reader/ReaderActions.vue";
+import ShareDialog from "../components/reader/ShareDialog.vue";
+import TagInput from "../components/reader/TagInput.vue";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -71,12 +73,32 @@ async function onDelete() {
 function onMarkRead() {
   store.markRead(props.id);
 }
+
+const showShareDialog = ref(false);
+
+function onTogglePublic(isPublic: boolean) {
+  if (bookmark.value) store.setPublic(bookmark.value.id, isPublic);
+}
+
+function onAddTag(name: string) {
+  if (bookmark.value) store.addTag(bookmark.value.id, name);
+}
+
+function onRemoveTag(tagId: string) {
+  if (bookmark.value) store.removeTag(bookmark.value.id, tagId);
+}
 </script>
 
 <template>
   <main v-if="bookmark" class="reader-view">
     <ReaderProgressBar :progress="progress" />
-    <ReaderHeader :bookmark="bookmark" @back="onBack" @archive="onArchive" @delete="onDelete" />
+    <ReaderHeader
+      :bookmark="bookmark"
+      @back="onBack"
+      @archive="onArchive"
+      @delete="onDelete"
+      @share="showShareDialog = true"
+    />
     <div ref="scrollContainer" class="scroll-area">
       <template v-if="bookmark.status === 'ready'">
         <h1 class="title">{{ bookmark.title }}</h1>
@@ -93,7 +115,14 @@ function onMarkRead() {
         <p class="status-text">Processing…</p>
       </div>
     </div>
+    <TagInput v-if="bookmark.status === 'ready'" :tags="bookmark.tags" @add="onAddTag" @remove="onRemoveTag" />
     <ReaderActions :bookmark="bookmark" @mark-read="onMarkRead" />
+    <ShareDialog
+      v-if="showShareDialog"
+      :bookmark="bookmark"
+      @close="showShareDialog = false"
+      @toggle-public="onTogglePublic"
+    />
   </main>
 </template>
 

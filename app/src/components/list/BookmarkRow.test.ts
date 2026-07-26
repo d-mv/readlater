@@ -17,6 +17,7 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     word_count: 100,
     reading_time: 6,
     tags: [],
+    is_public: false,
     archived: false,
     read_at: null,
     error_message: null,
@@ -44,6 +45,16 @@ describe("BookmarkRow", () => {
       props: { bookmark: makeBookmark({ read_at: "2026-01-02T00:00:00Z" }) },
     });
     expect(wrapper.find(".title").classes()).toContain("title-read");
+  });
+
+  test("shows a public badge when the bookmark is shared", () => {
+    const wrapper = mount(BookmarkRow, { props: { bookmark: makeBookmark({ is_public: true }) } });
+    expect(wrapper.find(".public-badge").exists()).toBe(true);
+  });
+
+  test("hides the public badge when the bookmark is not shared", () => {
+    const wrapper = mount(BookmarkRow, { props: { bookmark: makeBookmark({ is_public: false }) } });
+    expect(wrapper.find(".public-badge").exists()).toBe(false);
   });
 
   test("falls back to the URL when there's no title yet", () => {

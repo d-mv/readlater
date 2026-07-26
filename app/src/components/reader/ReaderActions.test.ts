@@ -17,6 +17,7 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     word_count: null,
     reading_time: null,
     tags: [],
+    is_public: false,
     archived: false,
     read_at: null,
     error_message: null,

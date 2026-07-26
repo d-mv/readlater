@@ -7,6 +7,7 @@ import {
   IconAlertTriangle,
   IconDownload,
   IconCheck,
+  IconWorld,
 } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
 import { listRowMeta } from "../../utils/format";
@@ -36,7 +37,7 @@ const displayTitle = computed(() => {
   if (props.bookmark.title) return props.bookmark.title;
   if (isFailed.value) return "Failed to process";
   if (isPending.value) return "Processing…";
-  return props.bookmark.url;
+  return props.bookmark.url ?? "Note";
 });
 </script>
 
@@ -49,7 +50,10 @@ const displayTitle = computed(() => {
         <component :is="iconComponent" v-else :size="16" class="icon" />
       </span>
       <span class="text">
-        <span class="title" :class="{ 'title-read': isRead, 'title-pending': isPending, 'title-failed': isFailed }">{{ displayTitle }}</span>
+        <span class="title-row">
+          <span class="title" :class="{ 'title-read': isRead, 'title-pending': isPending, 'title-failed': isFailed }">{{ displayTitle }}</span>
+          <IconWorld v-if="bookmark.is_public" :size="12" class="public-badge" aria-label="Shared publicly" />
+        </span>
         <span class="meta">{{ meta }}</span>
       </span>
     </button>
@@ -131,6 +135,13 @@ const displayTitle = computed(() => {
   flex: 1;
 }
 
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
 .title {
   font-size: 14px;
   font-weight: 500;
@@ -138,6 +149,11 @@ const displayTitle = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.public-badge {
+  flex-shrink: 0;
+  color: var(--rl-accent);
 }
 
 .title-read {

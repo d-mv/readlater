@@ -18,6 +18,7 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     word_count: null,
     reading_time: null,
     tags: [],
+    is_public: false,
     archived: false,
     read_at: null,
     error_message: null,
@@ -47,6 +48,17 @@ describe("ReaderHeader", () => {
     const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
     await wrapper.find(".archive-btn").trigger("click");
     expect(wrapper.emitted("archive")).toHaveLength(1);
+  });
+
+  test("emits share when the share button is clicked", async () => {
+    const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
+    await wrapper.find(".share-btn").trigger("click");
+    expect(wrapper.emitted("share")).toHaveLength(1);
+  });
+
+  test("marks the share button active when the bookmark is public", () => {
+    const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark({ is_public: true }) } });
+    expect(wrapper.find(".share-btn").classes()).toContain("share-btn-active");
   });
 
   test("links the external-link button to the original URL in a new tab", () => {

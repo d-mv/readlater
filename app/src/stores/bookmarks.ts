@@ -1,9 +1,13 @@
 import { acceptHMRUpdate, defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
-import { supabase, type Bookmark } from "../lib/supabase";
+import { supabase, type Bookmark, type DuplicateBookmark } from "../lib/supabase";
 import { detectBookmarkType } from "../utils/bookmarkType";
+import { truncateTitle } from "../utils/captureText";
 import * as offlineDb from "../lib/offlineDb";
 import { useOfflineCacheStore } from "./offlineCache";
+
+const BOOKMARK_SELECT = "*, tags(id, name, color)";
+const UNIQUE_VIOLATION = "23505";
 
 function stripContentMd(bookmark: Bookmark): offlineDb.OfflineBookmarkMeta {
   const { content_md: _content_md, ...meta } = bookmark;
@@ -26,6 +30,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   const bookmarks = ref<Bookmark[]>([]);
   const filter = shallowRef<BookmarkFilter>("all");
   const loading = shallowRef(false);
+  const searchQuery = shallowRef("");
+  const activeTagIds = ref<string[]>([]);
 
   const visibleBookmarks = computed(() =>
     bookmarks.value.filter((b) => (filter.value === "archived" ? b.archived : !b.archived)),
@@ -35,20 +41,71 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     () => bookmarks.value.filter((b) => !b.archived && b.read_at === null).length,
   );
 
+  // Derived from tags already attached to loaded bookmarks, not a separate
+  // query — fine at personal-library scale, and means the filter bar only
+  // ever shows tags that are actually in use.
+  const allTags = computed(() => {
+    const byId = new Map<string, Bookmark["tags"][number]>();
+    for (const bookmark of bookmarks.value) {
+      for (const tag of bookmark.tags) byId.set(tag.id, tag);
+    }
+    return [...byId.values()];
+  });
+
   function setFilter(next: BookmarkFilter) {
     filter.value = next;
+  }
+
+  function setSearchQuery(next: string) {
+    searchQuery.value = next;
+  }
+
+  function setActiveTagIds(next: string[]) {
+    activeTagIds.value = next;
+  }
+
+  // Tags are a many-to-many join, so "match all selected tags" can't be
+  // expressed as a single PostgREST filter on the bookmarks table — resolve
+  // it as a separate lookup against bookmark_tags first.
+  async function bookmarkIdsMatchingAllTags(tagIds: string[]): Promise<string[]> {
+    const { data } = await supabase.from("bookmark_tags").select("bookmark_id, tag_id").in("tag_id", tagIds);
+    const counts = new Map<string, number>();
+    for (const row of data ?? []) {
+      counts.set(row.bookmark_id, (counts.get(row.bookmark_id) ?? 0) + 1);
+    }
+    return [...counts.entries()].filter(([, count]) => count === tagIds.length).map(([id]) => id);
   }
 
   async function fetch() {
     loading.value = true;
     try {
-      const { data } = await supabase
-        .from("bookmarks")
-        .select("*")
-        .order("created_at", { ascending: false });
+      let query = supabase.from("bookmarks").select(BOOKMARK_SELECT);
+
+      const trimmedQuery = searchQuery.value.trim();
+      if (trimmedQuery) {
+        query = query.textSearch("search_vector", trimmedQuery, { type: "websearch" });
+      }
+
+      if (activeTagIds.value.length > 0) {
+        const matchingIds = await bookmarkIdsMatchingAllTags(activeTagIds.value);
+        query = query.in("id", matchingIds);
+      }
+
+      const { data } = await query.order("created_at", { ascending: false });
       bookmarks.value = data ?? [];
     } catch {
-      bookmarks.value = await loadOfflineBookmarks();
+      const offlineBookmarks = await loadOfflineBookmarks();
+      const trimmedQuery = searchQuery.value.trim().toLowerCase();
+      // Postgres full-text search doesn't run against the cached copy — fall
+      // back to a plain substring match over title/excerpt (content_md isn't
+      // cached in list metadata, so offline search can't reach article bodies).
+      bookmarks.value = trimmedQuery
+        ? offlineBookmarks.filter(
+            (b) =>
+              b.title?.toLowerCase().includes(trimmedQuery) ||
+              b.excerpt?.toLowerCase().includes(trimmedQuery),
+          )
+        : offlineBookmarks;
       loading.value = false;
       return;
     }
@@ -60,7 +117,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   async function add(
     url: string,
     options?: { force?: boolean },
-  ): Promise<{ error: string | null; duplicate?: boolean }> {
+  ): Promise<{ error: string | null; duplicate?: boolean } & Partial<DuplicateBookmark>> {
     let type: Bookmark["type"];
     try {
       type = detectBookmarkType(url);
@@ -80,7 +137,52 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const { data, error } = await supabase
       .from("bookmarks")
       .insert({ url, type, status: "pending", user_id: user.id })
-      .select()
+      .select(BOOKMARK_SELECT)
+      .single();
+
+    if (error) {
+      // The local check above only catches URLs already loaded into this
+      // session's list (e.g. archived items that weren't fetched); the DB's
+      // unique index on the normalized URL is the source of truth.
+      if (error.code === UNIQUE_VIOLATION) {
+        const existing = await findByNormalizedUrl(url);
+        if (existing) {
+          return {
+            error: null,
+            duplicate: true,
+            existingId: existing.id,
+            existingTitle: existing.title,
+            existingSavedAt: existing.created_at,
+          };
+        }
+      }
+      return { error: error.message };
+    }
+
+    bookmarks.value.unshift(data);
+    return { error: null };
+  }
+
+  async function addNote(text: string): Promise<{ error: string | null }> {
+    const trimmed = text.trim();
+    if (!trimmed) return { error: "Note text is empty." };
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { error: "You must be signed in." };
+
+    const { data, error } = await supabase
+      .from("bookmarks")
+      .insert({
+        url: null,
+        title: truncateTitle(trimmed),
+        content_md: trimmed,
+        type: "note",
+        status: "ready",
+        user_id: user.id,
+      })
+      .select(BOOKMARK_SELECT)
       .single();
 
     if (error) return { error: error.message };
@@ -89,8 +191,27 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return { error: null };
   }
 
+  async function findByNormalizedUrl(url: string) {
+    const normalized = url.toLowerCase().replace(/\/+$/, "");
+    const { data } = await supabase
+      .from("bookmarks")
+      .select("id, title, created_at")
+      .eq("url_normalized", normalized)
+      .maybeSingle();
+    return data;
+  }
+
+  async function refresh(id: string) {
+    await supabase.from("bookmarks").update({ status: "pending", error_message: null }).eq("id", id);
+    const bookmark = bookmarks.value.find((b) => b.id === id);
+    if (bookmark) {
+      bookmark.status = "pending";
+      bookmark.error_message = null;
+    }
+  }
+
   async function fetchOne(id: string): Promise<Bookmark | null> {
-    const { data } = await supabase.from("bookmarks").select("*").eq("id", id).single();
+    const { data } = await supabase.from("bookmarks").select(BOOKMARK_SELECT).eq("id", id).single();
     if (!data) return null;
 
     const index = bookmarks.value.findIndex((b) => b.id === id);
@@ -100,6 +221,40 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       bookmarks.value.push(data);
     }
     return data;
+  }
+
+  async function setPublic(id: string, isPublic: boolean) {
+    await supabase.from("bookmarks").update({ is_public: isPublic }).eq("id", id);
+    const bookmark = bookmarks.value.find((b) => b.id === id);
+    if (bookmark) bookmark.is_public = isPublic;
+  }
+
+  async function addTag(bookmarkId: string, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+
+    const { data: tag, error: tagError } = await supabase
+      .from("tags")
+      .upsert({ name: trimmed }, { onConflict: "name", ignoreDuplicates: false })
+      .select("id, name, color")
+      .single();
+    if (tagError || !tag) return;
+
+    const { error: joinError } = await supabase
+      .from("bookmark_tags")
+      .upsert({ bookmark_id: bookmarkId, tag_id: tag.id }, { onConflict: "bookmark_id,tag_id" });
+    if (joinError) return;
+
+    const bookmark = bookmarks.value.find((b) => b.id === bookmarkId);
+    if (bookmark && !bookmark.tags.some((t) => t.id === tag.id)) {
+      bookmark.tags.push(tag);
+    }
+  }
+
+  async function removeTag(bookmarkId: string, tagId: string) {
+    await supabase.from("bookmark_tags").delete().eq("bookmark_id", bookmarkId).eq("tag_id", tagId);
+    const bookmark = bookmarks.value.find((b) => b.id === bookmarkId);
+    if (bookmark) bookmark.tags = bookmark.tags.filter((t) => t.id !== tagId);
   }
 
   async function markRead(id: string) {
@@ -127,15 +282,25 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     bookmarks,
     filter,
     loading,
+    searchQuery,
+    activeTagIds,
     visibleBookmarks,
     unreadCount,
+    allTags,
     setFilter,
+    setSearchQuery,
+    setActiveTagIds,
     fetch,
     add,
+    addNote,
+    refresh,
     fetchOne,
     markRead,
     archive,
     remove,
+    setPublic,
+    addTag,
+    removeTag,
   };
 });
 

@@ -41,6 +41,7 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     word_count: 100,
     reading_time: 5,
     tags: [],
+    is_public: false,
     archived: false,
     read_at: null,
     error_message: null,
@@ -309,6 +310,7 @@ describe("useBookmarksStore", () => {
         word_count: null,
         reading_time: null,
         tags: [],
+        is_public: false,
         archived: false,
         read_at: null,
         error_message: null,
@@ -340,6 +342,143 @@ describe("useBookmarksStore", () => {
     await store.archive("1");
 
     expect(removeCachedBookmark).toHaveBeenCalledWith("1");
+  });
+
+  test("addNote inserts a ready note for the signed-in user and prepends it locally", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
+    const inserted = makeBookmark({ id: "note-1", url: null, type: "note", status: "ready", content_md: "hello" });
+    const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    from.mockReturnValue({ insert });
+
+    const store = useBookmarksStore();
+    const result = await store.addNote("hello");
+
+    expect(insert).toHaveBeenCalledWith(
+      expect.objectContaining({ url: null, type: "note", status: "ready", content_md: "hello", user_id: "user-1" }),
+    );
+    expect(result.error).toBeNull();
+    expect(store.bookmarks[0]?.id).toBe("note-1");
+  });
+
+  test("addNote returns an error for blank text without touching the network", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
+
+    const store = useBookmarksStore();
+    const result = await store.addNote("   ");
+
+    expect(result.error).toBeTruthy();
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  test("setPublic updates is_public both remotely and in local state", async () => {
+    const rows = [makeBookmark({ id: "1", is_public: false })];
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      update,
+    });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.setPublic("1", true);
+
+    expect(update).toHaveBeenCalledWith({ is_public: true });
+    expect(eq).toHaveBeenCalledWith("id", "1");
+    expect(store.bookmarks[0]?.is_public).toBe(true);
+  });
+
+  test("refresh resets a bookmark to pending both remotely and in local state", async () => {
+    const rows = [makeBookmark({ id: "1", status: "failed", error_message: "boom" })];
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      update,
+    });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.refresh("1");
+
+    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null });
+    expect(store.bookmarks[0]?.status).toBe("pending");
+    expect(store.bookmarks[0]?.error_message).toBeNull();
+  });
+
+  test("add reports a duplicate via the DB unique index when the URL wasn't in the local list", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
+    const single = vi.fn().mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    from.mockReturnValueOnce({ insert });
+
+    const existing = { id: "existing-1", title: "Already saved", created_at: "2026-01-01T00:00:00Z" };
+    const maybeSingle = vi.fn().mockResolvedValue({ data: existing, error: null });
+    const eq = vi.fn(() => ({ maybeSingle }));
+    const lookupSelect = vi.fn(() => ({ eq }));
+    from.mockReturnValueOnce({ select: lookupSelect });
+
+    const store = useBookmarksStore();
+    const result = await store.add("https://arc90.com/new");
+
+    expect(result).toEqual({
+      error: null,
+      duplicate: true,
+      existingId: "existing-1",
+      existingTitle: "Already saved",
+      existingSavedAt: "2026-01-01T00:00:00Z",
+    });
+  });
+
+  test("addTag creates the tag, links it, and updates local state", async () => {
+    const rows = [makeBookmark({ id: "1", tags: [] })];
+    const tag = { id: "tag-1", name: "vue", color: "#888888" };
+    const tagSingle = vi.fn().mockResolvedValue({ data: tag, error: null });
+    const tagSelect = vi.fn(() => ({ single: tagSingle }));
+    const tagUpsert = vi.fn(() => ({ select: tagSelect }));
+    const joinUpsert = vi.fn().mockResolvedValue({ error: null });
+
+    from.mockImplementation((table: string) => {
+      if (table === "tags") return { upsert: tagUpsert };
+      if (table === "bookmark_tags") return { upsert: joinUpsert };
+      return { select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }) };
+    });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.addTag("1", "vue");
+
+    expect(tagUpsert).toHaveBeenCalledWith({ name: "vue" }, { onConflict: "name", ignoreDuplicates: false });
+    expect(joinUpsert).toHaveBeenCalledWith(
+      { bookmark_id: "1", tag_id: "tag-1" },
+      { onConflict: "bookmark_id,tag_id" },
+    );
+    expect(store.bookmarks[0]?.tags).toEqual([tag]);
+  });
+
+  test("removeTag unlinks the tag and updates local state", async () => {
+    const tag = { id: "tag-1", name: "vue", color: "#888888" };
+    const rows = [makeBookmark({ id: "1", tags: [tag] })];
+    const eq2 = vi.fn().mockResolvedValue({ error: null });
+    const eq1 = vi.fn(() => ({ eq: eq2 }));
+    const del = vi.fn(() => ({ eq: eq1 }));
+
+    from.mockImplementation((table: string) => {
+      if (table === "bookmark_tags") return { delete: del };
+      return { select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }) };
+    });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.removeTag("1", "tag-1");
+
+    expect(del).toHaveBeenCalled();
+    expect(eq1).toHaveBeenCalledWith("bookmark_id", "1");
+    expect(eq2).toHaveBeenCalledWith("tag_id", "tag-1");
+    expect(store.bookmarks[0]?.tags).toEqual([]);
   });
 
   test("remove deletes the row remotely, drops it locally, and evicts offline data", async () => {

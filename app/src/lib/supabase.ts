@@ -9,10 +9,16 @@ if (!url || !publishableKey) {
 
 export const supabase = createClient(url, publishableKey);
 
+export interface Tag {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export interface Bookmark {
   id: string;
-  url: string;
-  type: "article" | "youtube";
+  url: string | null;
+  type: "article" | "youtube" | "note";
   status: "pending" | "processing" | "ready" | "failed";
   title: string | null;
   author: string | null;
@@ -21,10 +27,17 @@ export interface Bookmark {
   thumbnail_url: string | null;
   word_count: number | null;
   reading_time: number | null;
-  tags: string[];
+  tags: Tag[];
+  is_public: boolean;
   archived: boolean;
   read_at: string | null;
   error_message: string | null;
   created_at: string;
   processed_at: string | null;
+}
+
+export interface DuplicateBookmark {
+  existingId: string;
+  existingTitle: string | null;
+  existingSavedAt: string;
 }

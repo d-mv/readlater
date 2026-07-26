@@ -21,6 +21,14 @@ export default defineConfig({
           { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
           { src: "/icons/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
         ],
+        // Chrome-on-Android only — WebKit/Safari has never implemented
+        // share_target, so this has no effect on iOS (bookmarklet/Shortcut
+        // cover capture there instead).
+        share_target: {
+          action: "/share-target",
+          method: "GET",
+          params: { title: "title", text: "text", url: "url" },
+        },
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,woff2,svg,png}"],

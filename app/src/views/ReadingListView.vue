@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
+import { useDebouncedFn } from "../composables/useDebouncedFn";
 import StatusTabs from "../components/list/StatusTabs.vue";
 import BookmarkList from "../components/list/BookmarkList.vue";
 import AddBookmarkDialog from "../components/list/AddBookmarkDialog.vue";
+import TagFilterBar from "../components/list/TagFilterBar.vue";
 import ThemeToggle from "../components/ThemeToggle.vue";
 import type { BookmarkFilter } from "../stores/bookmarks";
 
@@ -35,6 +37,24 @@ function onToggleOffline(id: string) {
     offlineCache.cacheBookmark(bookmark);
   }
 }
+
+const searchInput = ref("");
+const runSearch = useDebouncedFn((query: string) => {
+  store.setSearchQuery(query);
+  store.fetch();
+}, 300);
+
+function onSearchInput() {
+  runSearch(searchInput.value);
+}
+
+function onToggleTag(tagId: string) {
+  const next = store.activeTagIds.includes(tagId)
+    ? store.activeTagIds.filter((id) => id !== tagId)
+    : [...store.activeTagIds, tagId];
+  store.setActiveTagIds(next);
+  store.fetch();
+}
 </script>
 
 <template>
@@ -46,6 +66,15 @@ function onToggleOffline(id: string) {
         <ThemeToggle />
       </div>
     </div>
+    <input
+      v-model="searchInput"
+      class="search-input"
+      type="search"
+      placeholder="Search…"
+      maxlength="200"
+      @input="onSearchInput"
+    />
+    <TagFilterBar :tags="store.allTags" :active-tag-ids="store.activeTagIds" @toggle="onToggleTag" />
     <StatusTabs :active-filter="store.filter" :unread-count="store.unreadCount" @change="onChangeFilter" />
     <BookmarkList
       :bookmarks="store.visibleBookmarks"
@@ -82,5 +111,23 @@ function onToggleOffline(id: string) {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.search-input {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 4px 16px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: var(--rl-radius);
+  border: 0.5px solid var(--rl-border);
+  background: transparent;
+  color: var(--rl-text-primary);
+  font-size: 14px;
+}
+
+.search-input:focus {
+  outline: none;
+  border-color: var(--rl-accent);
 }
 </style>

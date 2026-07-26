@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { IconArchive, IconChevronLeft, IconExternalLink, IconTrash } from "@tabler/icons-vue";
+import { IconArchive, IconChevronLeft, IconExternalLink, IconTrash, IconWorld } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
 import { domainFromUrl } from "../../utils/format";
 import FontSizeControl from "./FontSizeControl.vue";
@@ -13,6 +13,7 @@ const emit = defineEmits<{
   back: [];
   archive: [];
   delete: [];
+  share: [];
 }>();
 
 const domain = computed(() => domainFromUrl(props.bookmark.url));
@@ -32,13 +33,27 @@ function onDelete() {
     <span class="domain">{{ domain }}</span>
     <div class="actions">
       <FontSizeControl />
+      <button
+        class="icon-btn share-btn"
+        :class="{ 'share-btn-active': bookmark.is_public }"
+        type="button"
+        @click="emit('share')"
+      >
+        <IconWorld :size="18" />
+      </button>
       <button class="icon-btn archive-btn" type="button" @click="emit('archive')">
         <IconArchive :size="18" />
       </button>
       <button class="icon-btn delete-btn" type="button" @click="onDelete">
         <IconTrash :size="18" />
       </button>
-      <a class="icon-btn external-link-btn" :href="bookmark.url" target="_blank" rel="noopener">
+      <a
+        v-if="bookmark.url"
+        class="icon-btn external-link-btn"
+        :href="bookmark.url"
+        target="_blank"
+        rel="noopener"
+      >
         <IconExternalLink :size="18" />
       </a>
     </div>
@@ -72,5 +87,9 @@ function onDelete() {
   color: var(--rl-text-secondary);
   cursor: pointer;
   padding: 0;
+}
+
+.share-btn-active {
+  color: var(--rl-accent);
 }
 </style>
