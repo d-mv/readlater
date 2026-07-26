@@ -125,6 +125,131 @@ describe("AddBookmarkDialog", () => {
     expect(wrapper.find("dialog").exists()).toBe(false);
   });
 
+  test("defaults to URL mode, showing the URL input and not the snippet textarea", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+
+    expect(wrapper.find("input[type=url]").exists()).toBe(true);
+    expect(wrapper.find("textarea").exists()).toBe(false);
+  });
+
+  test("switching to Snippet mode swaps the input area", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-snippet").trigger("click");
+
+    expect(wrapper.find("textarea").exists()).toBe(true);
+    expect(wrapper.find("input[type=url]").exists()).toBe(false);
+  });
+
+  test("switching modes clears an existing error", async () => {
+    const store = useBookmarksStore();
+    store.add = vi.fn().mockResolvedValue({ error: "Enter a valid URL." });
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("input[type=url]").setValue("not a url");
+    await wrapper.get("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+    expect(wrapper.text()).toContain("Enter a valid URL.");
+
+    await wrapper.get("button.mode-snippet").trigger("click");
+
+    expect(wrapper.text()).not.toContain("Enter a valid URL.");
+  });
+
+  test("the submit button is disabled until the snippet textarea has non-whitespace content", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-snippet").trigger("click");
+
+    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+
+    await wrapper.get("textarea").setValue("   ");
+    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+
+    await wrapper.get("textarea").setValue("real content");
+    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeUndefined();
+  });
+
+  test("pasting rich HTML into the snippet textarea calls addSnippet with both formats on submit", async () => {
+    const store = useBookmarksStore();
+    store.addSnippet = vi.fn().mockResolvedValue({ error: null });
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-snippet").trigger("click");
+
+    const textarea = wrapper.get("textarea");
+    await textarea.trigger("paste", {
+      clipboardData: { getData: (type: string) => (type === "text/html" ? "<b>bold</b>" : "bold") },
+    });
+    await textarea.setValue("bold");
+    await wrapper.get("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    expect(store.addSnippet).toHaveBeenCalledWith("<b>bold</b>", "bold");
+    expect(wrapper.find("dialog").exists()).toBe(false);
+  });
+
+  test("typing plain text with no paste falls back to addNote on submit", async () => {
+    const store = useBookmarksStore();
+    store.addNote = vi.fn().mockResolvedValue({ error: null });
+    store.addSnippet = vi.fn();
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-snippet").trigger("click");
+    await wrapper.get("textarea").setValue("just typed text");
+    await wrapper.get("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    expect(store.addNote).toHaveBeenCalledWith("just typed text");
+    expect(store.addSnippet).not.toHaveBeenCalled();
+    expect(wrapper.find("dialog").exists()).toBe(false);
+  });
+
+  test("a paste with only text/plain (no HTML) falls back to addNote", async () => {
+    const store = useBookmarksStore();
+    store.addNote = vi.fn().mockResolvedValue({ error: null });
+    store.addSnippet = vi.fn();
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-snippet").trigger("click");
+
+    const textarea = wrapper.get("textarea");
+    await textarea.trigger("paste", {
+      clipboardData: { getData: (type: string) => (type === "text/html" ? "" : "plain source") },
+    });
+    await textarea.setValue("plain source");
+    await wrapper.get("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    expect(store.addNote).toHaveBeenCalledWith("plain source");
+    expect(store.addSnippet).not.toHaveBeenCalled();
+  });
+
+  test("shows an error and keeps the dialog open when addSnippet fails", async () => {
+    const store = useBookmarksStore();
+    store.addSnippet = vi.fn().mockResolvedValue({ error: "snippet is empty" });
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-snippet").trigger("click");
+
+    const textarea = wrapper.get("textarea");
+    await textarea.trigger("paste", {
+      clipboardData: { getData: (type: string) => (type === "text/html" ? "<b>x</b>" : "x") },
+    });
+    await textarea.setValue("x");
+    await wrapper.get("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find("dialog").exists()).toBe(true);
+    expect(wrapper.text()).toContain("snippet is empty");
+  });
+
   test("cancelling the duplicate prompt returns to the form without adding", async () => {
     const store = useBookmarksStore();
     store.add = vi.fn().mockResolvedValue({ error: null, duplicate: true });

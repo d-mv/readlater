@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Bookmark } from "../lib/supabase";
 
-const { from, getUser } = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn() }));
-vi.mock("../lib/supabase", () => ({ supabase: { from, auth: { getUser } } }));
+const { from, getUser, invoke } = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn(), invoke: vi.fn() }));
+vi.mock("../lib/supabase", () => ({ supabase: { from, auth: { getUser }, functions: { invoke } } }));
 
 const { replaceBookmarksList, getBookmarksList, getArticle, deleteBookmarkMeta, hydrateArticleContent } = vi.hoisted(
   () => ({
@@ -402,6 +402,28 @@ describe("useBookmarksStore", () => {
 
     expect(result.error).toBeTruthy();
     expect(from).not.toHaveBeenCalled();
+  });
+
+  test("addSnippet invokes the snippet edge function and prepends the returned bookmark", async () => {
+    const inserted = makeBookmark({ id: "snippet-1", url: null, type: "note", content_md: "**bold**" });
+    invoke.mockResolvedValue({ data: { bookmark: inserted }, error: null });
+
+    const store = useBookmarksStore();
+    const result = await store.addSnippet("<b>bold</b>", "bold");
+
+    expect(invoke).toHaveBeenCalledWith("snippet", { body: { html: "<b>bold</b>", text: "bold" } });
+    expect(result.error).toBeNull();
+    expect(store.bookmarks[0]?.id).toBe("snippet-1");
+  });
+
+  test("addSnippet propagates an error from the edge function without touching local state", async () => {
+    invoke.mockResolvedValue({ data: null, error: { message: "snippet is empty" } });
+
+    const store = useBookmarksStore();
+    const result = await store.addSnippet("", "");
+
+    expect(result.error).toBe("snippet is empty");
+    expect(store.bookmarks).toHaveLength(0);
   });
 
   test("setPublic updates is_public both remotely and in local state", async () => {

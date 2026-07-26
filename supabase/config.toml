@@ -420,3 +420,9 @@ enabled = true
 # through the logged-in Supabase session instead.
 [functions.capture]
 verify_jwt = false
+
+# snippet runs as the caller's own Supabase session (RLS), unlike capture's
+# static-bearer-token auth — the dialog that calls it only ever renders for a
+# logged-in browser session.
+[functions.snippet]
+verify_jwt = true

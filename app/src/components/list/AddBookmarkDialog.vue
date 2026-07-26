@@ -2,16 +2,24 @@
 import { shallowRef } from "vue";
 import { useBookmarksStore } from "../../stores/bookmarks";
 
+type Mode = "url" | "snippet";
+
 const store = useBookmarksStore();
 
 const isOpen = shallowRef(false);
+const mode = shallowRef<Mode>("url");
 const url = shallowRef("");
+const snippetText = shallowRef("");
+const snippetHtml = shallowRef<string | null>(null);
 const error = shallowRef<string | null>(null);
 const submitting = shallowRef(false);
 const duplicate = shallowRef(false);
 
 function open() {
+  mode.value = "url";
   url.value = "";
+  snippetText.value = "";
+  snippetHtml.value = null;
   error.value = null;
   duplicate.value = false;
   isOpen.value = true;
@@ -21,7 +29,26 @@ function cancel() {
   isOpen.value = false;
 }
 
+function setMode(next: Mode) {
+  mode.value = next;
+  error.value = null;
+}
+
+// A textarea only ever holds plain text — the clipboard's HTML flavor has to
+// be captured here instead, since it's discarded by native paste.
+function onSnippetPaste(event: ClipboardEvent) {
+  snippetHtml.value = event.clipboardData?.getData("text/html") || null;
+}
+
 async function onSubmit() {
+  if (mode.value === "snippet") {
+    await onSubmitSnippet();
+  } else {
+    await onSubmitUrl();
+  }
+}
+
+async function onSubmitUrl() {
   submitting.value = true;
   error.value = null;
   try {
@@ -30,6 +57,23 @@ async function onSubmit() {
       duplicate.value = true;
       return;
     }
+    if (result.error) {
+      error.value = result.error;
+      return;
+    }
+    isOpen.value = false;
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function onSubmitSnippet() {
+  submitting.value = true;
+  error.value = null;
+  try {
+    const result = snippetHtml.value
+      ? await store.addSnippet(snippetHtml.value, snippetText.value)
+      : await store.addNote(snippetText.value);
     if (result.error) {
       error.value = result.error;
       return;
@@ -80,20 +124,59 @@ async function confirmDuplicate() {
         </div>
       </div>
       <form v-else @submit.prevent="onSubmit">
-        <label class="field-label" for="bookmark-url">URL</label>
-        <input
-          id="bookmark-url"
-          v-model="url"
-          type="url"
-          placeholder="https://example.com/article"
-          class="field-input"
-          required
-          autofocus
-        />
+        <div class="mode-switch">
+          <button
+            type="button"
+            class="mode-btn mode-url"
+            :class="{ active: mode === 'url' }"
+            @click="setMode('url')"
+          >
+            URL
+          </button>
+          <button
+            type="button"
+            class="mode-btn mode-snippet"
+            :class="{ active: mode === 'snippet' }"
+            @click="setMode('snippet')"
+          >
+            Snippet
+          </button>
+        </div>
+
+        <template v-if="mode === 'url'">
+          <label class="field-label" for="bookmark-url">URL</label>
+          <input
+            id="bookmark-url"
+            v-model="url"
+            type="url"
+            placeholder="https://example.com/article"
+            class="field-input"
+            required
+            autofocus
+          />
+        </template>
+        <template v-else>
+          <label class="field-label" for="bookmark-snippet">Snippet</label>
+          <textarea
+            id="bookmark-snippet"
+            v-model="snippetText"
+            class="field-input snippet-input"
+            placeholder="Paste or type a snippet"
+            autofocus
+            @paste="onSnippetPaste"
+          ></textarea>
+        </template>
+
         <p v-if="error" class="error">{{ error }}</p>
         <div class="dialog-actions">
           <button class="btn btn-secondary cancel-btn" type="button" @click="cancel">Cancel</button>
-          <button class="btn btn-primary submit-btn" type="submit" :disabled="submitting">Add</button>
+          <button
+            class="btn btn-primary submit-btn"
+            type="submit"
+            :disabled="submitting || (mode === 'snippet' && !snippetText.trim())"
+          >
+            Add
+          </button>
         </div>
       </form>
     </dialog>
@@ -149,6 +232,31 @@ async function confirmDuplicate() {
   max-width: calc(100vw - 32px);
 }
 
+.mode-switch {
+  display: flex;
+  border-radius: var(--rl-radius);
+  border: 0.5px solid var(--rl-border);
+  padding: 2px;
+  margin-bottom: 16px;
+}
+
+.mode-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-radius: calc(var(--rl-radius) - 2px);
+  color: var(--rl-text-secondary);
+  font-size: 13px;
+  height: 28px;
+  cursor: pointer;
+}
+
+.mode-btn.active {
+  background: var(--rl-accent);
+  color: var(--rl-on-accent);
+  font-weight: 500;
+}
+
 .field-label {
   font-size: 12px;
   color: var(--rl-text-secondary);
@@ -166,6 +274,13 @@ async function confirmDuplicate() {
   padding: 0 12px;
   font-size: 14px;
   box-sizing: border-box;
+}
+
+.snippet-input {
+  height: 120px;
+  padding: 8px 12px;
+  resize: vertical;
+  font-family: inherit;
 }
 
 .error {

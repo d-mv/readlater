@@ -210,6 +210,14 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return { error: null };
   }
 
+  async function addSnippet(html: string, text: string): Promise<{ error: string | null }> {
+    const { data, error } = await supabase.functions.invoke("snippet", { body: { html, text } });
+    if (error) return { error: error.message };
+
+    bookmarks.value.unshift(data.bookmark);
+    return { error: null };
+  }
+
   async function findByNormalizedUrl(url: string) {
     const normalized = url.toLowerCase().replace(/\/+$/, "");
     const { data } = await supabase
@@ -320,6 +328,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     stopPolling,
     add,
     addNote,
+    addSnippet,
     refresh,
     fetchOne,
     markRead,
