@@ -8,9 +8,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   markRead: [];
+  markUnread: [];
 }>();
 
 const canMarkRead = computed(() => props.bookmark.status === "ready" && props.bookmark.read_at === null);
+const canMarkUnread = computed(() => props.bookmark.status === "ready" && props.bookmark.read_at !== null);
 </script>
 
 <template>
@@ -26,6 +28,9 @@ const canMarkRead = computed(() => props.bookmark.status === "ready" && props.bo
     </a>
     <button v-if="canMarkRead" class="btn btn-primary mark-read" type="button" @click="emit('markRead')">
       Mark as read
+    </button>
+    <button v-if="canMarkUnread" class="btn btn-secondary mark-unread" type="button" @click="emit('markUnread')">
+      Mark as unread
     </button>
   </div>
 </template>

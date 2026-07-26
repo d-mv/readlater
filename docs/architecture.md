@@ -65,30 +65,22 @@ Notes:
 
 ## 3. Capture flow
 
-**Bookmarklet** — a `javascript:` URL saved as a regular bookmark, run in the context of whatever page you're on:
+**Bookmarklet** — a `javascript:` URL saved as a regular bookmark. Unlike the original design (a self-contained script that POSTed straight to the capture edge function with a bearer key, run in the context of whatever page you're on), the saved bookmark (`bookmarklet/source.js`, built by `bookmarklet/build.ts`) does nothing but open a small popup to the PWA's own `/capture` route:
 ```js
-javascript:(function(){
-  fetch('https://<project>.functions.supabase.co/capture', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + '<API_KEY>'
-    },
-    body: JSON.stringify({ url: location.href, title: document.title })
-  })
-  .then(function(res){
-    var n = document.createElement('div');
-    n.textContent = res.ok ? 'Saved' : 'Failed to save';
-    n.style.cssText = 'position:fixed;top:16px;right:16px;z-index:2147483647;padding:8px 14px;border-radius:6px;font:13px sans-serif;background:' + (res.ok ? '#1D9E75' : '#D85A30') + ';color:#fff';
-    document.body.appendChild(n);
-    setTimeout(function(){ n.remove(); }, 2000);
-  });
+(() => {
+  const params = new URLSearchParams({ url: location.href, title: document.title });
+  window.open('https://readlater.mlnkv.net/capture?' + params.toString(), 'readlater-capture', 'width=380,height=260');
 })();
 ```
-Trade-offs against the extension approach, worth knowing going in:
+`CaptureView.vue` (mirroring the existing `/share-target` handler) reads `url`/`title` from the query string and inserts through `useBookmarksStore().add()` — the same client-side path the app's own "add bookmark" dialog uses — authenticated with whatever Supabase session is already active in that browser, then shows a brief "Saved" state and closes itself.
+
+Why this instead of a direct `fetch()` from the target page:
+- **No page CSP can block it.** A page's `connect-src`/`script-src` directives govern the *requests that page's own script makes* — `fetch()`, `XMLHttpRequest`, `new Function()`/`eval`. They do not govern where a page navigates or opens a window to. Wikipedia is a concrete example that forced this change: its CSP `default-src` (no explicit `connect-src` override) doesn't allowlist Supabase, so a bookmarklet doing `fetch(CAPTURE_ENDPOINT, ...)` directly from `en.wikipedia.org` fails outright, and no client-side workaround fixes that short of not making the request from that page's context at all.
+- **No shared secret in the bookmarklet at all.** It carries `url`/`title` in a query string (not sensitive) and nothing else — no `CAPTURE_KEY`, no endpoint. The Android share-target path (`/share-target`, see `docs/plans/read-later-new-capabilities.md`) is session-based the same way. The `capture` edge function's `CAPTURE_KEY` bearer scheme below is kept for a future capture path with no browser session at all to lean on — e.g. an iOS Shortcut doing a raw HTTP POST — not for anything currently wired up.
 - **No install step, and it works on iOS Safari** — mobile Safari has minimal extension support but bookmarklets work fine there, and once saved they sync via your browser's normal bookmark sync across every device signed in, desktop and mobile alike.
-- **The API key sits in plain text inside the bookmark URL.** Anyone who opens "edit bookmark" can read it. Fine for a single-user, single-device-family setup; just don't rely on it as a real secret boundary.
-- **CORS becomes required.** The fetch runs from whatever origin you're bookmarking (e.g. `nytimes.com`), so the edge function must explicitly allow cross-origin requests — see below. A small number of sites with a strict `connect-src` CSP may block the request outright; there's no real workaround for those beyond capturing the URL some other way for that one site.
+- **Trade-off:** the popup needs an active Supabase session in that browser (redirects to `/login` otherwise, via the router's normal auth guard), and it's a visible popup rather than an inline toast on the page you're reading — a small UX cost for working on every site regardless of CSP.
+
+The `capture` edge function (below) is unrelated to the bookmarklet now — it's still the entry point for capture paths with no browser session to lean on.
 
 **Edge function** — does the minimum needed to return fast, and now needs CORS handling since requests arrive from arbitrary origins:
 ```ts
@@ -254,9 +246,10 @@ Three separate identities touch this system, each with a different trust level �
 
 | Actor | Mechanism | Why |
 |---|---|---|
-| Bookmarklet | Shared secret (`CAPTURE_KEY`) bearer token | No session to attach a login to — just enough to gate the insert endpoint |
+| Bookmarklet / share-target | Vue 3 PWA's own Supabase session | Both just open/navigate to a route inside the already-logged-in app |
 | VPS worker | Supabase `service_role` key | Needs to read/write every row unconditionally; bypasses RLS by design |
 | Vue 3 PWA | Supabase Auth, email + password | The actual you, logging into the actual app |
+| *(future)* session-less capture (e.g. iOS Shortcut) | Shared secret (`CAPTURE_KEY`) bearer token, via the `capture` edge function | No session to attach a login to — just enough to gate the insert endpoint |
 
 **PWA login** — single-user, so there's no signup flow to build: create the one account directly in the Supabase dashboard (Authentication → Users → Add user), then the PWA just needs a login form:
 ```ts
@@ -277,15 +270,15 @@ const { data, error } = await supabase.auth.signInWithPassword({
 
 - Worker: new Docker service on the Contabo VPS, no public port required — it only needs outbound access to Supabase.
 - PWA: same Docker + Caddy path-based routing pattern as your other apps (e.g. `readlater.mlnkv.net` or a path under an existing domain).
-- Bookmarklet: nothing to deploy — it's the `javascript:` snippet dragged to the bookmarks bar, generated once from a small build step if you want the API key injected rather than hand-pasted.
+- Bookmarklet: nothing to deploy — it's a tiny static popup-opener (`bookmarklet/build.ts`, built once with the PWA's own origin baked in, then dragged to the bookmarks bar), pointed at the already-deployed PWA's `/capture` route. Nothing to redeploy or rotate when the PWA changes, since the bookmarklet carries no logic and no secret.
 
 ## 9. Implementation plan
 
 **Phase 1 — capture path**
 - [ ] Supabase project, `bookmarks` table + RLS policy
 - [ ] Edge function: CORS handling, auth check, type detection, insert
-- [ ] Bookmarklet: capture script + on-page save/fail toast
-- [ ] Manual test: click bookmarklet on a few different sites → row appears in Supabase table editor, check for any CSP blocks
+- [ ] Bookmarklet: popup-opener script + `/capture` route with save/duplicate/fail states
+- [ ] Manual test: click bookmarklet on a few different sites, including at least one with a strict CSP (e.g. Wikipedia) → popup opens and a row appears in Supabase table editor regardless of the page's CSP
 
 **Phase 2 — worker: articles**
 - [ ] Worker skeleton: polling loop, status transitions, error handling

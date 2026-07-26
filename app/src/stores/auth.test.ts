@@ -62,6 +62,18 @@ describe("useAuthStore", () => {
     expect(store.isAuthenticated).toBe(false);
   });
 
+  test("init only calls getSession once even when called concurrently, sharing one promise", async () => {
+    const fakeSession = { user: { id: "u1" } };
+    getSession.mockResolvedValue({ data: { session: fakeSession } });
+
+    const store = useAuthStore();
+    await Promise.all([store.init(), store.init(), store.init()]);
+
+    expect(getSession).toHaveBeenCalledTimes(1);
+    expect(onAuthStateChange).toHaveBeenCalledTimes(1);
+    expect(store.isAuthenticated).toBe(true);
+  });
+
   test("signOut clears the session", async () => {
     signInWithPassword.mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null });
     signOut.mockResolvedValue({ error: null });

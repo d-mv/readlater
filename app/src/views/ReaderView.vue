@@ -74,6 +74,10 @@ function onMarkRead() {
   store.markRead(props.id);
 }
 
+function onMarkUnread() {
+  store.markUnread(props.id);
+}
+
 const showShareDialog = ref(false);
 
 function onTogglePublic(isPublic: boolean) {
@@ -116,7 +120,7 @@ function onRemoveTag(tagId: string) {
       </div>
     </div>
     <TagInput v-if="bookmark.status === 'ready'" :tags="bookmark.tags" @add="onAddTag" @remove="onRemoveTag" />
-    <ReaderActions :bookmark="bookmark" @mark-read="onMarkRead" />
+    <ReaderActions :bookmark="bookmark" @mark-read="onMarkRead" @mark-unread="onMarkUnread" />
     <ShareDialog
       v-if="showShareDialog"
       :bookmark="bookmark"

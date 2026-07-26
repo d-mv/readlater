@@ -414,6 +414,9 @@ enabled = true
 # format_options = "{\"keywordCase\":\"upper\",\"indent\":2,\"maxWidth\":80,\"commaStyle\":\"trailing\"}"
 
 # capture uses its own CAPTURE_KEY bearer-token check (checkAuth.ts) instead of
-# a Supabase-issued JWT, since the bookmarklet has no user session to attach.
+# a Supabase-issued JWT, since callers with no browser session (iOS Shortcut,
+# share-target) have no session to attach. The bookmarklet itself no longer
+# uses this at all — it just opens the PWA's own /capture route, which saves
+# through the logged-in Supabase session instead.
 [functions.capture]
 verify_jwt = false

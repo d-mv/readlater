@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
@@ -17,7 +17,12 @@ const offlineCache = useOfflineCacheStore();
 
 onMounted(() => {
   store.fetch();
+  store.startPolling();
   offlineCache.init();
+});
+
+onUnmounted(() => {
+  store.stopPolling();
 });
 
 function onOpen(id: string) {

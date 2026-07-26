@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Bookmark } from "../lib/supabase";
 
@@ -136,6 +136,24 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks[0]?.read_at).not.toBeNull();
   });
 
+  test("markUnread clears the row's read_at both remotely and in local state", async () => {
+    const rows = [makeBookmark({ id: "1", read_at: "2026-01-02T00:00:00Z" })];
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      update,
+    });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.markUnread("1");
+
+    expect(update).toHaveBeenCalledWith({ read_at: null });
+    expect(eq).toHaveBeenCalledWith("id", "1");
+    expect(store.bookmarks[0]?.read_at).toBeNull();
+  });
+
   test("archive updates the row's archived flag both remotely and in local state", async () => {
     const rows = [makeBookmark({ id: "1", archived: false })];
     const eq = vi.fn().mockResolvedValue({ error: null });
@@ -248,6 +266,20 @@ describe("useBookmarksStore", () => {
     expect(insert).toHaveBeenCalled();
     expect(result.error).toBeNull();
     expect(store.bookmarks[0]?.id).toBe("new");
+  });
+
+  test("add passes an optional title through to the insert", async () => {
+    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
+    const inserted = makeBookmark({ id: "new", url: "https://arc90.com/new", status: "pending" });
+    const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
+    const select = vi.fn(() => ({ single }));
+    const insert = vi.fn(() => ({ select }));
+    from.mockReturnValue({ insert });
+
+    const store = useBookmarksStore();
+    await store.add("https://arc90.com/new", { title: "A great article" });
+
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ title: "A great article" }));
   });
 
   test("fetchOne replaces the existing local copy rather than duplicating it", async () => {
@@ -499,5 +531,55 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks).toHaveLength(0);
     expect(deleteBookmarkMeta).toHaveBeenCalledWith("1");
     expect(removeCachedBookmark).toHaveBeenCalledWith("1");
+  });
+
+  describe("polling", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    test("startPolling re-fetches on an interval to pick up remote changes", async () => {
+      const order = vi.fn().mockResolvedValue({ data: [], error: null });
+      from.mockReturnValue({ select: () => ({ order }) });
+
+      const store = useBookmarksStore();
+      store.startPolling();
+
+      expect(order).toHaveBeenCalledTimes(0);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(order).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(order).toHaveBeenCalledTimes(2);
+    });
+
+    test("stopPolling cancels further re-fetches", async () => {
+      const order = vi.fn().mockResolvedValue({ data: [], error: null });
+      from.mockReturnValue({ select: () => ({ order }) });
+
+      const store = useBookmarksStore();
+      store.startPolling();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(order).toHaveBeenCalledTimes(1);
+
+      store.stopPolling();
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(order).toHaveBeenCalledTimes(1);
+    });
+
+    test("startPolling is idempotent — calling it again doesn't stack extra timers", async () => {
+      const order = vi.fn().mockResolvedValue({ data: [], error: null });
+      from.mockReturnValue({ select: () => ({ order }) });
+
+      const store = useBookmarksStore();
+      store.startPolling();
+      store.startPolling();
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(order).toHaveBeenCalledTimes(1);
+    });
   });
 });

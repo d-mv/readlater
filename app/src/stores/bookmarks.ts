@@ -8,6 +8,7 @@ import { useOfflineCacheStore } from "./offlineCache";
 
 const BOOKMARK_SELECT = "*, tags(id, name, color)";
 const UNIQUE_VIOLATION = "23505";
+const POLL_INTERVAL_MS = 5000;
 
 function stripContentMd(bookmark: Bookmark): offlineDb.OfflineBookmarkMeta {
   const { content_md: _content_md, ...meta } = bookmark;
@@ -32,6 +33,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   const loading = shallowRef(false);
   const searchQuery = shallowRef("");
   const activeTagIds = ref<string[]>([]);
+  let pollTimer: ReturnType<typeof setInterval> | undefined;
 
   const visibleBookmarks = computed(() =>
     bookmarks.value.filter((b) => (filter.value === "archived" ? b.archived : !b.archived)),
@@ -114,9 +116,26 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
   }
 
+  // The list is otherwise loaded once on mount, so without this a bookmark
+  // captured from another tab (bookmarklet popup, share target) or one still
+  // being processed server-side never shows up or updates until the page is
+  // reloaded.
+  function startPolling() {
+    if (pollTimer !== undefined) return;
+    pollTimer = setInterval(() => {
+      fetch();
+    }, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (pollTimer === undefined) return;
+    clearInterval(pollTimer);
+    pollTimer = undefined;
+  }
+
   async function add(
     url: string,
-    options?: { force?: boolean },
+    options?: { force?: boolean; title?: string },
   ): Promise<{ error: string | null; duplicate?: boolean } & Partial<DuplicateBookmark>> {
     let type: Bookmark["type"];
     try {
@@ -136,7 +155,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
 
     const { data, error } = await supabase
       .from("bookmarks")
-      .insert({ url, type, status: "pending", user_id: user.id })
+      .insert({ url, title: options?.title, type, status: "pending", user_id: user.id })
       .select(BOOKMARK_SELECT)
       .single();
 
@@ -264,6 +283,12 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (bookmark) bookmark.read_at = read_at;
   }
 
+  async function markUnread(id: string) {
+    await supabase.from("bookmarks").update({ read_at: null }).eq("id", id);
+    const bookmark = bookmarks.value.find((b) => b.id === id);
+    if (bookmark) bookmark.read_at = null;
+  }
+
   async function archive(id: string) {
     await supabase.from("bookmarks").update({ archived: true }).eq("id", id);
     const bookmark = bookmarks.value.find((b) => b.id === id);
@@ -291,11 +316,14 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     setSearchQuery,
     setActiveTagIds,
     fetch,
+    startPolling,
+    stopPolling,
     add,
     addNote,
     refresh,
     fetchOne,
     markRead,
+    markUnread,
     archive,
     remove,
     setPublic,

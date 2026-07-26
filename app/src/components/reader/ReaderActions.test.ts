@@ -49,4 +49,19 @@ describe("ReaderActions", () => {
     });
     expect(wrapper.find(".mark-read").exists()).toBe(false);
   });
+
+  test("shows 'Mark as unread' and emits mark-unread when read", async () => {
+    const wrapper = mount(ReaderActions, {
+      props: { bookmark: makeBookmark({ read_at: "2026-01-02T00:00:00Z" }) },
+    });
+    const btn = wrapper.find(".mark-unread");
+    expect(btn.exists()).toBe(true);
+    await btn.trigger("click");
+    expect(wrapper.emitted("markUnread")).toHaveLength(1);
+  });
+
+  test("hides 'Mark as unread' while still unread", () => {
+    const wrapper = mount(ReaderActions, { props: { bookmark: makeBookmark({ read_at: null }) } });
+    expect(wrapper.find(".mark-unread").exists()).toBe(false);
+  });
 });

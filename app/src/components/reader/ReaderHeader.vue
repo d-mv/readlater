@@ -70,6 +70,10 @@ function onDelete() {
 }
 
 .domain {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-family: var(--rl-font-mono);
   font-size: 12px;
   color: var(--rl-text-muted);
@@ -77,6 +81,7 @@ function onDelete() {
 
 .actions {
   display: flex;
+  flex-shrink: 0;
   gap: 16px;
 }
 
