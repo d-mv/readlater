@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import { useRouter } from "vue-router";
-import { IconLoader2, IconAlertTriangle } from "@tabler/icons-vue";
+import { IconLoader2, IconAlertTriangle, IconRefresh } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
 import { useScrollProgress } from "../composables/useScrollProgress";
@@ -9,7 +9,6 @@ import { readerByline } from "../utils/format";
 import ReaderHeader from "../components/reader/ReaderHeader.vue";
 import ReaderProgressBar from "../components/reader/ReaderProgressBar.vue";
 import ArticleContent from "../components/reader/ArticleContent.vue";
-import ReaderActions from "../components/reader/ReaderActions.vue";
 import ShareDialog from "../components/reader/ShareDialog.vue";
 import TagInput from "../components/reader/TagInput.vue";
 
@@ -41,18 +40,26 @@ function stopPolling() {
   }
 }
 
+function startPolling() {
+  if (pollTimer !== undefined) return;
+  pollTimer = setInterval(async () => {
+    await store.fetchOne(props.id);
+    if (!isNotReady.value) stopPolling();
+  }, POLL_INTERVAL_MS);
+}
+
 onMounted(async () => {
   if (!bookmark.value) await store.fetchOne(props.id);
   if (bookmark.value?.status === "ready") {
     offlineCache.cacheBookmark(bookmark.value).catch(() => {});
   }
-  if (isNotReady.value) {
-    pollTimer = setInterval(async () => {
-      await store.fetchOne(props.id);
-      if (!isNotReady.value) stopPolling();
-    }, POLL_INTERVAL_MS);
-  }
+  if (isNotReady.value) startPolling();
 });
+
+async function onRetry() {
+  await store.refresh(props.id);
+  startPolling();
+}
 
 onUnmounted(stopPolling);
 
@@ -102,6 +109,8 @@ function onRemoveTag(tagId: string) {
       @archive="onArchive"
       @delete="onDelete"
       @share="showShareDialog = true"
+      @mark-read="onMarkRead"
+      @mark-unread="onMarkUnread"
     />
     <div ref="scrollContainer" class="scroll-area">
       <template v-if="bookmark.status === 'ready'">
@@ -113,6 +122,10 @@ function onRemoveTag(tagId: string) {
         <IconAlertTriangle :size="28" class="status-icon status-icon-failed" />
         <p class="status-text">Couldn't process this article.</p>
         <p v-if="bookmark.error_message" class="status-detail">{{ bookmark.error_message }}</p>
+        <button class="retry-btn" type="button" @click="onRetry">
+          <IconRefresh :size="16" />
+          Try again
+        </button>
       </div>
       <div v-else class="status-placeholder">
         <IconLoader2 :size="28" class="status-icon icon-spin" />
@@ -120,7 +133,6 @@ function onRemoveTag(tagId: string) {
       </div>
     </div>
     <TagInput v-if="bookmark.status === 'ready'" :tags="bookmark.tags" @add="onAddTag" @remove="onRemoveTag" />
-    <ReaderActions :bookmark="bookmark" @mark-read="onMarkRead" @mark-unread="onMarkUnread" />
     <ShareDialog
       v-if="showShareDialog"
       :bookmark="bookmark"
@@ -188,6 +200,25 @@ function onRemoveTag(tagId: string) {
   color: var(--rl-text-muted);
   margin: 0;
   max-width: 480px;
+}
+
+.retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 14px;
+  border: 0.5px solid var(--rl-border);
+  border-radius: var(--rl-radius);
+  background: var(--rl-surface);
+  color: var(--rl-text-primary);
+  font-family: var(--rl-font-ui);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.retry-btn:hover {
+  background: var(--rl-bg);
 }
 
 .icon-spin {

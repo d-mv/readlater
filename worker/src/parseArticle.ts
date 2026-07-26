@@ -28,16 +28,29 @@ export interface ParsedArticle {
   reading_time: number;
 }
 
+const MIN_EXTRACTED_LENGTH = 200;
+
+function extractArticle(html: string, url: string) {
+  const dom = new JSDOM(html, { url });
+  const article = new Readability(dom.window.document).parse();
+  const isSubstantial = (article?.textContent ?? "").trim().length >= MIN_EXTRACTED_LENGTH;
+  return isSubstantial ? article : null;
+}
+
 export async function parseArticle(
   url: string,
   fetchHtml: FetchHtml = defaultFetchHtml,
+  renderHtml?: FetchHtml,
 ): Promise<ParsedArticle> {
   const html = await fetchHtml(url);
-  const dom = new JSDOM(html, { url });
-  const article = new Readability(dom.window.document).parse();
+  let article = extractArticle(html, url);
 
-  const MIN_EXTRACTED_LENGTH = 200;
-  if (!article || (article.textContent ?? "").trim().length < MIN_EXTRACTED_LENGTH) {
+  if (!article && renderHtml) {
+    const rendered = await renderHtml(url);
+    article = extractArticle(rendered, url);
+  }
+
+  if (!article) {
     throw new Error(`Readability could not extract article content from ${url}`);
   }
 

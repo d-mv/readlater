@@ -3,6 +3,7 @@ import { parseArticle } from "./parseArticle";
 import { parseYoutube } from "./parseYoutube";
 import { fetchCaptions, fetchMeta } from "./ytDlpRunner";
 import { makeThumbnailUploader } from "./storage";
+import { renderWithBrowser } from "./browserRender";
 
 const POLL_INTERVAL_MS = 15_000;
 const BATCH_SIZE = 5;
@@ -24,7 +25,7 @@ async function processBookmark(bookmark: Bookmark) {
     const result =
       bookmark.type === "youtube"
         ? await parseYoutube(bookmark.url, { fetchMeta, fetchCaptions, uploadThumbnail })
-        : await parseArticle(bookmark.url);
+        : await parseArticle(bookmark.url, undefined, renderWithBrowser);
 
     await supabase
       .from("bookmarks")

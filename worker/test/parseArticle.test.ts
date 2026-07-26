@@ -45,4 +45,40 @@ describe("parseArticle", () => {
     const emptyHtml = "<html><body><nav>Home</nav></body></html>";
     await expect(parseArticle("https://example.com/empty", async () => emptyHtml)).rejects.toThrow();
   });
+
+  test("falls back to renderHtml when the plain fetch yields no extractable content", async () => {
+    const shellHtml = "<html><body><div id=\"app\"></div></body></html>";
+
+    const result = await parseArticle(
+      "https://www.perplexity.ai/search/example",
+      async () => shellHtml,
+      async () => FIXTURE_HTML,
+    );
+
+    expect(result.title).toBe("A short history of the readability algorithm");
+    expect(result.content_md).toContain("Arc90 published a bookmarklet");
+  });
+
+  test("throws when both the plain fetch and the render fallback yield no extractable content", async () => {
+    const emptyHtml = "<html><body><nav>Home</nav></body></html>";
+
+    await expect(
+      parseArticle("https://example.com/empty", async () => emptyHtml, async () => emptyHtml),
+    ).rejects.toThrow();
+  });
+
+  test("does not invoke renderHtml when the plain fetch already yields enough content", async () => {
+    let renderCalled = false;
+
+    await parseArticle(
+      "https://arc90.com/readability",
+      async () => FIXTURE_HTML,
+      async () => {
+        renderCalled = true;
+        return FIXTURE_HTML;
+      },
+    );
+
+    expect(renderCalled).toBe(false);
+  });
 });
