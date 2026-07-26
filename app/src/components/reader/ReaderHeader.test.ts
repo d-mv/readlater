@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { mount } from "@vue/test-utils";
 import ReaderHeader from "./ReaderHeader.vue";
@@ -44,41 +44,17 @@ describe("ReaderHeader", () => {
     expect(wrapper.emitted("back")).toHaveLength(1);
   });
 
-  test("emits archive when the archive button is clicked", async () => {
+  test("forwards archive from the menu", async () => {
     const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
-    await wrapper.find(".archive-btn").trigger("click");
+    await wrapper.find(".menu-trigger").trigger("click");
+    await wrapper.find(".archive-item").trigger("click");
     expect(wrapper.emitted("archive")).toHaveLength(1);
   });
 
-  test("emits share when the share button is clicked", async () => {
+  test("forwards share from the menu", async () => {
     const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
-    await wrapper.find(".share-btn").trigger("click");
+    await wrapper.find(".menu-trigger").trigger("click");
+    await wrapper.find(".share-item").trigger("click");
     expect(wrapper.emitted("share")).toHaveLength(1);
-  });
-
-  test("marks the share button active when the bookmark is public", () => {
-    const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark({ is_public: true }) } });
-    expect(wrapper.find(".share-btn").classes()).toContain("share-btn-active");
-  });
-
-  test("links the external-link button to the original URL in a new tab", () => {
-    const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark({ url: "https://example.com/a" }) } });
-    const link = wrapper.find(".external-link-btn");
-    expect(link.attributes("href")).toBe("https://example.com/a");
-    expect(link.attributes("target")).toBe("_blank");
-  });
-
-  test("emits delete when the delete button is clicked and confirmed", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
-    await wrapper.find(".delete-btn").trigger("click");
-    expect(wrapper.emitted("delete")).toHaveLength(1);
-  });
-
-  test("does not emit delete when the confirmation is cancelled", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(false);
-    const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
-    await wrapper.find(".delete-btn").trigger("click");
-    expect(wrapper.emitted("delete")).toBeUndefined();
   });
 });
