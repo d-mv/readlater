@@ -1,0 +1,27 @@
+{
+  "name": "worker",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "lint": "oxlint src test"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/jsdom": "^28.0.3",
+    "@types/turndown": "^5.0.6",
+    "oxlint": "^1.75.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "@supabase/supabase-js": "^2.110.8",
+    "jsdom": "^29.1.1",
+    "turndown": "^7.2.4"
+  }
+}

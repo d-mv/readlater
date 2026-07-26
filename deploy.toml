@@ -1,0 +1,21 @@
+[deploy]
+name = "readlater"
+type = "node-monorepo"
+provider = "contabo"
+domain = "readlater.mlnkv.net"
+build_context = "/opt/apps/apps/readlater"
+network = "apps"
+
+[[deploy.services]]
+name = "readlater-app"
+dockerfile = "app/Dockerfile"
+port = 80
+route = "/*"
+build_args = { VITE_SUPABASE_URL = "https://yqdyswhdwbqabbbczmwq.supabase.co", VITE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_6IIVZYRIR-9aKwDDCTVeFA_233jpkmW" }
+
+[[deploy.services]]
+name = "readlater-worker"
+dockerfile = "worker/Dockerfile"
+
+[previous]
+fly = false

@@ -1,0 +1,33 @@
+:root {
+  --rl-bg: #F5F4F2;
+  --rl-surface: #FAFAF8;
+  --rl-border: #E3E1DB;
+  --rl-text-primary: #1A1A18;
+  --rl-text-secondary: #6B6963;
+  --rl-text-muted: #9B9990;
+  --rl-accent: #D85A30;
+  --rl-accent-tint: #FAECE7;
+  --rl-on-accent-tint: #993C1D;
+  --rl-on-accent: #FFFFFF;
+  --rl-danger: #C23B3B;
+
+  --rl-radius: 8px;
+  --rl-font-ui: "Inter", sans-serif;
+  --rl-font-serif: "Source Serif 4", serif;
+  --rl-font-mono: "JetBrains Mono", monospace;
+  --rl-article-font-size: 16px;
+}
+
+[data-theme="dark"] {
+  --rl-bg: #1C1B19;
+  --rl-surface: #242320;
+  --rl-border: #38362F;
+  --rl-text-primary: #F0EEE8;
+  --rl-text-secondary: #A8A69E;
+  --rl-text-muted: #726F66;
+  --rl-accent: #F0997B;
+  --rl-accent-tint: #4A1B0C;
+  --rl-on-accent-tint: #F0997B;
+  --rl-on-accent: #2C1006;
+  --rl-danger: #E2685F;
+}
