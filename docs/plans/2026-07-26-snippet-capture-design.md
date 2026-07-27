@@ -1,5 +1,9 @@
 # Snippet capture design
 
+> **Status: implemented.** Kept for the reasoning behind a separate
+> JWT-authed edge function instead of extending `capture`. For the current
+> behavior as shipped, see [`docs/architecture.md`](../architecture.md#3-capture-paths).
+
 Adds a second capture mode to the existing "Add" dialog: alongside saving a URL (current behavior), the user can paste a rich-text snippet copied from anywhere and save it as a formatted note. Additive only — does not replace the bookmarklet or URL-save flow.
 
 ## Context

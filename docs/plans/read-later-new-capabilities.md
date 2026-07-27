@@ -1,5 +1,10 @@
 # Read Later — new capabilities
 
+> **Status: implemented.** This is the original design doc — kept for the
+> trade-off reasoning (enumeration risk in §3, race condition in §5, etc.).
+> For the current schema and behavior as actually shipped, see
+> [`docs/architecture.md`](../architecture.md).
+
 Extends the existing architecture (bookmarklet → Supabase edge function → VPS worker → Vue 3 PWA) with four additions: **full-text search**, **tags**, **public sharing via URL**, and **PWA share-target capture** (including direct-text notes that skip the worker entirely).
 
 This is a **single-owner personal app** (one `OWNER_USER_ID`, one RLS policy of `auth.uid() = user_id`, capture auth is a single static bearer key baked into the bookmarklet). That constraint simplifies some things below (no multi-tenant RLS to design) and is called out explicitly where it changes the recommendation from what a multi-user app would need.

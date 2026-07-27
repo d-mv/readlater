@@ -1,5 +1,9 @@
 # PWA design
 
+> **Status: implemented.** Kept for the reasoning behind app-level IndexedDB
+> caching vs. Workbox runtime caching. For the current offline/PWA behavior
+> as shipped, see [`docs/architecture.md`](../architecture.md#offline--pwa).
+
 Turns the existing Vue 3 + Vite reading list into an installable, offline-capable PWA. Single-user, self-hosted — optimizes for simplicity over general-purpose robustness.
 
 ## Scope

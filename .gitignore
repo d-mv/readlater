@@ -6,3 +6,4 @@ node_modules/
 supabase/.branches
 supabase/.temp
 bookmarklet/dist.txt
+error.txt
