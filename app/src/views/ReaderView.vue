@@ -6,6 +6,7 @@ import { useBookmarksStore } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
 import { useScrollProgress } from "../composables/useScrollProgress";
 import { readerByline } from "../utils/format";
+import { readingTimeFromWordCount, wordCount } from "../utils/reading";
 import ReaderHeader from "../components/reader/ReaderHeader.vue";
 import ReaderProgressBar from "../components/reader/ReaderProgressBar.vue";
 import ArticleContent from "../components/reader/ArticleContent.vue";
@@ -98,6 +99,33 @@ function onAddTag(name: string) {
 function onRemoveTag(tagId: string) {
   if (bookmark.value) store.removeTag(bookmark.value.id, tagId);
 }
+
+const editing = ref(false);
+const draftTitle = ref("");
+const draftContent = ref("");
+
+function onEdit() {
+  if (!bookmark.value) return;
+  draftTitle.value = bookmark.value.title ?? "";
+  draftContent.value = bookmark.value.content_md ?? "";
+  editing.value = true;
+}
+
+function onCancelEdit() {
+  editing.value = false;
+}
+
+async function onSaveEdit() {
+  if (!bookmark.value) return;
+  const words = wordCount(draftContent.value);
+  await store.updateContent(bookmark.value.id, {
+    title: draftTitle.value,
+    content_md: draftContent.value,
+    word_count: words,
+    reading_time: readingTimeFromWordCount(words),
+  });
+  editing.value = false;
+}
 </script>
 
 <template>
@@ -111,12 +139,26 @@ function onRemoveTag(tagId: string) {
       @share="showShareDialog = true"
       @mark-read="onMarkRead"
       @mark-unread="onMarkUnread"
+      @edit="onEdit"
     />
     <div ref="scrollContainer" class="scroll-area">
       <template v-if="bookmark.status === 'ready'">
-        <h1 class="title">{{ bookmark.title }}</h1>
-        <p v-if="byline" class="byline">{{ byline }}</p>
-        <ArticleContent :content-md="bookmark.content_md" />
+        <h1 v-if="!editing" class="title">{{ bookmark.title }}</h1>
+        <input v-else v-model="draftTitle" class="title-input" type="text" placeholder="Title" />
+        <p v-if="byline && !editing" class="byline">{{ byline }}</p>
+        <div v-if="editing" class="edit-actions">
+          <button class="btn-secondary cancel-edit-btn" type="button" @click="onCancelEdit">Cancel</button>
+          <button class="btn-primary save-edit-btn" type="button" @click="onSaveEdit">Save</button>
+        </div>
+        <ArticleContent
+          :content-md="bookmark.content_md"
+          :type="bookmark.type"
+          :youtube-video-id="bookmark.youtube_video_id"
+          :thumbnail-url="bookmark.thumbnail_url"
+          :editing="editing"
+          :model-value="draftContent"
+          @update:model-value="draftContent = $event"
+        />
       </template>
       <div v-else-if="bookmark.status === 'failed'" class="status-placeholder">
         <IconAlertTriangle :size="28" class="status-icon status-icon-failed" />
@@ -172,6 +214,51 @@ function onRemoveTag(tagId: string) {
   font-size: 12px;
   color: var(--rl-text-muted);
   margin: 0 0 20px;
+}
+
+.title-input {
+  width: 100%;
+  border: 0.5px solid var(--rl-border);
+  border-radius: var(--rl-radius);
+  background: var(--rl-surface);
+  color: var(--rl-text-primary);
+  font-family: var(--rl-font-ui);
+  font-size: 20px;
+  font-weight: 500;
+  padding: 8px 10px;
+  margin: 0 0 12px;
+}
+
+.edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.btn-secondary,
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: var(--rl-radius);
+  font-family: var(--rl-font-ui);
+  font-size: 13px;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-secondary {
+  background: transparent;
+  border: 0.5px solid var(--rl-border);
+  color: var(--rl-text-primary);
+}
+
+.btn-primary {
+  background: var(--rl-accent);
+  color: var(--rl-on-accent);
+  font-weight: 500;
 }
 
 .status-placeholder {

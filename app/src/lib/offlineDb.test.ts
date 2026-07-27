@@ -13,6 +13,8 @@ function makeMeta(overrides: Partial<OfflineBookmarkMeta> = {}): OfflineBookmark
     author: null,
     excerpt: null,
     thumbnail_url: null,
+    youtube_video_id: null,
+    content_edited: false,
     word_count: 100,
     reading_time: 5,
     tags: [],

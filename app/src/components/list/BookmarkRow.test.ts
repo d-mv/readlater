@@ -14,6 +14,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     excerpt: null,
     content_md: null,
     thumbnail_url: null,
+    youtube_video_id: null,
+    content_edited: false,
     word_count: 100,
     reading_time: 6,
     tags: [],

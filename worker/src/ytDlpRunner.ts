@@ -10,6 +10,7 @@ export async function fetchMeta(url: string): Promise<YtDlpMeta> {
   });
   const json = JSON.parse(stdout);
   return {
+    id: json.id,
     title: json.title,
     uploader: json.uploader,
     thumbnail: json.thumbnail,

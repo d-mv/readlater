@@ -61,6 +61,11 @@ describe("CaptureView", () => {
     const lookupSelect = vi.fn(() => ({ eq }));
     from.mockReturnValueOnce({ select: lookupSelect });
 
+    const contentEditedMaybeSingle = vi.fn().mockResolvedValue({ data: { content_edited: false } });
+    const contentEditedEq = vi.fn(() => ({ maybeSingle: contentEditedMaybeSingle }));
+    const contentEditedSelect = vi.fn(() => ({ eq: contentEditedEq }));
+    from.mockReturnValueOnce({ select: contentEditedSelect });
+
     const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({}) }));
     from.mockReturnValueOnce({ update });
 

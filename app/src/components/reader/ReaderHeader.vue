@@ -16,6 +16,7 @@ const emit = defineEmits<{
   share: [];
   markRead: [];
   markUnread: [];
+  edit: [];
 }>();
 
 const domain = computed(() => domainFromUrl(props.bookmark.url));
@@ -34,6 +35,7 @@ const domain = computed(() => domainFromUrl(props.bookmark.url));
       @share="emit('share')"
       @mark-read="emit('markRead')"
       @mark-unread="emit('markUnread')"
+      @edit="emit('edit')"
     />
   </div>
 </template>

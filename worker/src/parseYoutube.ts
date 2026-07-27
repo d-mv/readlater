@@ -2,6 +2,7 @@ import { readingTimeFromDurationSeconds, wordCount } from "./reading";
 import { vttToPlainText } from "./vtt";
 
 export interface YtDlpMeta {
+  id: string;
   title: string;
   uploader: string;
   thumbnail: string;
@@ -17,6 +18,7 @@ export interface YoutubeRunners {
 export interface ParsedYoutube {
   title: string;
   author: string;
+  youtube_video_id: string;
   thumbnail_url: string;
   content_md: string;
   word_count: number;
@@ -34,6 +36,7 @@ export async function parseYoutube(url: string, runners: YoutubeRunners): Promis
   return {
     title: meta.title,
     author: meta.uploader,
+    youtube_video_id: meta.id,
     thumbnail_url,
     content_md,
     word_count: wordCount(transcript),

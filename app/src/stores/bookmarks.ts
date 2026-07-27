@@ -229,11 +229,32 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   }
 
   async function refresh(id: string) {
-    await supabase.from("bookmarks").update({ status: "pending", error_message: null }).eq("id", id);
     const bookmark = bookmarks.value.find((b) => b.id === id);
+    // The duplicate-resave flow (share target / bookmarklet "already saved" prompt)
+    // can target a bookmark that was never loaded into this session's list, so the
+    // edited-content check can't always rely on local state alone.
+    const contentEdited = bookmark
+      ? bookmark.content_edited
+      : Boolean(
+          (await supabase.from("bookmarks").select("content_edited").eq("id", id).maybeSingle()).data
+            ?.content_edited,
+        );
+
+    if (
+      contentEdited &&
+      !window.confirm("This was manually edited — refreshing will overwrite your changes. Continue?")
+    ) {
+      return;
+    }
+
+    await supabase
+      .from("bookmarks")
+      .update({ status: "pending", error_message: null, content_edited: false })
+      .eq("id", id);
     if (bookmark) {
       bookmark.status = "pending";
       bookmark.error_message = null;
+      bookmark.content_edited = false;
     }
   }
 
@@ -248,6 +269,16 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       bookmarks.value.push(data);
     }
     return data;
+  }
+
+  async function updateContent(
+    id: string,
+    fields: { title: string; content_md: string; word_count: number; reading_time: number },
+  ) {
+    const update = { ...fields, content_edited: true };
+    await supabase.from("bookmarks").update(update).eq("id", id);
+    const bookmark = bookmarks.value.find((b) => b.id === id);
+    if (bookmark) Object.assign(bookmark, update);
   }
 
   async function setPublic(id: string, isPublic: boolean) {
@@ -330,6 +361,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     addNote,
     addSnippet,
     refresh,
+    updateContent,
     fetchOne,
     markRead,
     markUnread,

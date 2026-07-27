@@ -22,6 +22,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     excerpt: null,
     content_md: "![img](https://cdn.example.com/a.png) body text",
     thumbnail_url: "https://cdn.example.com/thumb.png",
+    youtube_video_id: null,
+    content_edited: false,
     word_count: 100,
     reading_time: 5,
     tags: [],

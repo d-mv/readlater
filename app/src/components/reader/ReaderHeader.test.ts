@@ -15,6 +15,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     excerpt: null,
     content_md: null,
     thumbnail_url: null,
+    youtube_video_id: null,
+    content_edited: false,
     word_count: null,
     reading_time: null,
     tags: [],
@@ -56,5 +58,12 @@ describe("ReaderHeader", () => {
     await wrapper.find(".menu-trigger").trigger("click");
     await wrapper.find(".share-item").trigger("click");
     expect(wrapper.emitted("share")).toHaveLength(1);
+  });
+
+  test("forwards edit from the menu", async () => {
+    const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
+    await wrapper.find(".menu-trigger").trigger("click");
+    await wrapper.find(".edit-item").trigger("click");
+    expect(wrapper.emitted("edit")).toHaveLength(1);
   });
 });

@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { mount } from "@vue/test-utils";
+import { MdEditor } from "md-editor-v3";
 import ArticleContent from "./ArticleContent.vue";
 
 describe("ArticleContent", () => {
@@ -8,6 +9,7 @@ describe("ArticleContent", () => {
     setActivePinia(createPinia());
     localStorage.clear();
     document.documentElement.style.removeProperty("--rl-article-font-size");
+    document.documentElement.dataset.theme = "";
   });
 
   test("applies a previously saved font size on mount, without opening the menu first", () => {
@@ -43,5 +45,134 @@ describe("ArticleContent", () => {
     expect(link.attributes("href")).toBe("https://example.com/article");
     expect(link.attributes("target")).toBe("_blank");
     expect(link.attributes("rel")).toBe("noopener noreferrer");
+  });
+
+  describe("youtube embed", () => {
+    const youtubeProps = {
+      contentMd: "# A video\n\n![thumbnail](https://thumb.example/abc123.jpg)\n\nwelcome back to the show",
+      type: "youtube" as const,
+      youtubeVideoId: "abc123",
+      thumbnailUrl: "https://thumb.example/abc123.jpg",
+    };
+
+    test("shows a click-to-play thumbnail and does not mount an iframe until tapped", () => {
+      const wrapper = mount(ArticleContent, { props: youtubeProps });
+      expect(wrapper.find("iframe").exists()).toBe(false);
+      const playButton = wrapper.find("button.youtube-play");
+      expect(playButton.exists()).toBe(true);
+      expect(playButton.find("img").attributes("src")).toBe("https://thumb.example/abc123.jpg");
+      // The thumbnail baked into content_md is redundant with the click-to-play
+      // image above it, so it shouldn't render a second time.
+      expect(wrapper.findAll("img")).toHaveLength(1);
+      expect(wrapper.text()).toContain("welcome back to the show");
+    });
+
+    test("tapping the thumbnail mounts a youtube-nocookie iframe pointed at the video id", async () => {
+      const wrapper = mount(ArticleContent, { props: youtubeProps });
+      await wrapper.find("button.youtube-play").trigger("click");
+      const iframe = wrapper.find("iframe");
+      expect(iframe.exists()).toBe(true);
+      expect(iframe.attributes("src")).toBe("https://www.youtube-nocookie.com/embed/abc123");
+      expect(wrapper.find("button.youtube-play").exists()).toBe(false);
+    });
+
+    test("non-youtube content renders without any click-to-play affordance", () => {
+      const wrapper = mount(ArticleContent, { props: { contentMd: "# Hello" } });
+      expect(wrapper.find("button.youtube-play").exists()).toBe(false);
+      expect(wrapper.find("iframe").exists()).toBe(false);
+    });
+
+    test("youtube type without a resolved video id (older bookmark) falls back to today's rendering", () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "# A video\n\n![thumbnail](https://thumb.example/x.jpg)", type: "youtube", youtubeVideoId: null },
+      });
+      expect(wrapper.find("button.youtube-play").exists()).toBe(false);
+      expect(wrapper.find("img").attributes("src")).toBe("https://thumb.example/x.jpg");
+    });
+  });
+
+  describe("editing", () => {
+    const originalInnerWidth = window.innerWidth;
+
+    afterEach(() => {
+      window.innerWidth = originalInnerWidth;
+    });
+
+    test("renders MdEditor bound to modelValue instead of the rendered view when editing", () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "# saved", editing: true, modelValue: "draft text" },
+      });
+      const editor = wrapper.findComponent(MdEditor);
+      expect(editor.exists()).toBe(true);
+      expect(editor.props("modelValue")).toBe("draft text");
+      expect(wrapper.find("h1").exists()).toBe(false);
+    });
+
+    test("emits update:modelValue when the editor content changes", async () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "# saved", editing: true, modelValue: "draft text" },
+      });
+      wrapper.findComponent(MdEditor).vm.$emit("update:modelValue", "changed text");
+      expect(wrapper.emitted("update:modelValue")?.[0]).toEqual(["changed text"]);
+    });
+
+    test("hides the youtube click-to-play affordance while editing", () => {
+      const wrapper = mount(ArticleContent, {
+        props: {
+          contentMd: "transcript",
+          type: "youtube",
+          youtubeVideoId: "abc123",
+          thumbnailUrl: "https://thumb.example/abc.jpg",
+          editing: true,
+          modelValue: "transcript",
+        },
+      });
+      expect(wrapper.find("button.youtube-play").exists()).toBe(false);
+      expect(wrapper.find("iframe").exists()).toBe(false);
+    });
+
+    test("trims the toolbar to bold/italic/link/lists/heading/undo/redo, excluding image/table/mermaid/katex", () => {
+      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      const toolbars = wrapper.findComponent(MdEditor).props("toolbars") as string[];
+      expect(toolbars).toEqual(expect.arrayContaining(["bold", "italic", "link", "unorderedList", "orderedList", "title", "revoke", "next"]));
+      expect(toolbars).not.toEqual(expect.arrayContaining(["image", "table", "mermaid", "formula"]));
+    });
+
+    test("disables image upload and mermaid/katex/echarts rendering in the editor", () => {
+      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      const editor = wrapper.findComponent(MdEditor);
+      expect(editor.props("noUploadImg")).toBe(true);
+      expect(editor.props("noMermaid")).toBe(true);
+      expect(editor.props("noKatex")).toBe(true);
+      expect(editor.props("noEcharts")).toBe(true);
+    });
+
+    test("binds the editor's theme to the app's theme store", () => {
+      document.documentElement.dataset.theme = "dark";
+      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      expect(wrapper.findComponent(MdEditor).props("theme")).toBe("dark");
+    });
+
+    test("starts single-pane (no split preview) on a narrow viewport, and includes a preview toggle", () => {
+      window.innerWidth = 400;
+      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      const editor = wrapper.findComponent(MdEditor);
+      expect(editor.props("preview")).toBe(false);
+      expect(editor.props("toolbars")).toEqual(expect.arrayContaining(["preview"]));
+    });
+
+    test("starts split-screen on a wide viewport", () => {
+      window.innerWidth = 1200;
+      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      expect(wrapper.findComponent(MdEditor).props("preview")).toBe(true);
+    });
+
+    test("sanitizes the editor's live preview so raw HTML in the source can't carry an onerror/script payload", () => {
+      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      const sanitize = wrapper.findComponent(MdEditor).props("sanitize") as (html: string) => string;
+      const sanitized = sanitize('<script>alert(1)</script><img src=x onerror="alert(1)">');
+      expect(sanitized).not.toContain("onerror");
+      expect(sanitized).not.toContain("<script");
+    });
   });
 });

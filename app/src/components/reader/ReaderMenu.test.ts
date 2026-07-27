@@ -15,6 +15,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     excerpt: null,
     content_md: null,
     thumbnail_url: null,
+    youtube_video_id: null,
+    content_edited: false,
     word_count: null,
     reading_time: null,
     tags: [],
@@ -63,6 +65,22 @@ describe("ReaderMenu", () => {
     await openMenu(wrapper);
     await wrapper.find(".archive-item").trigger("click");
     expect(wrapper.emitted("archive")).toHaveLength(1);
+  });
+
+  test("emits edit and closes the menu when the edit item is clicked", async () => {
+    const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
+    await openMenu(wrapper);
+    await wrapper.find(".edit-item").trigger("click");
+    expect(wrapper.emitted("edit")).toHaveLength(1);
+    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+  });
+
+  test("shows the edit item for every bookmark type", async () => {
+    for (const type of ["article", "youtube", "note"] as const) {
+      const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark({ type }) } });
+      await openMenu(wrapper);
+      expect(wrapper.find(".edit-item").exists()).toBe(true);
+    }
   });
 
   test("links 'Open original' to the bookmark's URL in a new tab", async () => {

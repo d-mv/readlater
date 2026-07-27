@@ -21,6 +21,8 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     excerpt: null,
     content_md: null,
     thumbnail_url: null,
+    youtube_video_id: null,
+    content_edited: false,
     error_message: "Readability could not extract article content",
     word_count: null,
     reading_time: null,
@@ -63,7 +65,93 @@ describe("ReaderView", () => {
     await retryButton.trigger("click");
     await flushPromises();
 
-    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null });
+    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null, content_edited: false });
     expect(wrapper.text()).toContain("Processing…");
+  });
+
+  describe("editing", () => {
+    function mockReadyBookmark(bookmark: Bookmark) {
+      const single = vi.fn().mockResolvedValue({ data: bookmark, error: null });
+      const eqSelect = vi.fn(() => ({ single }));
+      const select = vi.fn(() => ({ eq: eqSelect }));
+      const eqUpdate = vi.fn().mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq: eqUpdate }));
+      from.mockReturnValue({ select, update });
+      return { update };
+    }
+
+    async function enterEditMode(wrapper: ReturnType<typeof mount>) {
+      await wrapper.find(".menu-trigger").trigger("click");
+      await wrapper.find(".edit-item").trigger("click");
+    }
+
+    test("Edit switches to a title input and the markdown editor, seeded from the bookmark", async () => {
+      const ready = makeBookmark({
+        id: "1",
+        status: "ready",
+        title: "Original title",
+        content_md: "original content",
+      });
+      mockReadyBookmark(ready);
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await enterEditMode(wrapper);
+
+      expect(wrapper.find("h1.title").exists()).toBe(false);
+      const titleInput = wrapper.get("input.title-input");
+      expect((titleInput.element as HTMLInputElement).value).toBe("Original title");
+    });
+
+    test("Save writes the edited title/content_md and recomputed word_count/reading_time, then exits edit mode", async () => {
+      const ready = makeBookmark({
+        id: "1",
+        status: "ready",
+        title: "Original title",
+        content_md: "original content",
+      });
+      const { update } = mockReadyBookmark(ready);
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await enterEditMode(wrapper);
+
+      await wrapper.get("input.title-input").setValue("Edited title");
+      // Simulate the editor reporting new draft content, the same way md-editor-v3 does via update:modelValue.
+      await wrapper.findComponent({ name: "ArticleContent" }).vm.$emit("update:modelValue", "one two three four");
+
+      await wrapper.find(".save-edit-btn").trigger("click");
+      await flushPromises();
+
+      expect(update).toHaveBeenCalledWith({
+        title: "Edited title",
+        content_md: "one two three four",
+        word_count: 4,
+        reading_time: 1,
+        content_edited: true,
+      });
+      expect(wrapper.find("h1.title").text()).toBe("Edited title");
+      expect(wrapper.find("input.title-input").exists()).toBe(false);
+    });
+
+    test("Cancel discards the draft without saving", async () => {
+      const ready = makeBookmark({
+        id: "1",
+        status: "ready",
+        title: "Original title",
+        content_md: "original content",
+      });
+      const { update } = mockReadyBookmark(ready);
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await enterEditMode(wrapper);
+
+      await wrapper.get("input.title-input").setValue("Edited title");
+      await wrapper.find(".cancel-edit-btn").trigger("click");
+
+      expect(update).not.toHaveBeenCalled();
+      expect(wrapper.find("h1.title").text()).toBe("Original title");
+    });
   });
 });

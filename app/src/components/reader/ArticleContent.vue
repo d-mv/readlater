@@ -1,16 +1,55 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
+import { MdEditor } from "md-editor-v3";
+import type { ToolbarNames } from "md-editor-v3";
+import "md-editor-v3/lib/style.css";
+import { IconPlayerPlayFilled } from "@tabler/icons-vue";
 import { useFontSizeStore } from "../../stores/fontSize";
+import { useThemeStore } from "../../stores/theme";
+
+const NARROW_VIEWPORT_BREAKPOINT = 640;
+const EDITOR_TOOLBARS: ToolbarNames[] = [
+  "title",
+  "bold",
+  "italic",
+  "unorderedList",
+  "orderedList",
+  "link",
+  "revoke",
+  "next",
+];
 
 const props = defineProps<{
   contentMd: string | null;
+  type?: "article" | "youtube" | "note";
+  youtubeVideoId?: string | null;
+  thumbnailUrl?: string | null;
+  editing?: boolean;
+  modelValue?: string;
+}>();
+
+const emit = defineEmits<{
+  "update:modelValue": [value: string];
 }>();
 
 // Instantiating the store applies the saved font size immediately, rather than
 // waiting for the reader menu (which owns FontSizeControl) to be opened first.
 useFontSizeStore();
+const themeStore = useThemeStore();
+
+const isNarrowViewport = ref(window.innerWidth <= NARROW_VIEWPORT_BREAKPOINT);
+const editorToolbars = computed<ToolbarNames[]>(() =>
+  isNarrowViewport.value ? [...EDITOR_TOOLBARS, "preview"] : [...EDITOR_TOOLBARS],
+);
+
+function onResize() {
+  isNarrowViewport.value = window.innerWidth <= NARROW_VIEWPORT_BREAKPOINT;
+}
+
+onMounted(() => window.addEventListener("resize", onResize));
+onUnmounted(() => window.removeEventListener("resize", onResize));
 
 const md = new MarkdownIt();
 
@@ -25,14 +64,64 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   return defaultLinkOpen(tokens, idx, options, env, self);
 };
 
+const isYoutube = computed(() => props.type === "youtube" && !!props.youtubeVideoId && !props.editing);
+const playing = ref(false);
+
+// The worker bakes the thumbnail into content_md as a plain markdown image —
+// once the click-to-play affordance below covers that job, rendering it a
+// second time from content_md would just duplicate the same picture.
+const displayContentMd = computed(() => {
+  if (!isYoutube.value) return props.contentMd ?? "";
+  return (props.contentMd ?? "").replace(/^!\[thumbnail\]\([^)]*\)\n*/m, "");
+});
+
+const embedUrl = computed(() => `https://www.youtube-nocookie.com/embed/${props.youtubeVideoId}`);
+
 const safeHtml = computed(() =>
-  DOMPurify.sanitize(md.render(props.contentMd ?? ""), { ADD_ATTR: ["target"] }),
+  DOMPurify.sanitize(md.render(displayContentMd.value), { ADD_ATTR: ["target"] }),
 );
 </script>
 
 <template>
-  <!-- eslint-disable-next-line vue/no-v-html -->
-  <div class="article" v-html="safeHtml"></div>
+  <div class="article">
+    <div v-if="isYoutube" class="youtube-embed">
+      <iframe
+        v-if="playing"
+        class="youtube-iframe"
+        :src="embedUrl"
+        title="YouTube video player"
+        allow="autoplay; encrypted-media; picture-in-picture"
+        allowfullscreen
+        referrerpolicy="strict-origin-when-cross-origin"
+      ></iframe>
+      <button
+        v-else
+        class="youtube-play"
+        type="button"
+        aria-label="Play video"
+        @click="playing = true"
+      >
+        <img :src="thumbnailUrl ?? undefined" alt="" />
+        <IconPlayerPlayFilled :size="48" class="youtube-play-icon" />
+      </button>
+    </div>
+    <MdEditor
+      v-if="editing"
+      :model-value="modelValue ?? ''"
+      @update:model-value="emit('update:modelValue', $event)"
+      :theme="themeStore.theme"
+      :toolbars="editorToolbars"
+      :preview="!isNarrowViewport"
+      :sanitize="(html: string) => DOMPurify.sanitize(html)"
+      :no-upload-img="true"
+      :no-mermaid="true"
+      :no-katex="true"
+      :no-echarts="true"
+      placeholder="Write in markdown…"
+    />
+    <!-- eslint-disable-next-line vue/no-v-html -->
+    <div v-else v-html="safeHtml"></div>
+  </div>
 </template>
 
 <style scoped>
@@ -62,5 +151,47 @@ const safeHtml = computed(() =>
 
 .article :deep(a) {
   color: var(--rl-accent);
+}
+
+.youtube-embed {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 0 0 16px;
+  border-radius: var(--rl-radius);
+  overflow: hidden;
+  background: black;
+}
+
+.youtube-iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+.youtube-play {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  display: block;
+}
+
+.youtube-play img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.youtube-play-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: white;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
 }
 </style>

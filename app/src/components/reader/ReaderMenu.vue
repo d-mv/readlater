@@ -6,6 +6,7 @@ import {
   IconExternalLink,
   IconMail,
   IconMailOpened,
+  IconPencil,
   IconTrash,
   IconWorld,
 } from "@tabler/icons-vue";
@@ -22,6 +23,7 @@ const emit = defineEmits<{
   share: [];
   markRead: [];
   markUnread: [];
+  edit: [];
 }>();
 
 const canMarkRead = computed(() => props.bookmark.status === "ready" && props.bookmark.read_at === null);
@@ -98,6 +100,15 @@ onUnmounted(() => {
         <IconExternalLink :size="16" />
         Open original
       </a>
+      <button
+        class="menu-item edit-item"
+        type="button"
+        role="menuitem"
+        @click="select(() => emit('edit'))"
+      >
+        <IconPencil :size="16" />
+        Edit
+      </button>
       <button
         v-if="canMarkRead"
         class="menu-item mark-read"

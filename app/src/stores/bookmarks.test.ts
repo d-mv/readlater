@@ -38,6 +38,8 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     excerpt: null,
     content_md: "content",
     thumbnail_url: null,
+    youtube_video_id: null,
+    content_edited: false,
     word_count: 100,
     reading_time: 5,
     tags: [],
@@ -457,9 +459,95 @@ describe("useBookmarksStore", () => {
     await store.fetch();
     await store.refresh("1");
 
-    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null });
+    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null, content_edited: false });
     expect(store.bookmarks[0]?.status).toBe("pending");
     expect(store.bookmarks[0]?.error_message).toBeNull();
+  });
+
+  test("refresh asks for confirmation before overwriting a manually-edited bookmark", async () => {
+    const rows = [makeBookmark({ id: "1", status: "failed", error_message: "boom", content_edited: true })];
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      update,
+    });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.refresh("1");
+
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null, content_edited: false });
+    expect(store.bookmarks[0]?.status).toBe("pending");
+  });
+
+  test("refresh looks up content_edited remotely when the bookmark isn't loaded locally", async () => {
+    const maybeSingle = vi.fn().mockResolvedValue({ data: { content_edited: true } });
+    const eqSelect = vi.fn(() => ({ maybeSingle }));
+    const select = vi.fn(() => ({ eq: eqSelect }));
+    const eqUpdate = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq: eqUpdate }));
+    from.mockReturnValue({ select, update });
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+
+    const store = useBookmarksStore();
+    await store.refresh("not-loaded-id");
+
+    expect(select).toHaveBeenCalledWith("content_edited");
+    expect(eqSelect).toHaveBeenCalledWith("id", "not-loaded-id");
+    expect(confirmSpy).toHaveBeenCalled();
+    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null, content_edited: false });
+  });
+
+  test("refresh does nothing if the user declines the manual-edit confirmation", async () => {
+    const rows = [makeBookmark({ id: "1", status: "failed", error_message: "boom", content_edited: true })];
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      update,
+    });
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.refresh("1");
+
+    expect(update).not.toHaveBeenCalled();
+    expect(store.bookmarks[0]?.status).toBe("failed");
+  });
+
+  test("updateContent saves title/content_md/word_count/reading_time, marks content_edited, and updates local state", async () => {
+    const rows = [makeBookmark({ id: "1", title: "Old title", content_md: "old content" })];
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      update,
+    });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.updateContent("1", {
+      title: "New title",
+      content_md: "new content here",
+      word_count: 3,
+      reading_time: 1,
+    });
+
+    expect(update).toHaveBeenCalledWith({
+      title: "New title",
+      content_md: "new content here",
+      word_count: 3,
+      reading_time: 1,
+      content_edited: true,
+    });
+    expect(eq).toHaveBeenCalledWith("id", "1");
+    expect(store.bookmarks[0]?.title).toBe("New title");
+    expect(store.bookmarks[0]?.content_md).toBe("new content here");
+    expect(store.bookmarks[0]?.content_edited).toBe(true);
   });
 
   test("add reports a duplicate via the DB unique index when the URL wasn't in the local list", async () => {
