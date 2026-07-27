@@ -5,9 +5,11 @@ import type { YtDlpMeta } from "./parseYoutube";
 const execFileAsync = promisify(execFile);
 
 export async function fetchMeta(url: string): Promise<YtDlpMeta> {
-  const { stdout } = await execFileAsync("yt-dlp", ["--dump-json", "--skip-download", url], {
-    maxBuffer: 10 * 1024 * 1024,
-  });
+  const { stdout } = await execFileAsync(
+    "yt-dlp",
+    ["--js-runtimes", "bun", "--dump-json", "--skip-download", url],
+    { maxBuffer: 10 * 1024 * 1024 },
+  );
   const json = JSON.parse(stdout);
   return {
     id: json.id,
@@ -22,7 +24,7 @@ export async function fetchCaptions(url: string): Promise<string> {
   try {
     const { stdout } = await execFileAsync(
       "yt-dlp",
-      ["--write-auto-sub", "--sub-lang", "en", "--skip-download", "-o", "-", url],
+      ["--js-runtimes", "bun", "--write-auto-sub", "--sub-lang", "en", "--skip-download", "-o", "-", url],
       { maxBuffer: 20 * 1024 * 1024 },
     );
     return stdout;
