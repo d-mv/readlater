@@ -39,6 +39,8 @@ Deno.test("handleSnippet: converts HTML to Markdown and inserts a ready note", a
   assertEquals(supabase.lastInsertedRow?.status, "ready");
   assertEquals(supabase.lastInsertedRow?.url, null);
   assertEquals(supabase.lastInsertedRow?.user_id, "user-1");
+  assertEquals(supabase.lastInsertedRow?.word_count, 2);
+  assertEquals(supabase.lastInsertedRow?.reading_time, 1);
 });
 
 Deno.test("handleSnippet: falls back to plain text when no HTML is provided", async () => {

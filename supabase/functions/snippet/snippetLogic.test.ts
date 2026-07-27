@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { resolveContent, truncateTitle } from "./snippetLogic.ts";
+import { readingTimeFromWordCount, resolveContent, truncateTitle, wordCount } from "./snippetLogic.ts";
 
 Deno.test("resolveContent: prefers the converted markdown when non-empty", () => {
   assertEquals(resolveContent("**bold**", "bold"), "**bold**");
@@ -30,4 +30,20 @@ Deno.test("truncateTitle: cuts at the last space before the limit and adds an el
   const result = truncateTitle(text);
   assertEquals(result.endsWith("…"), true);
   assertEquals(result.length <= 102, true);
+});
+
+Deno.test("wordCount: counts whitespace-separated words", () => {
+  assertEquals(wordCount("bold text here"), 3);
+});
+
+Deno.test("wordCount: empty string has zero words", () => {
+  assertEquals(wordCount("   "), 0);
+});
+
+Deno.test("readingTimeFromWordCount: rounds to the nearest minute at 200wpm", () => {
+  assertEquals(readingTimeFromWordCount(400), 2);
+});
+
+Deno.test("readingTimeFromWordCount: never rounds down to zero", () => {
+  assertEquals(readingTimeFromWordCount(1), 1);
 });
