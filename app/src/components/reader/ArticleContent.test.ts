@@ -1,8 +1,21 @@
-import { describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
 import { mount } from "@vue/test-utils";
 import ArticleContent from "./ArticleContent.vue";
 
 describe("ArticleContent", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    localStorage.clear();
+    document.documentElement.style.removeProperty("--rl-article-font-size");
+  });
+
+  test("applies a previously saved font size on mount, without opening the menu first", () => {
+    localStorage.setItem("articleFontSize", "20");
+    mount(ArticleContent, { props: { contentMd: "# Hello" } });
+    expect(document.documentElement.style.getPropertyValue("--rl-article-font-size")).toBe("20px");
+  });
+
   test("renders markdown as HTML", () => {
     const wrapper = mount(ArticleContent, { props: { contentMd: "# Hello\n\nSome **bold** text." } });
     expect(wrapper.find("h1").text()).toBe("Hello");

@@ -2,10 +2,15 @@
 import { computed } from "vue";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
+import { useFontSizeStore } from "../../stores/fontSize";
 
 const props = defineProps<{
   contentMd: string | null;
 }>();
+
+// Instantiating the store applies the saved font size immediately, rather than
+// waiting for the reader menu (which owns FontSizeControl) to be opened first.
+useFontSizeStore();
 
 const md = new MarkdownIt();
 
