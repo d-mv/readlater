@@ -9,15 +9,19 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "vue-tsc -b --noEmit",
-    "lint": "oxlint src"
+    "lint": "oxlint src",
+    "format": "oxfmt src",
+    "format:check": "oxfmt --check src",
+    "unused-deps": "knip --dependencies"
   },
   "devDependencies": {
-    "@types/dompurify": "^3.2.0",
     "@types/markdown-it": "^14.1.2",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vue/test-utils": "^2.4.11",
     "fake-indexeddb": "^6.2.5",
     "jsdom": "^29.1.1",
+    "knip": "^6.29.0",
+    "oxfmt": "^0.61.0",
     "oxlint": "^1.75.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1",

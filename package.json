@@ -1,0 +1,11 @@
+{
+  "name": "read-later",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "lefthook install"
+  },
+  "devDependencies": {
+    "lefthook": "^2.1.10"
+  }
+}

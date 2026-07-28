@@ -4,6 +4,13 @@
   "type": "module",
   "scripts": {
     "build": "bun run build.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "format": "oxfmt .",
+    "format:check": "oxfmt --check .",
+    "unused-deps": "knip --dependencies"
+  },
+  "devDependencies": {
+    "knip": "^6.29.0",
+    "oxfmt": "^0.61.0"
   }
 }

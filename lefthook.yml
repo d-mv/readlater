@@ -1,0 +1,55 @@
+pre-commit:
+  parallel: true
+  commands:
+    lint-app:
+      root: "app/"
+      glob: "*.{ts,vue}"
+      run: bun run lint
+    lint-worker:
+      root: "worker/"
+      glob: "*.ts"
+      run: bun run lint
+    format-app:
+      root: "app/"
+      glob: "*.{ts,vue,css,json}"
+      run: bun run format:check
+    format-worker:
+      root: "worker/"
+      glob: "*.ts"
+      run: bun run format:check
+    format-bookmarklet:
+      root: "bookmarklet/"
+      glob: "*.{ts,js}"
+      run: bun run format:check
+    typecheck-app:
+      root: "app/"
+      glob: "*.{ts,vue}"
+      run: bun run typecheck
+    typecheck-worker:
+      root: "worker/"
+      glob: "*.ts"
+      run: bun run typecheck
+    unused-deps-app:
+      root: "app/"
+      glob: "*.{ts,vue}"
+      run: bun run unused-deps
+    unused-deps-worker:
+      root: "worker/"
+      glob: "*.ts"
+      run: bun run unused-deps
+    unused-deps-bookmarklet:
+      root: "bookmarklet/"
+      glob: "*.{ts,js}"
+      run: bun run unused-deps
+
+pre-push:
+  parallel: true
+  commands:
+    build-app:
+      root: "app/"
+      glob: "*.{ts,vue}"
+      run: bun run build
+    build-bookmarklet:
+      root: "bookmarklet/"
+      glob: "*.{ts,js}"
+      run: bun run build
