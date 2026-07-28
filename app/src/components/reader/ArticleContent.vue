@@ -67,12 +67,15 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
 const isYoutube = computed(() => props.type === "youtube" && !!props.youtubeVideoId && !props.editing);
 const playing = ref(false);
 
-// The worker bakes the thumbnail into content_md as a plain markdown image —
-// once the click-to-play affordance below covers that job, rendering it a
-// second time from content_md would just duplicate the same picture.
+// The worker bakes the title and thumbnail into content_md as a markdown
+// heading + image — both are already shown elsewhere (title in the reader
+// header, thumbnail via the click-to-play affordance above), so rendering
+// content_md as-is would duplicate them.
 const displayContentMd = computed(() => {
   if (!isYoutube.value) return props.contentMd ?? "";
-  return (props.contentMd ?? "").replace(/^!\[thumbnail\]\([^)]*\)\n*/m, "");
+  return (props.contentMd ?? "")
+    .replace(/^#\s+.*\n+/, "")
+    .replace(/^!\[thumbnail\]\([^)]*\)\n*/, "");
 });
 
 const embedUrl = computed(() => `https://www.youtube-nocookie.com/embed/${props.youtubeVideoId}`);

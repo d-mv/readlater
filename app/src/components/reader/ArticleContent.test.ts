@@ -65,6 +65,9 @@ describe("ArticleContent", () => {
       // image above it, so it shouldn't render a second time.
       expect(wrapper.findAll("img")).toHaveLength(1);
       expect(wrapper.text()).toContain("welcome back to the show");
+      // The title baked into content_md is redundant with the reader header's
+      // own title, so it shouldn't render a second time either.
+      expect(wrapper.find("h1").exists()).toBe(false);
     });
 
     test("tapping the thumbnail mounts a youtube-nocookie iframe pointed at the video id", async () => {
