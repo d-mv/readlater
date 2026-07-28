@@ -2,18 +2,28 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Bookmark } from "../lib/supabase";
 
-const { from, getUser, invoke } = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn(), invoke: vi.fn() }));
-vi.mock("../lib/supabase", () => ({ supabase: { from, auth: { getUser }, functions: { invoke } } }));
+const { from, getUser, invoke } = vi.hoisted(() => ({
+  from: vi.fn(),
+  getUser: vi.fn(),
+  invoke: vi.fn(),
+}));
+vi.mock("../lib/supabase", () => ({
+  supabase: { from, auth: { getUser }, functions: { invoke } },
+}));
 
-const { replaceBookmarksList, getBookmarksList, getArticle, deleteBookmarkMeta, hydrateArticleContent } = vi.hoisted(
-  () => ({
-    replaceBookmarksList: vi.fn(),
-    getBookmarksList: vi.fn(),
-    getArticle: vi.fn(),
-    deleteBookmarkMeta: vi.fn(),
-    hydrateArticleContent: vi.fn((article: { content_md: string }) => article.content_md),
-  }),
-);
+const {
+  replaceBookmarksList,
+  getBookmarksList,
+  getArticle,
+  deleteBookmarkMeta,
+  hydrateArticleContent,
+} = vi.hoisted(() => ({
+  replaceBookmarksList: vi.fn(),
+  getBookmarksList: vi.fn(),
+  getArticle: vi.fn(),
+  deleteBookmarkMeta: vi.fn(),
+  hydrateArticleContent: vi.fn((article: { content_md: string }) => article.content_md),
+}));
 vi.mock("../lib/offlineDb", () => ({
   replaceBookmarksList,
   getBookmarksList,
@@ -62,7 +72,9 @@ describe("useBookmarksStore", () => {
     getArticle.mockResolvedValue(undefined);
     deleteBookmarkMeta.mockResolvedValue(undefined);
     removeCachedBookmark.mockResolvedValue(undefined);
-    hydrateArticleContent.mockImplementation((article: { content_md: string }) => article.content_md);
+    hydrateArticleContent.mockImplementation(
+      (article: { content_md: string }) => article.content_md,
+    );
   });
 
   test("fetch loads bookmarks ordered by the query and exposes them", async () => {
@@ -83,7 +95,9 @@ describe("useBookmarksStore", () => {
       makeBookmark({ id: "1", archived: false }),
       makeBookmark({ id: "2", archived: true }),
     ];
-    from.mockReturnValue({ select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }) });
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+    });
 
     const store = useBookmarksStore();
     await store.fetch();
@@ -97,7 +111,9 @@ describe("useBookmarksStore", () => {
       makeBookmark({ id: "1", archived: false }),
       makeBookmark({ id: "2", archived: true }),
     ];
-    from.mockReturnValue({ select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }) });
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+    });
 
     const store = useBookmarksStore();
     await store.fetch();
@@ -112,7 +128,9 @@ describe("useBookmarksStore", () => {
       makeBookmark({ id: "2", archived: false, read_at: "2026-01-02T00:00:00Z" }),
       makeBookmark({ id: "3", archived: true, read_at: null }),
     ];
-    from.mockReturnValue({ select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }) });
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+    });
 
     const store = useBookmarksStore();
     await store.fetch();
@@ -295,7 +313,9 @@ describe("useBookmarksStore", () => {
     await store.fetch();
 
     from.mockReturnValueOnce({
-      select: () => ({ eq: () => ({ single: vi.fn().mockResolvedValue({ data: updated, error: null }) }) }),
+      select: () => ({
+        eq: () => ({ single: vi.fn().mockResolvedValue({ data: updated, error: null }) }),
+      }),
     });
     await store.fetchOne("1");
 
@@ -305,7 +325,9 @@ describe("useBookmarksStore", () => {
 
   test("fetch persists list metadata without article content to the offline store on success", async () => {
     const rows = [makeBookmark({ id: "1", content_md: "full text" })];
-    from.mockReturnValue({ select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }) });
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+    });
 
     const store = useBookmarksStore();
     await store.fetch();
@@ -318,7 +340,9 @@ describe("useBookmarksStore", () => {
 
   test("fetch keeps the freshly loaded list even if persisting the offline copy fails", async () => {
     const rows = [makeBookmark({ id: "1" })];
-    from.mockReturnValue({ select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }) });
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+    });
     replaceBookmarksList.mockRejectedValue(new Error("private browsing: indexedDB disabled"));
 
     const store = useBookmarksStore();
@@ -352,7 +376,12 @@ describe("useBookmarksStore", () => {
         processed_at: null,
       },
     ]);
-    getArticle.mockResolvedValue({ id: "1", content_md: "cached body", images: [], cachedAt: "2026-01-01T00:00:00Z" });
+    getArticle.mockResolvedValue({
+      id: "1",
+      content_md: "cached body",
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
 
     const store = useBookmarksStore();
     await store.fetch();
@@ -380,7 +409,13 @@ describe("useBookmarksStore", () => {
 
   test("addNote inserts a ready note for the signed-in user and prepends it locally", async () => {
     getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-    const inserted = makeBookmark({ id: "note-1", url: null, type: "note", status: "ready", content_md: "hello" });
+    const inserted = makeBookmark({
+      id: "note-1",
+      url: null,
+      type: "note",
+      status: "ready",
+      content_md: "hello",
+    });
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const select = vi.fn(() => ({ single }));
     const insert = vi.fn(() => ({ select }));
@@ -390,7 +425,13 @@ describe("useBookmarksStore", () => {
     const result = await store.addNote("hello");
 
     expect(insert).toHaveBeenCalledWith(
-      expect.objectContaining({ url: null, type: "note", status: "ready", content_md: "hello", user_id: "user-1" }),
+      expect.objectContaining({
+        url: null,
+        type: "note",
+        status: "ready",
+        content_md: "hello",
+        user_id: "user-1",
+      }),
     );
     expect(result.error).toBeNull();
     expect(store.bookmarks[0]?.id).toBe("note-1");
@@ -407,7 +448,12 @@ describe("useBookmarksStore", () => {
   });
 
   test("addSnippet invokes the snippet edge function and prepends the returned bookmark", async () => {
-    const inserted = makeBookmark({ id: "snippet-1", url: null, type: "note", content_md: "**bold**" });
+    const inserted = makeBookmark({
+      id: "snippet-1",
+      url: null,
+      type: "note",
+      content_md: "**bold**",
+    });
     invoke.mockResolvedValue({ data: { bookmark: inserted }, error: null });
 
     const store = useBookmarksStore();
@@ -459,13 +505,19 @@ describe("useBookmarksStore", () => {
     await store.fetch();
     await store.refresh("1");
 
-    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null, content_edited: false });
+    expect(update).toHaveBeenCalledWith({
+      status: "pending",
+      error_message: null,
+      content_edited: false,
+    });
     expect(store.bookmarks[0]?.status).toBe("pending");
     expect(store.bookmarks[0]?.error_message).toBeNull();
   });
 
   test("refresh asks for confirmation before overwriting a manually-edited bookmark", async () => {
-    const rows = [makeBookmark({ id: "1", status: "failed", error_message: "boom", content_edited: true })];
+    const rows = [
+      makeBookmark({ id: "1", status: "failed", error_message: "boom", content_edited: true }),
+    ];
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
@@ -479,7 +531,11 @@ describe("useBookmarksStore", () => {
     await store.refresh("1");
 
     expect(confirmSpy).toHaveBeenCalled();
-    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null, content_edited: false });
+    expect(update).toHaveBeenCalledWith({
+      status: "pending",
+      error_message: null,
+      content_edited: false,
+    });
     expect(store.bookmarks[0]?.status).toBe("pending");
   });
 
@@ -498,11 +554,17 @@ describe("useBookmarksStore", () => {
     expect(select).toHaveBeenCalledWith("content_edited");
     expect(eqSelect).toHaveBeenCalledWith("id", "not-loaded-id");
     expect(confirmSpy).toHaveBeenCalled();
-    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null, content_edited: false });
+    expect(update).toHaveBeenCalledWith({
+      status: "pending",
+      error_message: null,
+      content_edited: false,
+    });
   });
 
   test("refresh does nothing if the user declines the manual-edit confirmation", async () => {
-    const rows = [makeBookmark({ id: "1", status: "failed", error_message: "boom", content_edited: true })];
+    const rows = [
+      makeBookmark({ id: "1", status: "failed", error_message: "boom", content_edited: true }),
+    ];
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
@@ -552,12 +614,18 @@ describe("useBookmarksStore", () => {
 
   test("add reports a duplicate via the DB unique index when the URL wasn't in the local list", async () => {
     getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-    const single = vi.fn().mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });
+    const single = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });
     const select = vi.fn(() => ({ single }));
     const insert = vi.fn(() => ({ select }));
     from.mockReturnValueOnce({ insert });
 
-    const existing = { id: "existing-1", title: "Already saved", created_at: "2026-01-01T00:00:00Z" };
+    const existing = {
+      id: "existing-1",
+      title: "Already saved",
+      created_at: "2026-01-01T00:00:00Z",
+    };
     const maybeSingle = vi.fn().mockResolvedValue({ data: existing, error: null });
     const eq = vi.fn(() => ({ maybeSingle }));
     const lookupSelect = vi.fn(() => ({ eq }));
@@ -593,7 +661,10 @@ describe("useBookmarksStore", () => {
     await store.fetch();
     await store.addTag("1", "vue");
 
-    expect(tagUpsert).toHaveBeenCalledWith({ name: "vue" }, { onConflict: "name", ignoreDuplicates: false });
+    expect(tagUpsert).toHaveBeenCalledWith(
+      { name: "vue" },
+      { onConflict: "name", ignoreDuplicates: false },
+    );
     expect(joinUpsert).toHaveBeenCalledWith(
       { bookmark_id: "1", tag_id: "tag-1" },
       { onConflict: "bookmark_id,tag_id" },

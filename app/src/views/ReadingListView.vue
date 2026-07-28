@@ -79,8 +79,16 @@ function onToggleTag(tagId: string) {
       maxlength="200"
       @input="onSearchInput"
     />
-    <TagFilterBar :tags="store.allTags" :active-tag-ids="store.activeTagIds" @toggle="onToggleTag" />
-    <StatusTabs :active-filter="store.filter" :unread-count="store.unreadCount" @change="onChangeFilter" />
+    <TagFilterBar
+      :tags="store.allTags"
+      :active-tag-ids="store.activeTagIds"
+      @toggle="onToggleTag"
+    />
+    <StatusTabs
+      :active-filter="store.filter"
+      :unread-count="store.unreadCount"
+      @change="onChangeFilter"
+    />
     <BookmarkList
       :bookmarks="store.visibleBookmarks"
       :cached-ids="offlineCache.cachedIds"

@@ -26,7 +26,10 @@ const offlineCache = useOfflineCacheStore();
 const bookmark = computed(() => store.bookmarks.find((b) => b.id === props.id) ?? null);
 const byline = computed(() => (bookmark.value ? readerByline(bookmark.value) : ""));
 const isNotReady = computed(
-  () => bookmark.value !== null && bookmark.value.status !== "ready" && bookmark.value.status !== "failed",
+  () =>
+    bookmark.value !== null &&
+    bookmark.value.status !== "ready" &&
+    bookmark.value.status !== "failed",
 );
 
 const scrollContainer = useTemplateRef<HTMLDivElement>("scrollContainer");
@@ -147,7 +150,9 @@ async function onSaveEdit() {
         <input v-else v-model="draftTitle" class="title-input" type="text" placeholder="Title" />
         <p v-if="byline && !editing" class="byline">{{ byline }}</p>
         <div v-if="editing" class="edit-actions">
-          <button class="btn-secondary cancel-edit-btn" type="button" @click="onCancelEdit">Cancel</button>
+          <button class="btn-secondary cancel-edit-btn" type="button" @click="onCancelEdit">
+            Cancel
+          </button>
           <button class="btn-primary save-edit-btn" type="button" @click="onSaveEdit">Save</button>
         </div>
         <ArticleContent
@@ -174,7 +179,12 @@ async function onSaveEdit() {
         <p class="status-text">Processing…</p>
       </div>
     </div>
-    <TagInput v-if="bookmark.status === 'ready'" :tags="bookmark.tags" @add="onAddTag" @remove="onRemoveTag" />
+    <TagInput
+      v-if="bookmark.status === 'ready'"
+      :tags="bookmark.tags"
+      @add="onAddTag"
+      @remove="onRemoveTag"
+    />
     <ShareDialog
       v-if="showShareDialog"
       :bookmark="bookmark"

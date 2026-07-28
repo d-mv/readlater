@@ -49,7 +49,9 @@ async function copyLink() {
 }
 
 function nativeShare() {
-  navigator.share({ url: shareUrl.value, title: props.bookmark.title ?? undefined }).catch(() => {});
+  navigator
+    .share({ url: shareUrl.value, title: props.bookmark.title ?? undefined })
+    .catch(() => {});
 }
 </script>
 
@@ -65,18 +67,34 @@ function nativeShare() {
 
       <label class="toggle-row">
         <span>Public link</span>
-        <input type="checkbox" class="toggle-input" :checked="bookmark.is_public" @change="onToggle" />
+        <input
+          type="checkbox"
+          class="toggle-input"
+          :checked="bookmark.is_public"
+          @change="onToggle"
+        />
       </label>
 
       <template v-if="bookmark.is_public">
         <div class="link-row">
-          <input class="link-field" type="text" readonly :value="shareUrl" @focus="($event.target as HTMLInputElement).select()" />
+          <input
+            class="link-field"
+            type="text"
+            readonly
+            :value="shareUrl"
+            @focus="($event.target as HTMLInputElement).select()"
+          />
           <button class="icon-btn copy-btn" type="button" @click="copyLink">
             <IconCopyCheck v-if="copied" :size="18" />
             <IconCopy v-else :size="18" />
           </button>
         </div>
-        <button v-if="canNativeShare" class="btn btn-primary share-native-btn" type="button" @click="nativeShare">
+        <button
+          v-if="canNativeShare"
+          class="btn btn-primary share-native-btn"
+          type="button"
+          @click="nativeShare"
+        >
           <IconShare2 :size="16" />
           Share…
         </button>

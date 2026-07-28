@@ -65,7 +65,11 @@ describe("ReaderView", () => {
     await retryButton.trigger("click");
     await flushPromises();
 
-    expect(update).toHaveBeenCalledWith({ status: "pending", error_message: null, content_edited: false });
+    expect(update).toHaveBeenCalledWith({
+      status: "pending",
+      error_message: null,
+      content_edited: false,
+    });
     expect(wrapper.text()).toContain("Processing…");
   });
 
@@ -118,7 +122,9 @@ describe("ReaderView", () => {
 
       await wrapper.get("input.title-input").setValue("Edited title");
       // Simulate the editor reporting new draft content, the same way md-editor-v3 does via update:modelValue.
-      await wrapper.findComponent({ name: "ArticleContent" }).vm.$emit("update:modelValue", "one two three four");
+      await wrapper
+        .findComponent({ name: "ArticleContent" })
+        .vm.$emit("update:modelValue", "one two three four");
 
       await wrapper.find(".save-edit-btn").trigger("click");
       await flushPromises();

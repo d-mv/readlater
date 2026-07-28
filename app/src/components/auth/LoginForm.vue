@@ -35,10 +35,22 @@ async function onSubmit() {
     <p class="subtitle">Sign in to your archive</p>
 
     <label class="field-label" for="email">Email</label>
-    <input id="email" v-model="email" type="email" placeholder="you@example.com" class="field-input" />
+    <input
+      id="email"
+      v-model="email"
+      type="email"
+      placeholder="you@example.com"
+      class="field-input"
+    />
 
     <label class="field-label" for="password">Password</label>
-    <input id="password" v-model="password" type="password" placeholder="••••••••" class="field-input" />
+    <input
+      id="password"
+      v-model="password"
+      type="password"
+      placeholder="••••••••"
+      class="field-input"
+    />
 
     <p v-if="error" class="error">{{ error }}</p>
 

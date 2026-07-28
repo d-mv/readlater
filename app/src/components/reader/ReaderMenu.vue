@@ -26,8 +26,12 @@ const emit = defineEmits<{
   edit: [];
 }>();
 
-const canMarkRead = computed(() => props.bookmark.status === "ready" && props.bookmark.read_at === null);
-const canMarkUnread = computed(() => props.bookmark.status === "ready" && props.bookmark.read_at !== null);
+const canMarkRead = computed(
+  () => props.bookmark.status === "ready" && props.bookmark.read_at === null,
+);
+const canMarkUnread = computed(
+  () => props.bookmark.status === "ready" && props.bookmark.read_at !== null,
+);
 
 const open = ref(false);
 const menuRef = useTemplateRef<HTMLDivElement>("menuRef");
@@ -139,11 +143,21 @@ onUnmounted(() => {
         <IconWorld :size="16" />
         Share…
       </button>
-      <button class="menu-item archive-item" type="button" role="menuitem" @click="select(() => emit('archive'))">
+      <button
+        class="menu-item archive-item"
+        type="button"
+        role="menuitem"
+        @click="select(() => emit('archive'))"
+      >
         <IconArchive :size="16" />
         Archive
       </button>
-      <button class="menu-item delete-item menu-item-danger" type="button" role="menuitem" @click="onDelete">
+      <button
+        class="menu-item delete-item menu-item-danger"
+        type="button"
+        role="menuitem"
+        @click="onDelete"
+      >
         <IconTrash :size="16" />
         Delete
       </button>

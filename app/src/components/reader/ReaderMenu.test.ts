@@ -84,7 +84,9 @@ describe("ReaderMenu", () => {
   });
 
   test("links 'Open original' to the bookmark's URL in a new tab", async () => {
-    const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark({ url: "https://example.com/a" }) } });
+    const wrapper = mount(ReaderMenu, {
+      props: { bookmark: makeBookmark({ url: "https://example.com/a" }) },
+    });
     await openMenu(wrapper);
     const link = wrapper.find(".open-original");
     expect(link.attributes("href")).toBe("https://example.com/a");
@@ -117,7 +119,9 @@ describe("ReaderMenu", () => {
   });
 
   test("hides 'Mark as read' once the bookmark is already read", async () => {
-    const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark({ read_at: "2026-01-02T00:00:00Z" }) } });
+    const wrapper = mount(ReaderMenu, {
+      props: { bookmark: makeBookmark({ read_at: "2026-01-02T00:00:00Z" }) },
+    });
     await openMenu(wrapper);
     expect(wrapper.find(".mark-read").exists()).toBe(false);
   });

@@ -38,7 +38,11 @@ describe("CaptureView", () => {
     await flushPromises();
 
     expect(insert).toHaveBeenCalledWith(
-      expect.objectContaining({ url: "https://arc90.com/x", title: "A great article", status: "pending" }),
+      expect.objectContaining({
+        url: "https://arc90.com/x",
+        title: "A great article",
+        status: "pending",
+      }),
     );
     expect(wrapper.text()).toContain("Saved");
     expect(window.close).not.toHaveBeenCalled();
@@ -50,12 +54,18 @@ describe("CaptureView", () => {
   test("shows a duplicate dialog, and Continue refreshes the existing row then closes", async () => {
     query.url = "https://arc90.com/x";
     getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-    const single = vi.fn().mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });
+    const single = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });
     const select = vi.fn(() => ({ single }));
     const insert = vi.fn(() => ({ select }));
     from.mockReturnValueOnce({ insert });
 
-    const existing = { id: "existing-1", title: "Already saved", created_at: "2026-01-01T00:00:00Z" };
+    const existing = {
+      id: "existing-1",
+      title: "Already saved",
+      created_at: "2026-01-01T00:00:00Z",
+    };
     const maybeSingle = vi.fn().mockResolvedValue({ data: existing, error: null });
     const eq = vi.fn(() => ({ maybeSingle }));
     const lookupSelect = vi.fn(() => ({ eq }));

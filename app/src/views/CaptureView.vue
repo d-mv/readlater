@@ -68,7 +68,9 @@ onMounted(async () => {
       <button class="btn btn-secondary" type="button" @click="close">Close</button>
     </div>
     <div v-else-if="status === 'duplicate'" class="status-placeholder">
-      <p class="status-text">Already saved on {{ new Date(duplicateSavedAt!).toLocaleDateString() }}</p>
+      <p class="status-text">
+        Already saved on {{ new Date(duplicateSavedAt!).toLocaleDateString() }}
+      </p>
       <div class="duplicate-actions">
         <button class="btn btn-secondary" type="button" @click="close">Cancel</button>
         <button class="btn btn-primary" type="button" @click="onContinueRefresh">Continue</button>

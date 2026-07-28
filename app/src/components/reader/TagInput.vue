@@ -26,7 +26,12 @@ function onSubmit() {
   <div class="tag-input">
     <span v-for="tag in tags" :key="tag.id" class="tag-chip" :style="{ '--tag-color': tag.color }">
       {{ tag.name }}
-      <button class="remove-btn" type="button" :aria-label="`Remove ${tag.name}`" @click="emit('remove', tag.id)">
+      <button
+        class="remove-btn"
+        type="button"
+        :aria-label="`Remove ${tag.name}`"
+        @click="emit('remove', tag.id)"
+      >
         <IconX :size="12" />
       </button>
     </span>

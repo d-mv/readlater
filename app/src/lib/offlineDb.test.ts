@@ -56,14 +56,29 @@ describe("offlineDb", () => {
   });
 
   test("deleteArticle removes a cached article", async () => {
-    await offlineDb.putArticle({ id: "1", content_md: "x", images: [], cachedAt: "2026-01-01T00:00:00Z" });
+    await offlineDb.putArticle({
+      id: "1",
+      content_md: "x",
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
     await offlineDb.deleteArticle("1");
     expect(await offlineDb.getArticle("1")).toBeUndefined();
   });
 
   test("listCachedArticleIds returns the ids of every cached article", async () => {
-    await offlineDb.putArticle({ id: "1", content_md: "x", images: [], cachedAt: "2026-01-01T00:00:00Z" });
-    await offlineDb.putArticle({ id: "2", content_md: "y", images: [], cachedAt: "2026-01-01T00:00:00Z" });
+    await offlineDb.putArticle({
+      id: "1",
+      content_md: "x",
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+    await offlineDb.putArticle({
+      id: "2",
+      content_md: "y",
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
     expect(await offlineDb.listCachedArticleIds()).toEqual(expect.arrayContaining(["1", "2"]));
   });
 
@@ -97,6 +112,8 @@ describe("offlineDb", () => {
     };
     const createObjectUrl = (blob: Blob) => (blob === blobA ? "blob:a" : "blob:b");
 
-    expect(offlineDb.hydrateArticleContent(article, createObjectUrl)).toBe("![a](blob:a) and ![b](blob:b)");
+    expect(offlineDb.hydrateArticleContent(article, createObjectUrl)).toBe(
+      "![a](blob:a) and ![b](blob:b)",
+    );
   });
 });

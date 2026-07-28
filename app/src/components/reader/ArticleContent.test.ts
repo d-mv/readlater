@@ -19,7 +19,9 @@ describe("ArticleContent", () => {
   });
 
   test("renders markdown as HTML", () => {
-    const wrapper = mount(ArticleContent, { props: { contentMd: "# Hello\n\nSome **bold** text." } });
+    const wrapper = mount(ArticleContent, {
+      props: { contentMd: "# Hello\n\nSome **bold** text." },
+    });
     expect(wrapper.find("h1").text()).toBe("Hello");
     expect(wrapper.find("strong").text()).toBe("bold");
   });
@@ -49,7 +51,8 @@ describe("ArticleContent", () => {
 
   describe("youtube embed", () => {
     const youtubeProps = {
-      contentMd: "# A video\n\n![thumbnail](https://thumb.example/abc123.jpg)\n\nwelcome back to the show",
+      contentMd:
+        "# A video\n\n![thumbnail](https://thumb.example/abc123.jpg)\n\nwelcome back to the show",
       type: "youtube" as const,
       youtubeVideoId: "abc123",
       thumbnailUrl: "https://thumb.example/abc123.jpg",
@@ -87,7 +90,11 @@ describe("ArticleContent", () => {
 
     test("youtube type without a resolved video id (older bookmark) falls back to today's rendering", () => {
       const wrapper = mount(ArticleContent, {
-        props: { contentMd: "# A video\n\n![thumbnail](https://thumb.example/x.jpg)", type: "youtube", youtubeVideoId: null },
+        props: {
+          contentMd: "# A video\n\n![thumbnail](https://thumb.example/x.jpg)",
+          type: "youtube",
+          youtubeVideoId: null,
+        },
       });
       expect(wrapper.find("button.youtube-play").exists()).toBe(false);
       expect(wrapper.find("img").attributes("src")).toBe("https://thumb.example/x.jpg");
@@ -135,14 +142,31 @@ describe("ArticleContent", () => {
     });
 
     test("trims the toolbar to bold/italic/link/lists/heading/undo/redo, excluding image/table/mermaid/katex", () => {
-      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
       const toolbars = wrapper.findComponent(MdEditor).props("toolbars") as string[];
-      expect(toolbars).toEqual(expect.arrayContaining(["bold", "italic", "link", "unorderedList", "orderedList", "title", "revoke", "next"]));
-      expect(toolbars).not.toEqual(expect.arrayContaining(["image", "table", "mermaid", "formula"]));
+      expect(toolbars).toEqual(
+        expect.arrayContaining([
+          "bold",
+          "italic",
+          "link",
+          "unorderedList",
+          "orderedList",
+          "title",
+          "revoke",
+          "next",
+        ]),
+      );
+      expect(toolbars).not.toEqual(
+        expect.arrayContaining(["image", "table", "mermaid", "formula"]),
+      );
     });
 
     test("disables image upload and mermaid/katex/echarts rendering in the editor", () => {
-      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
       const editor = wrapper.findComponent(MdEditor);
       expect(editor.props("noUploadImg")).toBe(true);
       expect(editor.props("noMermaid")).toBe(true);
@@ -152,13 +176,17 @@ describe("ArticleContent", () => {
 
     test("binds the editor's theme to the app's theme store", () => {
       document.documentElement.dataset.theme = "dark";
-      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
       expect(wrapper.findComponent(MdEditor).props("theme")).toBe("dark");
     });
 
     test("starts single-pane (no split preview) on a narrow viewport, and includes a preview toggle", () => {
       window.innerWidth = 400;
-      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
       const editor = wrapper.findComponent(MdEditor);
       expect(editor.props("preview")).toBe(false);
       expect(editor.props("toolbars")).toEqual(expect.arrayContaining(["preview"]));
@@ -166,13 +194,19 @@ describe("ArticleContent", () => {
 
     test("starts split-screen on a wide viewport", () => {
       window.innerWidth = 1200;
-      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
       expect(wrapper.findComponent(MdEditor).props("preview")).toBe(true);
     });
 
     test("sanitizes the editor's live preview so raw HTML in the source can't carry an onerror/script payload", () => {
-      const wrapper = mount(ArticleContent, { props: { contentMd: "", editing: true, modelValue: "" } });
-      const sanitize = wrapper.findComponent(MdEditor).props("sanitize") as (html: string) => string;
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
+      const sanitize = wrapper.findComponent(MdEditor).props("sanitize") as (
+        html: string,
+      ) => string;
       const sanitized = sanitize('<script>alert(1)</script><img src=x onerror="alert(1)">');
       expect(sanitized).not.toContain("onerror");
       expect(sanitized).not.toContain("<script");

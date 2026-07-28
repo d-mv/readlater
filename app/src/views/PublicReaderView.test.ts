@@ -13,7 +13,15 @@ describe("PublicReaderView", () => {
 
   test("renders the bookmark when the RPC returns a public row", async () => {
     rpc.mockResolvedValue({
-      data: [{ id: "abc", title: "A public note", author: null, reading_time: null, content_md: "hello" }],
+      data: [
+        {
+          id: "abc",
+          title: "A public note",
+          author: null,
+          reading_time: null,
+          content_md: "hello",
+        },
+      ],
       error: null,
     });
 

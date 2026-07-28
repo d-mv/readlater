@@ -64,7 +64,9 @@ md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
   return defaultLinkOpen(tokens, idx, options, env, self);
 };
 
-const isYoutube = computed(() => props.type === "youtube" && !!props.youtubeVideoId && !props.editing);
+const isYoutube = computed(
+  () => props.type === "youtube" && !!props.youtubeVideoId && !props.editing,
+);
 const playing = ref(false);
 
 // The worker bakes the title and thumbnail into content_md as a markdown

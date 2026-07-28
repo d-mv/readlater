@@ -1,6 +1,9 @@
 import { onUnmounted } from "vue";
 
-export function useDebouncedFn<Args extends unknown[]>(fn: (...args: Args) => void, delayMs: number) {
+export function useDebouncedFn<Args extends unknown[]>(
+  fn: (...args: Args) => void,
+  delayMs: number,
+) {
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   function debounced(...args: Args) {

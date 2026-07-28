@@ -10,7 +10,8 @@ describe("parseYoutube", () => {
         uploader: "Some Channel",
         thumbnail: "https://i.ytimg.com/vi/abc123/maxresdefault.jpg",
       }),
-      uploadThumbnail: async (thumbnailUrl) => `https://storage.example.com/thumbs/${thumbnailUrl.split("/").pop()}`,
+      uploadThumbnail: async (thumbnailUrl) =>
+        `https://storage.example.com/thumbs/${thumbnailUrl.split("/").pop()}`,
     });
 
     expect(result.title).toBe("Building a resilient scraper");
@@ -18,7 +19,9 @@ describe("parseYoutube", () => {
     expect(result.youtube_video_id).toBe("abc123");
     expect(result.thumbnail_url).toBe("https://storage.example.com/thumbs/maxresdefault.jpg");
     expect(result.content_md).toContain("# Building a resilient scraper");
-    expect(result.content_md).toContain("![thumbnail](https://storage.example.com/thumbs/maxresdefault.jpg)");
+    expect(result.content_md).toContain(
+      "![thumbnail](https://storage.example.com/thumbs/maxresdefault.jpg)",
+    );
     expect(result.word_count).toBeNull();
     expect(result.reading_time).toBeNull();
   });

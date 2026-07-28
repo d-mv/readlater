@@ -36,7 +36,9 @@ describe("buildBookmarklet", () => {
 
   test("collapses whitespace outside of string literals but preserves it inside", () => {
     const source = "const  x  =  'a b';\n\nconst y = 1;";
-    const decoded = decodeURIComponent(buildBookmarklet(source, "https://readlater.mlnkv.net").slice("javascript:".length));
+    const decoded = decodeURIComponent(
+      buildBookmarklet(source, "https://readlater.mlnkv.net").slice("javascript:".length),
+    );
 
     expect(decoded).toBe("const x='a b';const y=1;");
   });

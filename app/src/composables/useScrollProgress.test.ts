@@ -14,7 +14,10 @@ function mountHost() {
   return mount(Host);
 }
 
-function setScrollMetrics(el: Element, { scrollTop, scrollHeight, clientHeight }: Record<string, number>) {
+function setScrollMetrics(
+  el: Element,
+  { scrollTop, scrollHeight, clientHeight }: Record<string, number>,
+) {
   Object.defineProperty(el, "scrollTop", { value: scrollTop, configurable: true });
   Object.defineProperty(el, "scrollHeight", { value: scrollHeight, configurable: true });
   Object.defineProperty(el, "clientHeight", { value: clientHeight, configurable: true });

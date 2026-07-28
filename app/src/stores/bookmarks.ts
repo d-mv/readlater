@@ -70,7 +70,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   // expressed as a single PostgREST filter on the bookmarks table — resolve
   // it as a separate lookup against bookmark_tags first.
   async function bookmarkIdsMatchingAllTags(tagIds: string[]): Promise<string[]> {
-    const { data } = await supabase.from("bookmark_tags").select("bookmark_id, tag_id").in("tag_id", tagIds);
+    const { data } = await supabase
+      .from("bookmark_tags")
+      .select("bookmark_id, tag_id")
+      .in("tag_id", tagIds);
     const counts = new Map<string, number>();
     for (const row of data ?? []) {
       counts.set(row.bookmark_id, (counts.get(row.bookmark_id) ?? 0) + 1);
@@ -236,13 +239,15 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const contentEdited = bookmark
       ? bookmark.content_edited
       : Boolean(
-          (await supabase.from("bookmarks").select("content_edited").eq("id", id).maybeSingle()).data
-            ?.content_edited,
+          (await supabase.from("bookmarks").select("content_edited").eq("id", id).maybeSingle())
+            .data?.content_edited,
         );
 
     if (
       contentEdited &&
-      !window.confirm("This was manually edited — refreshing will overwrite your changes. Continue?")
+      !window.confirm(
+        "This was manually edited — refreshing will overwrite your changes. Continue?",
+      )
     ) {
       return;
     }
@@ -332,14 +337,18 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     await supabase.from("bookmarks").update({ archived: true }).eq("id", id);
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) bookmark.archived = true;
-    await useOfflineCacheStore().removeCachedBookmark(id).catch(() => {});
+    await useOfflineCacheStore()
+      .removeCachedBookmark(id)
+      .catch(() => {});
   }
 
   async function remove(id: string) {
     await supabase.from("bookmarks").delete().eq("id", id);
     bookmarks.value = bookmarks.value.filter((b) => b.id !== id);
     await offlineDb.deleteBookmarkMeta(id).catch(() => {});
-    await useOfflineCacheStore().removeCachedBookmark(id).catch(() => {});
+    await useOfflineCacheStore()
+      .removeCachedBookmark(id)
+      .catch(() => {});
   }
 
   return {

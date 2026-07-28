@@ -36,18 +36,22 @@ describe("parseArticle", () => {
     expect(result.author).toContain("Arc90");
     expect(result.content_md).toContain("Arc90 published a bookmarklet");
     expect(result.content_md).not.toContain("Home");
-    expect(result.content_md.startsWith("# A short history of the readability algorithm")).toBe(false);
+    expect(result.content_md.startsWith("# A short history of the readability algorithm")).toBe(
+      false,
+    );
     expect(result.word_count).toBeGreaterThan(50);
     expect(result.reading_time).toBeGreaterThanOrEqual(1);
   });
 
   test("throws when the page has no extractable article content", async () => {
     const emptyHtml = "<html><body><nav>Home</nav></body></html>";
-    await expect(parseArticle("https://example.com/empty", async () => emptyHtml)).rejects.toThrow();
+    await expect(
+      parseArticle("https://example.com/empty", async () => emptyHtml),
+    ).rejects.toThrow();
   });
 
   test("falls back to renderHtml when the plain fetch yields no extractable content", async () => {
-    const shellHtml = "<html><body><div id=\"app\"></div></body></html>";
+    const shellHtml = '<html><body><div id="app"></div></body></html>';
 
     const result = await parseArticle(
       "https://www.perplexity.ai/search/example",
@@ -63,7 +67,11 @@ describe("parseArticle", () => {
     const emptyHtml = "<html><body><nav>Home</nav></body></html>";
 
     await expect(
-      parseArticle("https://example.com/empty", async () => emptyHtml, async () => emptyHtml),
+      parseArticle(
+        "https://example.com/empty",
+        async () => emptyHtml,
+        async () => emptyHtml,
+      ),
     ).rejects.toThrow();
   });
 

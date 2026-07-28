@@ -25,7 +25,9 @@ const emit = defineEmits<{
   toggleOffline: [id: string];
 }>();
 
-const iconComponent = computed(() => (props.bookmark.type === "youtube" ? IconBrandYoutube : IconFileText));
+const iconComponent = computed(() =>
+  props.bookmark.type === "youtube" ? IconBrandYoutube : IconFileText,
+);
 const meta = computed(() => listRowMeta(props.bookmark));
 const isRead = computed(() => props.bookmark.read_at !== null);
 const isPending = computed(
@@ -51,8 +53,17 @@ const displayTitle = computed(() => {
       </span>
       <span class="text">
         <span class="title-row">
-          <span class="title" :class="{ 'title-read': isRead, 'title-pending': isPending, 'title-failed': isFailed }">{{ displayTitle }}</span>
-          <IconWorld v-if="bookmark.is_public" :size="12" class="public-badge" aria-label="Shared publicly" />
+          <span
+            class="title"
+            :class="{ 'title-read': isRead, 'title-pending': isPending, 'title-failed': isFailed }"
+            >{{ displayTitle }}</span
+          >
+          <IconWorld
+            v-if="bookmark.is_public"
+            :size="12"
+            class="public-badge"
+            aria-label="Shared publicly"
+          />
         </span>
         <span class="meta">{{ meta }}</span>
       </span>

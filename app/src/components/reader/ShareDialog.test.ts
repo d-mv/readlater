@@ -36,7 +36,10 @@ describe("ShareDialog", () => {
 
   test("does not show the link field when not public", () => {
     const wrapper = mount(ShareDialog, {
-      props: { bookmark: makeBookmark({ is_public: false }), origin: "https://readlater.mlnkv.net" },
+      props: {
+        bookmark: makeBookmark({ is_public: false }),
+        origin: "https://readlater.mlnkv.net",
+      },
     });
     expect(wrapper.find(".link-field").exists()).toBe(false);
   });

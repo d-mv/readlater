@@ -6,9 +6,23 @@ const router = createRouter({
   routes: [
     { path: "/login", name: "login", component: () => import("../views/LoginView.vue") },
     { path: "/", name: "list", component: () => import("../views/ReadingListView.vue") },
-    { path: "/b/:id", name: "reader", component: () => import("../views/ReaderView.vue"), props: true },
-    { path: "/s/:id", name: "public", component: () => import("../views/PublicReaderView.vue"), props: true },
-    { path: "/share-target", name: "share-target", component: () => import("../views/ShareTargetView.vue") },
+    {
+      path: "/b/:id",
+      name: "reader",
+      component: () => import("../views/ReaderView.vue"),
+      props: true,
+    },
+    {
+      path: "/s/:id",
+      name: "public",
+      component: () => import("../views/PublicReaderView.vue"),
+      props: true,
+    },
+    {
+      path: "/share-target",
+      name: "share-target",
+      component: () => import("../views/ShareTargetView.vue"),
+    },
     { path: "/capture", name: "capture", component: () => import("../views/CaptureView.vue") },
   ],
 });

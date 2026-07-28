@@ -75,7 +75,10 @@ describe("useAuthStore", () => {
   });
 
   test("signOut clears the session", async () => {
-    signInWithPassword.mockResolvedValue({ data: { session: { user: { id: "u1" } } }, error: null });
+    signInWithPassword.mockResolvedValue({
+      data: { session: { user: { id: "u1" } } },
+      error: null,
+    });
     signOut.mockResolvedValue({ error: null });
 
     const store = useAuthStore();

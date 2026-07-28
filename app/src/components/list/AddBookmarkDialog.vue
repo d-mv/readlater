@@ -112,7 +112,9 @@ async function confirmDuplicate() {
       <div v-if="duplicate" class="duplicate-confirm">
         <p class="confirm-message">This URL is already saved. Add it again?</p>
         <div class="dialog-actions">
-          <button class="btn btn-secondary cancel-btn" type="button" @click="cancelDuplicate">Cancel</button>
+          <button class="btn btn-secondary cancel-btn" type="button" @click="cancelDuplicate">
+            Cancel
+          </button>
           <button
             class="btn btn-primary confirm-btn"
             type="button"
