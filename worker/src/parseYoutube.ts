@@ -1,17 +1,12 @@
-import { readingTimeFromDurationSeconds, wordCount } from "./reading";
-import { vttToPlainText } from "./vtt";
-
-export interface YtDlpMeta {
+export interface YoutubeMeta {
   id: string;
   title: string;
   uploader: string;
   thumbnail: string;
-  duration: number;
 }
 
 export interface YoutubeRunners {
-  fetchMeta: (url: string) => Promise<YtDlpMeta>;
-  fetchCaptions: (url: string) => Promise<string>;
+  fetchMeta: (url: string) => Promise<YoutubeMeta>;
   uploadThumbnail: (thumbnailUrl: string) => Promise<string>;
 }
 
@@ -21,17 +16,15 @@ export interface ParsedYoutube {
   youtube_video_id: string;
   thumbnail_url: string;
   content_md: string;
-  word_count: number;
-  reading_time: number;
+  word_count: null;
+  reading_time: null;
 }
 
 export async function parseYoutube(url: string, runners: YoutubeRunners): Promise<ParsedYoutube> {
   const meta = await runners.fetchMeta(url);
-  const captionsVtt = await runners.fetchCaptions(url);
-  const transcript = vttToPlainText(captionsVtt);
   const thumbnail_url = await runners.uploadThumbnail(meta.thumbnail);
 
-  const content_md = `# ${meta.title}\n\n![thumbnail](${thumbnail_url})\n\n${transcript}`;
+  const content_md = `# ${meta.title}\n\n![thumbnail](${thumbnail_url})`;
 
   return {
     title: meta.title,
@@ -39,7 +32,7 @@ export async function parseYoutube(url: string, runners: YoutubeRunners): Promis
     youtube_video_id: meta.id,
     thumbnail_url,
     content_md,
-    word_count: wordCount(transcript),
-    reading_time: readingTimeFromDurationSeconds(meta.duration),
+    word_count: null,
+    reading_time: null,
   };
 }

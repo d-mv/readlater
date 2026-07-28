@@ -20,7 +20,7 @@ flowchart TD
     Cap -->|free-form text| Ready[(status=ready, type=note)]
     Snippet -->|Turndown HTML→MD| Ready
     Pending --> Worker[VPS worker — Docker, polls every 15s]
-    Worker -->|fetch, retry via headless browser if too little extracted| Parse[Readability + Turndown / yt-dlp]
+    Worker -->|fetch, retry via headless browser if too little extracted| Parse[Readability + Turndown / YouTube oEmbed]
     Worker -->|write markdown, status=ready| DB[(Postgres: bookmarks, tags, bookmark_tags)]
     Ready --> DB
     Worker -->|upload YouTube thumbnails, random UUID paths| Storage[(Supabase Storage, public-read)]
@@ -260,18 +260,24 @@ used rather than failing the bookmark outright. A duplicate leading heading
 that repeats the article title is stripped from the converted markdown
 (`stripDuplicateTitleHeading`) before it's stored.
 
-**YouTube pipeline** (`worker/src/parseYoutube.ts`) — shells out to `yt-dlp`
-for metadata + auto-generated captions (`worker/src/ytDlpRunner.ts`), no HTML
-to convert so markdown is assembled by hand:
+**YouTube pipeline** (`worker/src/parseYoutube.ts`) — fetches title/author/
+thumbnail from YouTube's public oEmbed endpoint (`worker/src/youtubeMeta.ts`),
+no transcript, no HTML to convert so markdown is assembled by hand:
 ```ts
-const content_md = `# ${meta.title}\n\n![thumbnail](${thumbnail_url})\n\n${transcript}`;
+const content_md = `# ${meta.title}\n\n![thumbnail](${thumbnail_url})`;
 ```
 Thumbnails are uploaded to Supabase Storage first (`worker/src/storage.ts`,
 `youtube/${crypto.randomUUID()}.<ext>`) so `content_md` references the
-Storage URL, not the original YouTube CDN URL.
+Storage URL, not the original YouTube CDN URL. `word_count`/`reading_time`
+are `null` for YouTube bookmarks — the reader shows the embedded player
+instead of a transcript. (An earlier version shelled out to `yt-dlp` for
+metadata + auto-captions and derived reading time from duration; that was
+dropped because YouTube aggressively rate-limits/blocks scraping requests
+from datacenter IPs like Contabo's, and oEmbed is a lightweight, unauthenticated
+endpoint that doesn't hit the same wall.)
 
-**Reading time**: `Math.max(1, Math.round(wordCount / 200))` for articles;
-`Math.max(1, Math.round(durationSeconds / 60))` for video (`worker/src/reading.ts`).
+**Reading time**: `Math.max(1, Math.round(wordCount / 200))` for articles
+(`worker/src/reading.ts`); YouTube bookmarks have no reading time.
 
 **Retry UI**: the reader's failed-article view has a "Try again" button
 (`ReaderView.vue`) that resets the bookmark to `pending` so the worker
@@ -408,7 +414,7 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
 - `readlater-app` — `app/Dockerfile`, port 80, `/*`, Supabase URL and
   publishable key baked in as build args.
 - `readlater-worker` — `worker/Dockerfile`, no public port, only needs
-  outbound access to Supabase (+ YouTube/yt-dlp targets, + whatever the
+  outbound access to Supabase (+ YouTube's oEmbed endpoint, + whatever the
   headless-browser fallback needs to reach).
 - Bookmarklet — nothing to deploy. `bookmarklet/build.ts` bakes the app's
   origin into `bookmarklet/source.js` once; the built snippet is dragged to

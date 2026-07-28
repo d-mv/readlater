@@ -8,7 +8,3 @@ export function wordCount(text: string): number {
 export function readingTimeFromWordCount(words: number): number {
   return Math.max(1, Math.round(words / WORDS_PER_MINUTE));
 }
-
-export function readingTimeFromDurationSeconds(durationSeconds: number): number {
-  return Math.max(1, Math.round(durationSeconds / 60));
-}

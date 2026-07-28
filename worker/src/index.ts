@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { parseArticle } from "./parseArticle";
 import { parseYoutube } from "./parseYoutube";
-import { fetchCaptions, fetchMeta } from "./ytDlpRunner";
+import { fetchMeta } from "./youtubeMeta";
 import { makeThumbnailUploader } from "./storage";
 import { renderWithBrowser } from "./browserRender";
 
@@ -24,7 +24,7 @@ async function processBookmark(bookmark: Bookmark) {
   try {
     const result =
       bookmark.type === "youtube"
-        ? await parseYoutube(bookmark.url, { fetchMeta, fetchCaptions, uploadThumbnail })
+        ? await parseYoutube(bookmark.url, { fetchMeta, uploadThumbnail })
         : await parseArticle(bookmark.url, undefined, renderWithBrowser);
 
     await supabase

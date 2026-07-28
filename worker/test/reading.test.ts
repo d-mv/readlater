@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readingTimeFromWordCount, readingTimeFromDurationSeconds, wordCount } from "../src/reading";
+import { readingTimeFromWordCount, wordCount } from "../src/reading";
 
 describe("wordCount", () => {
   test("counts space-separated words", () => {
@@ -25,16 +25,5 @@ describe("readingTimeFromWordCount", () => {
   test("floors at 1 minute for short content", () => {
     expect(readingTimeFromWordCount(0)).toBe(1);
     expect(readingTimeFromWordCount(10)).toBe(1);
-  });
-});
-
-describe("readingTimeFromDurationSeconds", () => {
-  test("rounds video duration to the nearest minute", () => {
-    expect(readingTimeFromDurationSeconds(600)).toBe(10);
-    expect(readingTimeFromDurationSeconds(90)).toBe(2);
-  });
-
-  test("floors at 1 minute for very short videos", () => {
-    expect(readingTimeFromDurationSeconds(5)).toBe(1);
   });
 });
