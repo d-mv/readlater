@@ -163,6 +163,13 @@ describe("ArticleContent", () => {
       );
     });
 
+    test("sets the editor's toolbar and dialog language to English, not the library's zh-CN default", () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
+      expect(wrapper.findComponent(MdEditor).props("language")).toBe("en-US");
+    });
+
     test("disables image upload and mermaid/katex/echarts rendering in the editor", () => {
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },

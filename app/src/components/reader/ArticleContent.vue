@@ -122,6 +122,7 @@ const safeHtml = computed(() =>
       :no-mermaid="true"
       :no-katex="true"
       :no-echarts="true"
+      language="en-US"
       placeholder="Write in markdown…"
     />
     <!-- eslint-disable-next-line vue/no-v-html -->
