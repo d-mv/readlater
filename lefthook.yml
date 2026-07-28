@@ -49,7 +49,3 @@ pre-push:
       root: "app/"
       glob: "*.{ts,vue}"
       run: bun run build
-    build-bookmarklet:
-      root: "bookmarklet/"
-      glob: "*.{ts,js}"
-      run: bun run build
