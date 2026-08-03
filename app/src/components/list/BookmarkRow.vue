@@ -8,6 +8,7 @@ import {
   IconDownload,
   IconCheck,
   IconWorld,
+  IconLanguageHiragana,
 } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
 import { listRowMeta } from "../../utils/format";
@@ -35,6 +36,7 @@ const isPending = computed(
 );
 const isFailed = computed(() => props.bookmark.status === "failed");
 const isUnread = computed(() => !props.bookmark.archived && !isRead.value);
+const isTranslated = computed(() => props.bookmark.translated_content_md !== null);
 const displayTitle = computed(() => {
   if (props.bookmark.title) return props.bookmark.title;
   if (isFailed.value) return "Failed to process";
@@ -65,7 +67,15 @@ const displayTitle = computed(() => {
             aria-label="Shared publicly"
           />
         </span>
-        <span class="meta">{{ meta }}</span>
+        <span class="meta-row">
+          <span class="meta">{{ meta }}</span>
+          <IconLanguageHiragana
+            v-if="isTranslated"
+            :size="12"
+            class="translated-badge"
+            aria-label="Translated"
+          />
+        </span>
       </span>
     </button>
     <button
@@ -198,9 +208,24 @@ const displayTitle = computed(() => {
   }
 }
 
+.meta-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  margin-top: 4px;
+}
+
 .meta {
   font-size: 12px;
   color: var(--rl-text-muted);
-  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.translated-badge {
+  flex-shrink: 0;
+  color: var(--rl-text-muted);
 }
 </style>
