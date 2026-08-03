@@ -47,6 +47,8 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     author: null,
     excerpt: null,
     content_md: "content",
+    translated_content_md: null,
+    translated_lang: null,
     thumbnail_url: null,
     youtube_video_id: null,
     content_edited: false,
@@ -474,6 +476,43 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks).toHaveLength(0);
   });
 
+  test("translateBookmark invokes the translate edge function with the bookmark id and caches the result locally", async () => {
+    const rows = [makeBookmark({ id: "1", content_md: "Bonjour" })];
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+    });
+    invoke.mockResolvedValue({
+      data: { translated_text: "Hello", translated_lang: "EN" },
+      error: null,
+    });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    const result = await store.translateBookmark("1", "Bonjour", "EN");
+
+    expect(invoke).toHaveBeenCalledWith("translate", {
+      body: { bookmark_id: "1", text: "Bonjour", target_lang: "EN" },
+    });
+    expect(result).toEqual({ translatedText: "Hello", error: null });
+    expect(store.bookmarks[0]?.translated_content_md).toBe("Hello");
+    expect(store.bookmarks[0]?.translated_lang).toBe("EN");
+  });
+
+  test("translateBookmark propagates an error from the edge function without touching local state", async () => {
+    const rows = [makeBookmark({ id: "1", content_md: "Bonjour" })];
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+    });
+    invoke.mockResolvedValue({ data: null, error: { message: "DeepL error" } });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    const result = await store.translateBookmark("1", "Bonjour", "EN");
+
+    expect(result).toEqual({ translatedText: null, error: "DeepL error" });
+    expect(store.bookmarks[0]?.translated_content_md).toBeNull();
+  });
+
   test("setPublic updates is_public both remotely and in local state", async () => {
     const rows = [makeBookmark({ id: "1", is_public: false })];
     const eq = vi.fn().mockResolvedValue({ error: null });
@@ -605,11 +644,42 @@ describe("useBookmarksStore", () => {
       word_count: 3,
       reading_time: 1,
       content_edited: true,
+      translated_content_md: null,
+      translated_lang: null,
     });
     expect(eq).toHaveBeenCalledWith("id", "1");
     expect(store.bookmarks[0]?.title).toBe("New title");
     expect(store.bookmarks[0]?.content_md).toBe("new content here");
     expect(store.bookmarks[0]?.content_edited).toBe(true);
+  });
+
+  test("updateContent clears a previously cached translation, since it no longer matches the edited text", async () => {
+    const rows = [
+      makeBookmark({
+        id: "1",
+        content_md: "old content",
+        translated_content_md: "stale translation",
+        translated_lang: "EN",
+      }),
+    ];
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq }));
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      update,
+    });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.updateContent("1", {
+      title: "Title",
+      content_md: "new content here",
+      word_count: 3,
+      reading_time: 1,
+    });
+
+    expect(store.bookmarks[0]?.translated_content_md).toBeNull();
+    expect(store.bookmarks[0]?.translated_lang).toBeNull();
   });
 
   test("add reports a duplicate via the DB unique index when the URL wasn't in the local list", async () => {

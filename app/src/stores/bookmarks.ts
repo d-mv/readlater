@@ -221,6 +221,24 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return { error: null };
   }
 
+  async function translateBookmark(
+    id: string,
+    text: string,
+    targetLang: string,
+  ): Promise<{ translatedText: string | null; error: string | null }> {
+    const { data, error } = await supabase.functions.invoke("translate", {
+      body: { bookmark_id: id, text, target_lang: targetLang },
+    });
+    if (error) return { translatedText: null, error: error.message };
+
+    const bookmark = bookmarks.value.find((b) => b.id === id);
+    if (bookmark) {
+      bookmark.translated_content_md = data.translated_text;
+      bookmark.translated_lang = data.translated_lang;
+    }
+    return { translatedText: data.translated_text, error: null };
+  }
+
   async function findByNormalizedUrl(url: string) {
     const normalized = url.toLowerCase().replace(/\/+$/, "");
     const { data } = await supabase
@@ -280,7 +298,15 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     id: string,
     fields: { title: string; content_md: string; word_count: number; reading_time: number },
   ) {
-    const update = { ...fields, content_edited: true };
+    // Editing content invalidates any cached translation — it was translated
+    // from text that no longer matches, so keeping it would silently show a
+    // stale translation on next open.
+    const update = {
+      ...fields,
+      content_edited: true,
+      translated_content_md: null,
+      translated_lang: null,
+    };
     await supabase.from("bookmarks").update(update).eq("id", id);
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) Object.assign(bookmark, update);
@@ -369,6 +395,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     add,
     addNote,
     addSnippet,
+    translateBookmark,
     refresh,
     updateContent,
     fetchOne,

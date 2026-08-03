@@ -426,3 +426,8 @@ verify_jwt = false
 # logged-in browser session.
 [functions.snippet]
 verify_jwt = true
+
+# translate runs as the caller's own Supabase session, same as snippet — it's
+# only ever invoked from the logged-in reader view.
+[functions.translate]
+verify_jwt = true

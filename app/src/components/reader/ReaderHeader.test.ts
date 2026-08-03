@@ -14,6 +14,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     author: null,
     excerpt: null,
     content_md: null,
+    translated_content_md: null,
+    translated_lang: null,
     thumbnail_url: null,
     youtube_video_id: null,
     content_edited: false,
@@ -65,5 +67,14 @@ describe("ReaderHeader", () => {
     await wrapper.find(".menu-trigger").trigger("click");
     await wrapper.find(".edit-item").trigger("click");
     expect(wrapper.emitted("edit")).toHaveLength(1);
+  });
+
+  test("forwards translate from the menu", async () => {
+    const wrapper = mount(ReaderHeader, {
+      props: { bookmark: makeBookmark({ url: null, type: "note", content_md: "Some text" }) },
+    });
+    await wrapper.find(".menu-trigger").trigger("click");
+    await wrapper.find(".translate-item").trigger("click");
+    expect(wrapper.emitted("translate")).toHaveLength(1);
   });
 });

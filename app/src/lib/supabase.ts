@@ -24,6 +24,8 @@ export interface Bookmark {
   author: string | null;
   excerpt: string | null;
   content_md: string | null;
+  translated_content_md: string | null;
+  translated_lang: string | null;
   thumbnail_url: string | null;
   youtube_video_id: string | null;
   content_edited: boolean;

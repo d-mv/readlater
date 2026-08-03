@@ -13,6 +13,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     author: null,
     excerpt: null,
     content_md: null,
+    translated_content_md: null,
+    translated_lang: null,
     thumbnail_url: null,
     youtube_video_id: null,
     content_edited: false,

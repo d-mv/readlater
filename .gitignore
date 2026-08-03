@@ -7,3 +7,4 @@ supabase/.branches
 supabase/.temp
 bookmarklet/dist.txt
 error.txt
+deno.lock

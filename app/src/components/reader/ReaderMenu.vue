@@ -4,6 +4,7 @@ import {
   IconArchive,
   IconDotsVertical,
   IconExternalLink,
+  IconLanguage,
   IconMail,
   IconMailOpened,
   IconPencil,
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   markRead: [];
   markUnread: [];
   edit: [];
+  translate: [];
 }>();
 
 const canMarkRead = computed(
@@ -32,6 +34,17 @@ const canMarkRead = computed(
 const canMarkUnread = computed(
   () => props.bookmark.status === "ready" && props.bookmark.read_at !== null,
 );
+
+// Bookmarks with a URL have a real page to hand off to Google Translate's
+// page proxy. URL-less bookmarks (notes/snippets) have no such page, so
+// those are translated inline instead — see the translate-item button below.
+const translateUrl = computed(() => {
+  if (!props.bookmark.url) return null;
+  const targetLang = navigator.language.split("-")[0] || "en";
+  return `https://translate.google.com/translate?sl=auto&tl=${targetLang}&u=${encodeURIComponent(props.bookmark.url)}`;
+});
+
+const canTranslateInline = computed(() => !props.bookmark.url && !!props.bookmark.content_md);
 
 const open = ref(false);
 const menuRef = useTemplateRef<HTMLDivElement>("menuRef");
@@ -104,6 +117,28 @@ onUnmounted(() => {
         <IconExternalLink :size="16" />
         Open original
       </a>
+      <a
+        v-if="translateUrl"
+        class="menu-item translate-item"
+        :href="translateUrl"
+        target="_blank"
+        rel="noopener"
+        role="menuitem"
+        @click="close"
+      >
+        <IconLanguage :size="16" />
+        Translate…
+      </a>
+      <button
+        v-else-if="canTranslateInline"
+        class="menu-item translate-item"
+        type="button"
+        role="menuitem"
+        @click="select(() => emit('translate'))"
+      >
+        <IconLanguage :size="16" />
+        Translate…
+      </button>
       <button
         class="menu-item edit-item"
         type="button"

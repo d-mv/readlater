@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
+import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { IconLoader2, IconAlertTriangle, IconRefresh } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
@@ -129,6 +129,55 @@ async function onSaveEdit() {
   });
   editing.value = false;
 }
+
+const translating = ref(false);
+const translateError = ref<string | null>(null);
+// A cached translation (bookmark.translated_content_md) is shown by default;
+// this only tracks the user explicitly asking to see the original instead.
+const showOriginal = ref(false);
+
+const displayContentMd = computed(() => {
+  if (!bookmark.value) return null;
+  if (showOriginal.value || !bookmark.value.translated_content_md) return bookmark.value.content_md;
+  return bookmark.value.translated_content_md;
+});
+
+async function onTranslate() {
+  if (!bookmark.value?.content_md) return;
+  // Already translated and cached server-side — just make sure it's shown,
+  // without spending another DeepL call.
+  if (bookmark.value.translated_content_md) {
+    showOriginal.value = false;
+    return;
+  }
+  translateError.value = null;
+  translating.value = true;
+  const targetLang = (navigator.language.split("-")[0] || "en").toUpperCase();
+  const { error } = await store.translateBookmark(
+    bookmark.value.id,
+    bookmark.value.content_md,
+    targetLang,
+  );
+  translating.value = false;
+  if (error) {
+    translateError.value = error;
+    return;
+  }
+  showOriginal.value = false;
+}
+
+function onToggleOriginal() {
+  showOriginal.value = !showOriginal.value;
+}
+
+watch(
+  () => props.id,
+  () => {
+    showOriginal.value = false;
+    translateError.value = null;
+    translating.value = false;
+  },
+);
 </script>
 
 <template>
@@ -143,6 +192,7 @@ async function onSaveEdit() {
       @mark-read="onMarkRead"
       @mark-unread="onMarkUnread"
       @edit="onEdit"
+      @translate="onTranslate"
     />
     <div ref="scrollContainer" class="scroll-area">
       <template v-if="bookmark.status === 'ready'">
@@ -155,8 +205,23 @@ async function onSaveEdit() {
           </button>
           <button class="btn-primary save-edit-btn" type="button" @click="onSaveEdit">Save</button>
         </div>
+        <div
+          v-if="!editing && (translating || translateError || bookmark.translated_content_md)"
+          class="translate-bar"
+        >
+          <span v-if="translating" class="translate-status">Translating…</span>
+          <span v-else-if="translateError" class="translate-status translate-status-error">{{
+            translateError
+          }}</span>
+          <template v-else>
+            <span class="translate-status">{{ showOriginal ? "Original" : "Translated" }}</span>
+            <button class="translate-toggle" type="button" @click="onToggleOriginal">
+              {{ showOriginal ? "Show translation" : "Show original" }}
+            </button>
+          </template>
+        </div>
         <ArticleContent
-          :content-md="bookmark.content_md"
+          :content-md="editing ? bookmark.content_md : displayContentMd"
           :type="bookmark.type"
           :youtube-video-id="bookmark.youtube_video_id"
           :thumbnail-url="bookmark.thumbnail_url"
@@ -244,6 +309,36 @@ async function onSaveEdit() {
   justify-content: flex-end;
   gap: 8px;
   margin: 0 0 12px;
+}
+
+.translate-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 8px 10px;
+  border-radius: var(--rl-radius);
+  background: var(--rl-bg);
+  font-family: var(--rl-font-ui);
+  font-size: 13px;
+}
+
+.translate-status {
+  color: var(--rl-text-secondary);
+}
+
+.translate-status-error {
+  color: var(--rl-danger);
+}
+
+.translate-toggle {
+  border: none;
+  background: transparent;
+  color: var(--rl-accent);
+  font-family: var(--rl-font-ui);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
 }
 
 .btn-secondary,

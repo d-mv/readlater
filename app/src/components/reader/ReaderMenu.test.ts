@@ -14,6 +14,8 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     author: null,
     excerpt: null,
     content_md: null,
+    translated_content_md: null,
+    translated_lang: null,
     thumbnail_url: null,
     youtube_video_id: null,
     content_edited: false,
@@ -91,6 +93,41 @@ describe("ReaderMenu", () => {
     const link = wrapper.find(".open-original");
     expect(link.attributes("href")).toBe("https://example.com/a");
     expect(link.attributes("target")).toBe("_blank");
+  });
+
+  test("links 'Translate…' to a Google Translate page-proxy URL when the bookmark has a URL", async () => {
+    const wrapper = mount(ReaderMenu, {
+      props: { bookmark: makeBookmark({ url: "https://example.com/a" }) },
+    });
+    await openMenu(wrapper);
+    const link = wrapper.find(".translate-item");
+    expect(link.exists()).toBe(true);
+    expect(link.attributes("href")).toContain("translate.google.com/translate?");
+    expect(link.attributes("href")).toContain(encodeURIComponent("https://example.com/a"));
+    expect(link.attributes("target")).toBe("_blank");
+  });
+
+  test("emits translate and closes the menu when the translate item is clicked for URL-less bookmarks (notes)", async () => {
+    const wrapper = mount(ReaderMenu, {
+      props: {
+        bookmark: makeBookmark({ url: null, type: "note", content_md: "Bonjour le monde" }),
+      },
+    });
+    await openMenu(wrapper);
+    const item = wrapper.find(".translate-item");
+    expect(item.exists()).toBe(true);
+    expect(item.element.tagName).toBe("BUTTON");
+    await item.trigger("click");
+    expect(wrapper.emitted("translate")).toHaveLength(1);
+    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+  });
+
+  test("hides 'Translate…' when there is neither a URL nor content", async () => {
+    const wrapper = mount(ReaderMenu, {
+      props: { bookmark: makeBookmark({ url: null, type: "note", content_md: null }) },
+    });
+    await openMenu(wrapper);
+    expect(wrapper.find(".translate-item").exists()).toBe(false);
   });
 
   test("emits delete when confirmed", async () => {

@@ -3,8 +3,8 @@ import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import type { Bookmark } from "../lib/supabase";
 
-const { from } = vi.hoisted(() => ({ from: vi.fn() }));
-vi.mock("../lib/supabase", () => ({ supabase: { from } }));
+const { from, invoke } = vi.hoisted(() => ({ from: vi.fn(), invoke: vi.fn() }));
+vi.mock("../lib/supabase", () => ({ supabase: { from, functions: { invoke } } }));
 
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -20,6 +20,8 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     author: null,
     excerpt: null,
     content_md: null,
+    translated_content_md: null,
+    translated_lang: null,
     thumbnail_url: null,
     youtube_video_id: null,
     content_edited: false,
@@ -135,6 +137,8 @@ describe("ReaderView", () => {
         word_count: 4,
         reading_time: 1,
         content_edited: true,
+        translated_content_md: null,
+        translated_lang: null,
       });
       expect(wrapper.find("h1.title").text()).toBe("Edited title");
       expect(wrapper.find("input.title-input").exists()).toBe(false);
@@ -158,6 +162,120 @@ describe("ReaderView", () => {
 
       expect(update).not.toHaveBeenCalled();
       expect(wrapper.find("h1.title").text()).toBe("Original title");
+    });
+  });
+
+  describe("translate", () => {
+    function mockReadyNote(bookmark: Bookmark) {
+      const single = vi.fn().mockResolvedValue({ data: bookmark, error: null });
+      const eqSelect = vi.fn(() => ({ single }));
+      const select = vi.fn(() => ({ eq: eqSelect }));
+      from.mockReturnValue({ select });
+    }
+
+    async function clickTranslate(wrapper: ReturnType<typeof mount>) {
+      await wrapper.find(".menu-trigger").trigger("click");
+      await wrapper.find(".translate-item").trigger("click");
+    }
+
+    test("replaces the rendered content with the translation and offers a 'Show original' toggle", async () => {
+      const note = makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "note",
+        content_md: "Bonjour le monde",
+      });
+      mockReadyNote(note);
+      invoke.mockResolvedValue({
+        data: { translated_text: "Hello world", translated_lang: "EN" },
+        error: null,
+      });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await clickTranslate(wrapper);
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledWith("translate", {
+        body: { bookmark_id: "1", text: "Bonjour le monde", target_lang: expect.any(String) },
+      });
+      expect(wrapper.text()).toContain("Translated");
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
+        "Hello world",
+      );
+
+      await wrapper.find(".translate-toggle").trigger("click");
+      expect(wrapper.text()).toContain("Original");
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
+        "Bonjour le monde",
+      );
+    });
+
+    test("shows the edge function's error message when translation fails", async () => {
+      const note = makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "note",
+        content_md: "Bonjour",
+      });
+      mockReadyNote(note);
+      invoke.mockResolvedValue({ data: null, error: { message: "DeepL error" } });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await clickTranslate(wrapper);
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("DeepL error");
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe("Bonjour");
+    });
+
+    test("shows a bookmark's cached translation by default without calling DeepL again", async () => {
+      const note = makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "note",
+        content_md: "Bonjour le monde",
+        translated_content_md: "Hello world",
+        translated_lang: "EN",
+      });
+      mockReadyNote(note);
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      expect(invoke).not.toHaveBeenCalled();
+      expect(wrapper.text()).toContain("Translated");
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
+        "Hello world",
+      );
+    });
+
+    test("clicking Translate with a cached translation just shows it, without re-calling DeepL", async () => {
+      const note = makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "note",
+        content_md: "Bonjour le monde",
+        translated_content_md: "Hello world",
+        translated_lang: "EN",
+      });
+      mockReadyNote(note);
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await wrapper.find(".translate-toggle").trigger("click"); // switch to original first
+      await clickTranslate(wrapper);
+      await flushPromises();
+
+      expect(invoke).not.toHaveBeenCalled();
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
+        "Hello world",
+      );
     });
   });
 });
