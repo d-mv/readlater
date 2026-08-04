@@ -18,7 +18,7 @@ export interface Tag {
 export interface Bookmark {
   id: string;
   url: string | null;
-  type: "article" | "youtube" | "note";
+  type: "article" | "youtube" | "note" | "pdf";
   status: "pending" | "processing" | "ready" | "failed";
   title: string | null;
   author: string | null;
@@ -38,6 +38,12 @@ export interface Bookmark {
   error_message: string | null;
   created_at: string;
   processed_at: string | null;
+  // PDF-only: path of the original file in the bookmark-pdfs storage bucket
+  // (null once the user trashes it), whether text extraction succeeded, and
+  // the persisted markdown/original view toggle.
+  pdf_path: string | null;
+  pdf_parsed: boolean;
+  view_mode: "markdown" | "original" | null;
 }
 
 export interface DuplicateBookmark {

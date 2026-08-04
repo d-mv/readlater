@@ -170,12 +170,66 @@ function onToggleOriginal() {
   showOriginal.value = !showOriginal.value;
 }
 
+// PDFs: view_mode is the persisted user choice; absent that, default to
+// markdown when extraction succeeded, else fall back to the original.
+const pdfSignedUrl = ref<string | null>(null);
+
+const pdfEffectiveViewMode = computed<"markdown" | "original">(() => {
+  if (!bookmark.value || bookmark.value.type !== "pdf") return "markdown";
+  if (bookmark.value.view_mode) return bookmark.value.view_mode;
+  return bookmark.value.pdf_parsed ? "markdown" : "original";
+});
+
+// Both views are only available once parsing succeeded and the original
+// hasn't been trashed — otherwise there's only one view to show, forced.
+const canTogglePdfView = computed(
+  () => bookmark.value?.type === "pdf" && bookmark.value.pdf_parsed && !!bookmark.value.pdf_path,
+);
+
+const showPdfOriginal = computed(
+  () =>
+    bookmark.value?.type === "pdf" &&
+    !!bookmark.value.pdf_path &&
+    pdfEffectiveViewMode.value === "original",
+);
+
+watch(
+  showPdfOriginal,
+  async (show) => {
+    if (!show || !bookmark.value?.pdf_path) {
+      pdfSignedUrl.value = null;
+      return;
+    }
+    const { url: signedUrl } = await store.getPdfSignedUrl(bookmark.value.pdf_path);
+    pdfSignedUrl.value = signedUrl;
+  },
+  { immediate: true },
+);
+
+function onTogglePdfView() {
+  if (!bookmark.value) return;
+  const next = pdfEffectiveViewMode.value === "markdown" ? "original" : "markdown";
+  store.setViewMode(bookmark.value.id, next);
+}
+
+async function onOpenOriginalPdf() {
+  if (!bookmark.value?.pdf_path) return;
+  const { url: signedUrl } = await store.getPdfSignedUrl(bookmark.value.pdf_path);
+  if (signedUrl) window.open(signedUrl, "_blank", "noopener");
+}
+
+async function onTrashOriginalPdf() {
+  if (!bookmark.value) return;
+  await store.trashOriginalPdf(bookmark.value.id);
+}
+
 watch(
   () => props.id,
   () => {
     showOriginal.value = false;
     translateError.value = null;
     translating.value = false;
+    pdfSignedUrl.value = null;
   },
 );
 </script>
@@ -193,6 +247,8 @@ watch(
       @mark-unread="onMarkUnread"
       @edit="onEdit"
       @translate="onTranslate"
+      @open-original-pdf="onOpenOriginalPdf"
+      @trash-original-pdf="onTrashOriginalPdf"
     />
     <div ref="scrollContainer" class="scroll-area">
       <template v-if="bookmark.status === 'ready'">
@@ -220,6 +276,14 @@ watch(
             </button>
           </template>
         </div>
+        <div v-if="!editing && canTogglePdfView" class="pdf-view-bar">
+          <span class="pdf-view-status">{{
+            pdfEffectiveViewMode === "original" ? "Original PDF" : "Markdown"
+          }}</span>
+          <button class="pdf-view-toggle" type="button" @click="onTogglePdfView">
+            {{ pdfEffectiveViewMode === "original" ? "Show markdown" : "Show original PDF" }}
+          </button>
+        </div>
         <ArticleContent
           :content-md="editing ? bookmark.content_md : displayContentMd"
           :type="bookmark.type"
@@ -227,6 +291,8 @@ watch(
           :thumbnail-url="bookmark.thumbnail_url"
           :editing="editing"
           :model-value="draftContent"
+          :show-pdf-original="showPdfOriginal"
+          :pdf-url="pdfSignedUrl"
           @update:model-value="draftContent = $event"
         />
       </template>
@@ -332,6 +398,32 @@ watch(
 }
 
 .translate-toggle {
+  border: none;
+  background: transparent;
+  color: var(--rl-accent);
+  font-family: var(--rl-font-ui);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pdf-view-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 8px 10px;
+  border-radius: var(--rl-radius);
+  background: var(--rl-bg);
+  font-family: var(--rl-font-ui);
+  font-size: 13px;
+}
+
+.pdf-view-status {
+  color: var(--rl-text-secondary);
+}
+
+.pdf-view-toggle {
   border: none;
   background: transparent;
   color: var(--rl-accent);

@@ -2,13 +2,22 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Bookmark } from "../lib/supabase";
 
-const { from, getUser, invoke } = vi.hoisted(() => ({
+const { from, getUser, invoke, storageRemove, storageCreateSignedUrl } = vi.hoisted(() => ({
   from: vi.fn(),
   getUser: vi.fn(),
   invoke: vi.fn(),
+  storageRemove: vi.fn(),
+  storageCreateSignedUrl: vi.fn(),
 }));
 vi.mock("../lib/supabase", () => ({
-  supabase: { from, auth: { getUser }, functions: { invoke } },
+  supabase: {
+    from,
+    auth: { getUser },
+    functions: { invoke },
+    storage: {
+      from: () => ({ remove: storageRemove, createSignedUrl: storageCreateSignedUrl }),
+    },
+  },
 }));
 
 const {
@@ -61,6 +70,9 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     error_message: null,
     created_at: "2026-01-01T00:00:00Z",
     processed_at: "2026-01-01T00:01:00Z",
+    pdf_path: null,
+    pdf_parsed: false,
+    view_mode: null,
     ...overrides,
   };
 }
@@ -474,6 +486,141 @@ describe("useBookmarksStore", () => {
 
     expect(result.error).toBe("snippet is empty");
     expect(store.bookmarks).toHaveLength(0);
+  });
+
+  test("addFile invokes file-import for a markdown file and prepends the returned bookmark", async () => {
+    const inserted = makeBookmark({ id: "file-1", url: null, type: "note", content_md: "# hi" });
+    invoke.mockResolvedValue({ data: { bookmark: inserted }, error: null });
+    const file = new File(["# hi"], "notes.md", { type: "text/markdown" });
+
+    const store = useBookmarksStore();
+    const result = await store.addFile(file);
+
+    expect(invoke).toHaveBeenCalledWith(
+      "file-import",
+      expect.objectContaining({ body: expect.objectContaining({ filename: "notes.md" }) }),
+    );
+    expect(result.error).toBeNull();
+    expect(store.bookmarks[0]?.id).toBe("file-1");
+  });
+
+  test("addFile rejects unsupported extensions without calling the edge function", async () => {
+    const store = useBookmarksStore();
+    const result = await store.addFile(new File(["x"], "legacy.doc"));
+
+    expect(result.error).toBeTruthy();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  test("addFile rejects an oversized markdown file without calling the edge function", async () => {
+    const store = useBookmarksStore();
+    const big = "a".repeat(500 * 1024 + 1);
+    const result = await store.addFile(new File([big], "big.md"));
+
+    expect(result.error).toContain("500KB");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  test("addPdf invokes pdf-import and prepends the returned bookmark", async () => {
+    const inserted = makeBookmark({
+      id: "pdf-1",
+      url: null,
+      type: "pdf",
+      pdf_path: "user-1/abc.pdf",
+      pdf_parsed: true,
+    });
+    invoke.mockResolvedValue({ data: { bookmark: inserted }, error: null });
+    const file = new File(["%PDF-1.4"], "report.pdf", { type: "application/pdf" });
+
+    const store = useBookmarksStore();
+    const result = await store.addPdf(file);
+
+    expect(invoke).toHaveBeenCalledWith(
+      "pdf-import",
+      expect.objectContaining({ body: expect.objectContaining({ filename: "report.pdf" }) }),
+    );
+    expect(result.error).toBeNull();
+    expect(store.bookmarks[0]?.id).toBe("pdf-1");
+  });
+
+  test("addPdf rejects a file over the 20MB limit without calling the edge function", async () => {
+    const store = useBookmarksStore();
+    const big = new Uint8Array(20 * 1024 * 1024 + 1);
+    const result = await store.addPdf(new File([big], "big.pdf"));
+
+    expect(result.error).toContain("20MB");
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  test("setViewMode persists the toggle and updates local state", async () => {
+    const rows = [
+      makeBookmark({ id: "1", type: "pdf", pdf_path: "user-1/a.pdf", pdf_parsed: true }),
+    ];
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+    });
+    const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    from.mockReturnValue({ update });
+
+    await store.setViewMode("1", "original");
+
+    expect(update).toHaveBeenCalledWith({ view_mode: "original" });
+    expect(store.bookmarks[0]?.view_mode).toBe("original");
+  });
+
+  test("getPdfSignedUrl returns a signed url on success", async () => {
+    storageCreateSignedUrl.mockResolvedValue({
+      data: { signedUrl: "https://example.com/signed" },
+      error: null,
+    });
+
+    const store = useBookmarksStore();
+    const result = await store.getPdfSignedUrl("user-1/a.pdf");
+
+    expect(storageCreateSignedUrl).toHaveBeenCalledWith("user-1/a.pdf", 60);
+    expect(result).toEqual({ url: "https://example.com/signed", error: null });
+  });
+
+  test("getPdfSignedUrl propagates a storage error", async () => {
+    storageCreateSignedUrl.mockResolvedValue({ data: null, error: { message: "not found" } });
+
+    const store = useBookmarksStore();
+    const result = await store.getPdfSignedUrl("user-1/missing.pdf");
+
+    expect(result).toEqual({ url: null, error: "not found" });
+  });
+
+  test("trashOriginalPdf removes the storage object and clears pdf_path locally", async () => {
+    const rows = [
+      makeBookmark({ id: "1", type: "pdf", pdf_path: "user-1/a.pdf", pdf_parsed: true }),
+    ];
+    from.mockReturnValue({
+      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+    });
+    const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+    storageRemove.mockResolvedValue({ error: null });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    from.mockReturnValue({ update });
+
+    const result = await store.trashOriginalPdf("1");
+
+    expect(storageRemove).toHaveBeenCalledWith(["user-1/a.pdf"]);
+    expect(update).toHaveBeenCalledWith({ pdf_path: null, view_mode: "markdown" });
+    expect(result.error).toBeNull();
+    expect(store.bookmarks[0]?.pdf_path).toBeNull();
+    expect(store.bookmarks[0]?.view_mode).toBe("markdown");
+  });
+
+  test("trashOriginalPdf is a no-op when there's no original to trash", async () => {
+    const result = await useBookmarksStore().trashOriginalPdf("missing");
+
+    expect(result.error).toBeNull();
+    expect(storageRemove).not.toHaveBeenCalled();
   });
 
   test("translateBookmark invokes the translate edge function with the bookmark id and caches the result locally", async () => {

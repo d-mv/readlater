@@ -26,6 +26,8 @@ const emit = defineEmits<{
   markUnread: [];
   edit: [];
   translate: [];
+  openOriginalPdf: [];
+  trashOriginalPdf: [];
 }>();
 
 const canMarkRead = computed(
@@ -46,6 +48,17 @@ const translateUrl = computed(() => {
 
 const canTranslateInline = computed(() => !props.bookmark.url && !!props.bookmark.content_md);
 
+// A PDF has no source URL — its "original" is the uploaded file kept in
+// Storage, opened via a signed url the parent resolves on click.
+const canOpenOriginalPdf = computed(
+  () => props.bookmark.type === "pdf" && !!props.bookmark.pdf_path,
+);
+// Only offered once parsing succeeded, since content_md then stands on its
+// own — trashing the original of an unparsed PDF would leave nothing to read.
+const canTrashOriginalPdf = computed(
+  () => props.bookmark.type === "pdf" && !!props.bookmark.pdf_path && props.bookmark.pdf_parsed,
+);
+
 const open = ref(false);
 const menuRef = useTemplateRef<HTMLDivElement>("menuRef");
 
@@ -65,6 +78,13 @@ function select(action: () => void) {
 function onDelete() {
   if (window.confirm("Delete this article? This can't be undone.")) {
     emit("delete");
+  }
+  close();
+}
+
+function onTrashOriginalPdf() {
+  if (window.confirm("Delete the original PDF? This can't be undone.")) {
+    emit("trashOriginalPdf");
   }
   close();
 }
@@ -117,6 +137,16 @@ onUnmounted(() => {
         <IconExternalLink :size="16" />
         Open original
       </a>
+      <button
+        v-else-if="canOpenOriginalPdf"
+        class="menu-item open-original"
+        type="button"
+        role="menuitem"
+        @click="select(() => emit('openOriginalPdf'))"
+      >
+        <IconExternalLink :size="16" />
+        Open original
+      </button>
       <a
         v-if="translateUrl"
         class="menu-item translate-item"
@@ -177,6 +207,16 @@ onUnmounted(() => {
       >
         <IconWorld :size="16" />
         Share…
+      </button>
+      <button
+        v-if="canTrashOriginalPdf"
+        class="menu-item trash-pdf-item menu-item-danger"
+        type="button"
+        role="menuitem"
+        @click="onTrashOriginalPdf"
+      >
+        <IconTrash :size="16" />
+        Trash original PDF
       </button>
       <button
         class="menu-item archive-item"

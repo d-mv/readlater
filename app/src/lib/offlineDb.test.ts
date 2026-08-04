@@ -26,6 +26,9 @@ function makeMeta(overrides: Partial<OfflineBookmarkMeta> = {}): OfflineBookmark
     error_message: null,
     created_at: "2026-01-01T00:00:00Z",
     processed_at: "2026-01-01T00:01:00Z",
+    pdf_path: null,
+    pdf_parsed: false,
+    view_mode: null,
     ...overrides,
   };
 }

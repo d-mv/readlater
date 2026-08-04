@@ -101,6 +101,44 @@ describe("ArticleContent", () => {
     });
   });
 
+  describe("pdf original view", () => {
+    test("renders an iframe pointed at the signed pdfUrl when showPdfOriginal is true", () => {
+      const wrapper = mount(ArticleContent, {
+        props: {
+          contentMd: "extracted text",
+          type: "pdf",
+          showPdfOriginal: true,
+          pdfUrl: "https://storage.example/signed-url",
+        },
+      });
+      const iframe = wrapper.find("iframe");
+      expect(iframe.exists()).toBe(true);
+      expect(iframe.attributes("src")).toBe("https://storage.example/signed-url");
+      expect(wrapper.find(".article > div").exists()).toBe(false);
+    });
+
+    test("shows a loading placeholder while the signed url hasn't resolved yet", () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: null, type: "pdf", showPdfOriginal: true, pdfUrl: null },
+      });
+      expect(wrapper.find("iframe").exists()).toBe(false);
+      expect(wrapper.text()).toContain("Loading PDF");
+    });
+
+    test("renders the markdown view instead when showPdfOriginal is false", () => {
+      const wrapper = mount(ArticleContent, {
+        props: {
+          contentMd: "# Extracted",
+          type: "pdf",
+          showPdfOriginal: false,
+          pdfUrl: "https://storage.example/signed-url",
+        },
+      });
+      expect(wrapper.find("iframe").exists()).toBe(false);
+      expect(wrapper.find("h1").text()).toBe("Extracted");
+    });
+  });
+
   describe("editing", () => {
     const originalInnerWidth = window.innerWidth;
 

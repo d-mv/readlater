@@ -250,6 +250,100 @@ describe("AddBookmarkDialog", () => {
     expect(wrapper.text()).toContain("snippet is empty");
   });
 
+  test("switching to File mode swaps the input area", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    expect(wrapper.find("input[type=file]").exists()).toBe(true);
+    expect(wrapper.find("input[type=url]").exists()).toBe(false);
+    expect(wrapper.find("textarea").exists()).toBe(false);
+  });
+
+  async function selectFile(wrapper: ReturnType<typeof mount>, file: File) {
+    const input = wrapper.get("input[type=file]");
+    Object.defineProperty(input.element, "files", { value: [file], configurable: true });
+    await input.trigger("change");
+  }
+
+  test("selecting an unsupported file type shows an error and keeps submit disabled", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    await selectFile(wrapper, new File(["x"], "legacy.doc"));
+
+    expect(wrapper.text()).toContain("Unsupported file type");
+    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+  });
+
+  test("selecting an oversized markdown file shows a size error and keeps submit disabled", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    const big = new Blob([new Uint8Array(500 * 1024 + 1)]);
+    const file = new File([big], "big.md");
+    await selectFile(wrapper, file);
+
+    expect(wrapper.text()).toContain("500KB");
+    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+  });
+
+  test("selecting a valid markdown file and submitting calls addFile and closes the dialog", async () => {
+    const store = useBookmarksStore();
+    store.addFile = vi.fn().mockResolvedValue({ error: null });
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    const file = new File(["# hi"], "notes.md", { type: "text/markdown" });
+    await selectFile(wrapper, file);
+    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeUndefined();
+
+    await wrapper.get("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    expect(store.addFile).toHaveBeenCalledWith(file);
+    expect(wrapper.find("dialog").exists()).toBe(false);
+  });
+
+  test("selecting a valid PDF file and submitting calls addPdf, not addFile", async () => {
+    const store = useBookmarksStore();
+    store.addPdf = vi.fn().mockResolvedValue({ error: null });
+    store.addFile = vi.fn();
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    const file = new File(["%PDF-1.4"], "report.pdf", { type: "application/pdf" });
+    await selectFile(wrapper, file);
+    await wrapper.get("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    expect(store.addPdf).toHaveBeenCalledWith(file);
+    expect(store.addFile).not.toHaveBeenCalled();
+    expect(wrapper.find("dialog").exists()).toBe(false);
+  });
+
+  test("shows an error and keeps the dialog open when addFile fails", async () => {
+    const store = useBookmarksStore();
+    store.addFile = vi.fn().mockResolvedValue({ error: "file is empty" });
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    await selectFile(wrapper, new File(["# hi"], "notes.md"));
+    await wrapper.get("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    expect(wrapper.find("dialog").exists()).toBe(true);
+    expect(wrapper.text()).toContain("file is empty");
+  });
+
   test("cancelling the duplicate prompt returns to the form without adding", async () => {
     const store = useBookmarksStore();
     store.add = vi.fn().mockResolvedValue({ error: null, duplicate: true });

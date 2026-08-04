@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { mount } from "@vue/test-utils";
 import ReaderHeader from "./ReaderHeader.vue";
@@ -28,6 +28,9 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     error_message: null,
     created_at: "2026-01-01T00:00:00Z",
     processed_at: null,
+    pdf_path: null,
+    pdf_parsed: false,
+    view_mode: null,
     ...overrides,
   };
 }
@@ -76,5 +79,32 @@ describe("ReaderHeader", () => {
     await wrapper.find(".menu-trigger").trigger("click");
     await wrapper.find(".translate-item").trigger("click");
     expect(wrapper.emitted("translate")).toHaveLength(1);
+  });
+
+  test("forwards openOriginalPdf from the menu", async () => {
+    const wrapper = mount(ReaderHeader, {
+      props: { bookmark: makeBookmark({ url: null, type: "pdf", pdf_path: "user-1/a.pdf" }) },
+    });
+    await wrapper.find(".menu-trigger").trigger("click");
+    await wrapper.find(".open-original").trigger("click");
+    expect(wrapper.emitted("openOriginalPdf")).toHaveLength(1);
+  });
+
+  test("forwards trashOriginalPdf from the menu", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const wrapper = mount(ReaderHeader, {
+      props: {
+        bookmark: makeBookmark({
+          url: null,
+          type: "pdf",
+          pdf_path: "user-1/a.pdf",
+          pdf_parsed: true,
+        }),
+      },
+    });
+    await wrapper.find(".menu-trigger").trigger("click");
+    await wrapper.find(".trash-pdf-item").trigger("click");
+    expect(wrapper.emitted("trashOriginalPdf")).toHaveLength(1);
+    confirmSpy.mockRestore();
   });
 });

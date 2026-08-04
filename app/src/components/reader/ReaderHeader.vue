@@ -18,6 +18,8 @@ const emit = defineEmits<{
   markUnread: [];
   edit: [];
   translate: [];
+  openOriginalPdf: [];
+  trashOriginalPdf: [];
 }>();
 
 const domain = computed(() => domainFromUrl(props.bookmark.url));
@@ -38,6 +40,8 @@ const domain = computed(() => domainFromUrl(props.bookmark.url));
       @mark-unread="emit('markUnread')"
       @edit="emit('edit')"
       @translate="emit('translate')"
+      @open-original-pdf="emit('openOriginalPdf')"
+      @trash-original-pdf="emit('trashOriginalPdf')"
     />
   </div>
 </template>

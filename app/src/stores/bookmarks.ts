@@ -3,12 +3,16 @@ import { computed, ref, shallowRef } from "vue";
 import { supabase, type Bookmark, type DuplicateBookmark } from "../lib/supabase";
 import { detectBookmarkType } from "../utils/bookmarkType";
 import { truncateTitle } from "../utils/captureText";
+import { arrayBufferToBase64 } from "../utils/base64";
+import { detectFileKind, maxBytesForFileKind } from "../utils/fileKind";
 import * as offlineDb from "../lib/offlineDb";
 import { useOfflineCacheStore } from "./offlineCache";
 
 const BOOKMARK_SELECT = "*, tags(id, name, color)";
 const UNIQUE_VIOLATION = "23505";
 const POLL_INTERVAL_MS = 5000;
+const PDF_BUCKET = "bookmark-pdfs";
+const PDF_SIGNED_URL_TTL_SECONDS = 60;
 
 function stripContentMd(bookmark: Bookmark): offlineDb.OfflineBookmarkMeta {
   const { content_md: _content_md, ...meta } = bookmark;
@@ -221,6 +225,82 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return { error: null };
   }
 
+  // Markdown/Word: read, converted to Markdown notes, and the original is
+  // discarded — unlike PDFs, there's no reason to keep these around.
+  async function addFile(file: File): Promise<{ error: string | null }> {
+    const kind = detectFileKind(file.name);
+    if (kind !== "markdown" && kind !== "docx") {
+      return { error: "Unsupported file type. Use .md, .markdown, or .docx." };
+    }
+
+    const maxBytes = maxBytesForFileKind(kind);
+    if (file.size > maxBytes) {
+      const limit = kind === "markdown" ? "500KB" : "5MB";
+      return { error: `File exceeds the ${limit} limit for this file type.` };
+    }
+
+    const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
+    const { data, error } = await supabase.functions.invoke("file-import", {
+      body: { filename: file.name, contentBase64 },
+    });
+    if (error) return { error: error.message };
+
+    bookmarks.value.unshift(data.bookmark);
+    return { error: null };
+  }
+
+  // PDFs go through server-side text extraction; the original is kept in
+  // Storage (see trashOriginalPdf) since extraction isn't always usable.
+  async function addPdf(file: File): Promise<{ error: string | null }> {
+    if (detectFileKind(file.name) !== "pdf") return { error: "Unsupported file type. Use .pdf." };
+
+    if (file.size > maxBytesForFileKind("pdf")) {
+      return { error: "File exceeds the 20MB limit for PDFs." };
+    }
+
+    const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
+    const { data, error } = await supabase.functions.invoke("pdf-import", {
+      body: { filename: file.name, contentBase64 },
+    });
+    if (error) return { error: error.message };
+
+    bookmarks.value.unshift(data.bookmark);
+    return { error: null };
+  }
+
+  async function setViewMode(id: string, mode: "markdown" | "original"): Promise<void> {
+    await supabase.from("bookmarks").update({ view_mode: mode }).eq("id", id);
+    const bookmark = bookmarks.value.find((b) => b.id === id);
+    if (bookmark) bookmark.view_mode = mode;
+  }
+
+  async function getPdfSignedUrl(
+    pdfPath: string,
+  ): Promise<{ url: string | null; error: string | null }> {
+    const { data, error } = await supabase.storage
+      .from(PDF_BUCKET)
+      .createSignedUrl(pdfPath, PDF_SIGNED_URL_TTL_SECONDS);
+    if (error) return { url: null, error: error.message };
+    return { url: data.signedUrl, error: null };
+  }
+
+  // Only offered once parsing succeeded — content_md then stands on its own,
+  // so the original can go without losing the ability to read the bookmark.
+  async function trashOriginalPdf(id: string): Promise<{ error: string | null }> {
+    const bookmark = bookmarks.value.find((b) => b.id === id);
+    if (!bookmark?.pdf_path) return { error: null };
+
+    const { error: removeError } = await supabase.storage
+      .from(PDF_BUCKET)
+      .remove([bookmark.pdf_path]);
+    if (removeError) return { error: removeError.message };
+
+    const update = { pdf_path: null, view_mode: "markdown" as const };
+    await supabase.from("bookmarks").update(update).eq("id", id);
+    Object.assign(bookmark, update);
+    return { error: null };
+  }
+
   async function translateBookmark(
     id: string,
     text: string,
@@ -395,6 +475,11 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     add,
     addNote,
     addSnippet,
+    addFile,
+    addPdf,
+    setViewMode,
+    getPdfSignedUrl,
+    trashOriginalPdf,
     translateBookmark,
     refresh,
     updateContent,

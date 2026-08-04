@@ -1,9 +1,10 @@
 # Read Later
 
-Personal read-it-later app: capture a link (bookmarklet, PWA share-target, or
-a pasted snippet), get it parsed into clean markdown on a self-hosted worker,
-read it later in a Vue 3 PWA — offline-capable, with tags, full-text search,
-and optional public sharing per bookmark.
+Personal read-it-later app: capture a link (bookmarklet, PWA share-target,
+a pasted snippet, or an uploaded Markdown/Word/PDF file), get it parsed into
+clean markdown on a self-hosted worker, read it later in a Vue 3 PWA —
+offline-capable, with tags, full-text search, and optional public sharing
+per bookmark.
 
 ## Documentation
 

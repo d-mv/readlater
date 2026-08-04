@@ -23,11 +23,15 @@ const EDITOR_TOOLBARS: ToolbarNames[] = [
 
 const props = defineProps<{
   contentMd: string | null;
-  type?: "article" | "youtube" | "note";
+  type?: "article" | "youtube" | "note" | "pdf";
   youtubeVideoId?: string | null;
   thumbnailUrl?: string | null;
   editing?: boolean;
   modelValue?: string;
+  // PDF-only: when true, show the original PDF (via pdfUrl, a signed url
+  // resolved by the parent) instead of the extracted Markdown.
+  showPdfOriginal?: boolean;
+  pdfUrl?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -125,6 +129,10 @@ const safeHtml = computed(() =>
       language="en-US"
       placeholder="Write in markdown…"
     />
+    <template v-else-if="showPdfOriginal">
+      <iframe v-if="pdfUrl" class="pdf-frame" :src="pdfUrl" title="PDF document"></iframe>
+      <p v-else class="pdf-loading">Loading PDF…</p>
+    </template>
     <!-- eslint-disable-next-line vue/no-v-html -->
     <div v-else v-html="safeHtml"></div>
   </div>
@@ -157,6 +165,20 @@ const safeHtml = computed(() =>
 
 .article :deep(a) {
   color: var(--rl-accent);
+}
+
+.pdf-frame {
+  width: 100%;
+  height: 80vh;
+  border: none;
+  border-radius: var(--rl-radius);
+  background: white;
+}
+
+.pdf-loading {
+  font-family: var(--rl-font-ui);
+  font-size: 14px;
+  color: var(--rl-text-muted);
 }
 
 .youtube-embed {

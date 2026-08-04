@@ -48,9 +48,9 @@ Independently replaceable pieces:
 create table bookmarks (
   id              uuid primary key default gen_random_uuid(),
   user_id         uuid not null references auth.users(id),
-  url             text,                -- nullable: notes have no source URL
+  url             text,                -- nullable: notes and uploaded files have no source URL
   url_normalized  text generated always as (lower(regexp_replace(url, '/+$', ''))) stored,
-  type            text not null check (type in ('article', 'youtube', 'note')),
+  type            text not null check (type in ('article', 'youtube', 'note', 'pdf')),
   status          text not null default 'pending'
                     check (status in ('pending', 'processing', 'ready', 'failed')),
   title           text,
@@ -61,6 +61,9 @@ create table bookmarks (
   word_count      int,
   reading_time    int,
   is_public       boolean not null default false,
+  pdf_path        text,                -- pdf only: object path in the bookmark-pdfs bucket
+  pdf_parsed      boolean not null default false, -- pdf only: did text extraction produce usable content_md
+  view_mode       text check (view_mode in ('markdown', 'original')), -- pdf only: persisted reader toggle
   search_vector   tsvector generated always as (
                     setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
                     setweight(to_tsvector('english', coalesce(content_md, '')), 'B')
@@ -71,7 +74,8 @@ create table bookmarks (
   created_at      timestamptz not null default now(),
   processed_at    timestamptz,
 
-  constraint bookmarks_url_required_unless_note check (type = 'note' or url is not null)
+  constraint bookmarks_url_required_unless_note check (type in ('note', 'pdf') or url is not null),
+  constraint bookmarks_pdf_path_requires_type check (pdf_path is null or type = 'pdf')
 );
 
 create index bookmarks_status_idx on bookmarks (status) where status = 'pending';
@@ -81,6 +85,18 @@ create unique index bookmarks_url_normalized_uniq on bookmarks (url_normalized);
 
 alter table bookmarks enable row level security;
 create policy "owner access" on bookmarks for all using (auth.uid() = user_id);
+
+-- bookmark-pdfs: private (unlike bookmark-assets), objects at
+-- `{user_id}/{uuid}.pdf` so ownership checks read straight from the path.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('bookmark-pdfs', 'bookmark-pdfs', false, 20971520);
+
+create policy "owner read own pdfs" on storage.objects
+  for select using (bucket_id = 'bookmark-pdfs' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "owner write own pdfs" on storage.objects
+  for insert with check (bucket_id = 'bookmark-pdfs' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "owner delete own pdfs" on storage.objects
+  for delete using (bucket_id = 'bookmark-pdfs' and (storage.foldername(name))[1] = auth.uid()::text);
 
 create table tags (
   id    uuid primary key default gen_random_uuid(),
@@ -114,8 +130,17 @@ Notes on the shape:
   scale, and lets `search_vector` (generated, stored) index it directly.
 - No `folders` table. `status` + `archived` + `tags` (many-to-many, not a
   hierarchy) covers the river-of-news model — filtering, not nesting.
-- `type = 'note'` covers both share-target free-text and in-app snippets.
-  Notes skip the worker entirely and land at `status = 'ready'` on insert.
+- `type = 'note'` covers share-target free-text, in-app snippets, and
+  uploaded Markdown/Word files (§3) — all land at `status = 'ready'` on
+  insert with no worker involvement, since there's nothing to fetch.
+- `type = 'pdf'` is its own type rather than folding into `note`: unlike the
+  others, it has an original binary worth keeping (`pdf_path`) and a
+  success/failure outcome for extraction (`pdf_parsed`) that the reader
+  branches on. `view_mode` is `null` until the user explicitly toggles —
+  the effective view is computed client-side as `view_mode ?? (pdf_parsed ?
+  'markdown' : 'original')` rather than written eagerly, so a bookmark that
+  was inserted before the user ever opens the reader doesn't need a second
+  write just to pick a default.
 - `url_normalized` (lowercase host, strip trailing slash — not stripping
   `utm_*`/`fbclid` yet) backs a real unique index, so the capture endpoint's
   duplicate check can rely on a Postgres constraint violation (`23505`)
@@ -136,11 +161,13 @@ Notes on the shape:
 Migrations, in order: `20260725000001_bookmarks.sql` →
 `20260726000001_bookmark_notes.sql` → `20260726000002_tags.sql` →
 `20260726000003_search.sql` → `20260726000004_url_normalization.sql` →
-`20260726000005_public_sharing.sql`.
+`20260726000005_public_sharing.sql` → `20260727000001_youtube_video_id.sql` →
+`20260727000002_content_edited.sql` → `20260803000001_translated_content.sql`
+→ `20260804000001_pdf_support.sql`.
 
 ## 3. Capture paths
 
-Four ways in, all funneling into the same `bookmarks` table:
+Six ways in, all funneling into the same `bookmarks` table:
 
 | Path | Entry point | Auth | Result |
 |---|---|---|---|
@@ -148,6 +175,8 @@ Four ways in, all funneling into the same `bookmarks` table:
 | PWA share-target (Chrome/Android only) | `/share-target` (manifest `share_target`) → `capture` edge fn | `CAPTURE_KEY` bearer | url → `pending`; free text → `note`, `ready` |
 | Add dialog — URL mode | `AddBookmarkDialog.vue` | Supabase session (client insert) | `pending` |
 | Add dialog — Snippet mode | `AddBookmarkDialog.vue` → `snippet` edge fn | JWT (session) | `note`, `ready` |
+| Add dialog — File mode (.md/.markdown/.docx) | `AddBookmarkDialog.vue` → `file-import` edge fn | JWT (session) | `note`, `ready` |
+| Add dialog — File mode (.pdf) | `AddBookmarkDialog.vue` → `pdf-import` edge fn | JWT (session) | `pdf`, `ready` |
 
 **Bookmarklet.** The saved bookmark does nothing but open a small popup
 (`bookmarklet/source.js`, `__APP_ORIGIN__` baked in at build time by
@@ -196,6 +225,55 @@ falls back to the existing client-side `store.addNote()` — no round trip.
 insert time and never touch the worker or the `pending` queue. They flow
 through search, tags, and public sharing identically to articles/videos.
 
+**File mode — Markdown/Word.** A third mode on `AddBookmarkDialog.vue`,
+alongside URL and Snippet: a plain `<input type="file">` accepting
+`.md`/`.markdown`/`.docx`. The dialog validates extension and size
+client-side (500KB for Markdown, 5MB for Word — cheap early rejection before
+spending a round trip), base64-encodes the file (`utils/base64.ts`,
+chunked — `String.fromCharCode(...bytes)` blows the call stack past ~64KB
+spread in one call) and posts it to the `file-import` edge function
+(JWT-authed, same trust level as `snippet`). Markdown passes through as-is;
+`.docx` is converted via `npm:mammoth` (docx → HTML) piped through the same
+`turndown` HTML→Markdown step `snippet` uses. Either way the result inserts
+as `type: 'note', status: 'ready'` — the original file itself is never kept,
+matching "read it, convert it, trash it."
+
+**File mode — PDF.** Same dialog, `.pdf` extension, 20MB limit, routed to a
+separate `pdf-import` edge function instead — PDFs need different handling
+than Markdown/Word because, unlike those, the original is worth keeping
+(scanned PDFs may have no usable text layer at all, and even when extraction
+succeeds the source formatting is often wanted back). `pdf-import`:
+1. Uploads the original to the private `bookmark-pdfs` Storage bucket at
+   `{user_id}/{uuid}.pdf` before attempting extraction, so the file survives
+   even if extraction throws.
+2. Attempts text extraction via `npm:unpdf` (a pdf.js wrapper built for
+   serverless/edge runtimes — plain `pdfjs-dist` expects a DOM/canvas
+   environment for its full pipeline; text-only extraction doesn't need
+   rendering, and `unpdf` is scoped to exactly that).
+3. Inserts `type: 'pdf', status: 'ready', pdf_path, pdf_parsed` — a PDF with
+   no extractable text (scanned images, etc.) is `pdf_parsed: false` with
+   `content_md: null`, which is an expected outcome, not a request failure.
+   If the insert itself fails, the already-uploaded Storage object is
+   removed rather than left orphaned.
+
+The reader (`ReaderView.vue`) picks a default view from
+`view_mode ?? (pdf_parsed ? 'markdown' : 'original')`. When both a
+Markdown extraction and the original exist, a toggle bar lets the user
+switch, persisting the choice to `bookmarks.view_mode` via
+`store.setViewMode()`; when parsing failed there's nothing to toggle to, so
+the original renders unconditionally. The original PDF is shown inline via
+`<iframe :src="signedUrl">` (the browser's native PDF viewer), where
+`signedUrl` comes from `store.getPdfSignedUrl()` —
+`supabase.storage.from('bookmark-pdfs').createSignedUrl(path, 60)` — since
+the bucket is private and RLS-gated per user, unlike the public
+`bookmark-assets` bucket YouTube thumbnails use. The reader menu's existing
+"Open original" item (normally `bookmark.url`) gets a PDF-specific branch
+that resolves a fresh signed URL on click and opens it in a new tab, and
+(only once `pdf_parsed`, so there's still something to read afterward) a
+"Trash original PDF" item that removes the Storage object and clears
+`pdf_path` — after which both the toggle and "Open original" disappear,
+since only the Markdown remains.
+
 ### Duplicate handling
 
 Applies to `url`-type captures only — notes have no dedup key and always
@@ -215,7 +293,7 @@ Three trust levels, kept distinct on purpose:
 | Actor | Mechanism | Why |
 |---|---|---|
 | Bookmarklet / share-target / iOS Shortcut | `capture` edge fn, static `CAPTURE_KEY` bearer | No browser session to lean on for share-target/Shortcut; intentionally weak — personal, single-user, low-value target |
-| Add dialog (URL + Snippet modes) | PWA's own Supabase session (JWT) | Browser-facing, already logged in — snippet insert runs under the user's own RLS rather than the shared capture key |
+| Add dialog (URL, Snippet, File modes) | PWA's own Supabase session (JWT) | Browser-facing, already logged in — snippet/file-import/pdf-import inserts all run under the user's own RLS rather than the shared capture key |
 | VPS worker | Supabase `service_role` (`SUPABASE_SECRET_KEY`) | Needs unconditional read/write on every row; bypasses RLS by design, never reaches a browser |
 | Public view (`/s/:id`) | Supabase anon key + `get_public_bookmark` RPC | No session at all; scoped to a single exact-id match, not a table policy |
 
@@ -292,6 +370,14 @@ reprocesses it — same underlying mechanism as the duplicate-refresh path.
   path even though thumbnails belong to bookmarks that may be public).
 - Article body images are hot-linked from the source, not re-uploaded — only
   YouTube thumbnails go through `storage.ts`.
+- Original PDFs → Supabase Storage bucket `bookmark-pdfs`,
+  `{user_id}/{uuid}.pdf` paths, **private** — deliberately not public like
+  `bookmark-assets`. A YouTube thumbnail is incidental and low-value if
+  leaked; an uploaded PDF is the user's own document and may be sensitive,
+  so access goes through owner-scoped Storage RLS policies (§2) and
+  60-second signed URLs generated on demand (`store.getPdfSignedUrl()`),
+  never a bare public URL. Uploaded Markdown/Word files are read, converted,
+  and discarded — they never touch Storage at all.
 
 ## 6. Frontend — Vue 3 PWA
 
@@ -306,10 +392,11 @@ Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
 - **Reader** (`ReaderView.vue`, `ArticleContent.vue`) — markdown rendered via
   `markdown-it`, sanitized through `DOMPurify` before `v-html`. Header
   (`ReaderHeader.vue`) holds back/domain/actions; all row-level actions
-  (open original, mark read/unread, share, archive, delete, font size) are
-  consolidated into a single overflow menu (`ReaderMenu.vue`) rather than a
-  row of separate icon buttons. Delete asks for confirmation
-  (`window.confirm`); share opens `ShareDialog.vue`. Tagging is
+  (open original, mark read/unread, share, archive, delete, font size, and
+  — PDF only — trash original) are consolidated into a single overflow menu
+  (`ReaderMenu.vue`) rather than a row of separate icon buttons. Delete and
+  trash-original both ask for confirmation (`window.confirm`); share opens
+  `ShareDialog.vue`. Tagging is
   `TagInput.vue`, create-on-type against the `tags` table via upsert.
   `ReaderProgressBar.vue` tracks scroll position.
 - **Sharing** (`ShareDialog.vue`) — toggle bound to `bookmark.is_public`
@@ -425,7 +512,9 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
 
 - Twitter/X capture — needs Playwright-driven scraping, separate scoping
   pass given how fragile it'll be.
-- PDF capture.
+- PDF OCR for scanned/image-only PDFs — `unpdf`'s extraction only reads an
+  existing text layer; a scanned PDF with none falls back to
+  `pdf_parsed: false` (original-only view) rather than attempting OCR.
 - URL normalization ignores tracking params (`utm_*`, `fbclid`, …) — add a
   strip-list if near-duplicate saves show up in practice.
 - `bookmarks.fetch()` in the Pinia store loads the entire table, unpaginated
@@ -460,6 +549,11 @@ analysis at the time — see the original design docs:
 - [`docs/plans/2026-07-26-snippet-capture-design.md`](plans/2026-07-26-snippet-capture-design.md)
   — the Add-dialog snippet mode, HTML→Markdown conversion, why it's a
   separate JWT-authed edge function rather than an extension of `capture`.
+- [`docs/plans/2026-08-04-file-pdf-import-design.md`](plans/2026-08-04-file-pdf-import-design.md)
+  — the Add-dialog File mode (Markdown/Word/PDF), why PDF got its own
+  `bookmarks.type` and a private Storage bucket while Markdown/Word fold
+  into `note` and keep no original, and the PDF reader's dual-view/
+  trash-original design.
 
 Six early HTML visual explorations (color system, theme comparisons, login/
 list/reader mockups) also live in `docs/*.html` — static, unmaintained since

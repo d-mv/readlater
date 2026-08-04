@@ -3,8 +3,19 @@ import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import type { Bookmark } from "../lib/supabase";
 
-const { from, invoke } = vi.hoisted(() => ({ from: vi.fn(), invoke: vi.fn() }));
-vi.mock("../lib/supabase", () => ({ supabase: { from, functions: { invoke } } }));
+const { from, invoke, storageCreateSignedUrl, storageRemove } = vi.hoisted(() => ({
+  from: vi.fn(),
+  invoke: vi.fn(),
+  storageCreateSignedUrl: vi.fn(),
+  storageRemove: vi.fn(),
+}));
+vi.mock("../lib/supabase", () => ({
+  supabase: {
+    from,
+    functions: { invoke },
+    storage: { from: () => ({ createSignedUrl: storageCreateSignedUrl, remove: storageRemove }) },
+  },
+}));
 
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
@@ -30,6 +41,9 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     reading_time: null,
     created_at: "2026-01-01T00:00:00Z",
     processed_at: null,
+    pdf_path: null,
+    pdf_parsed: false,
+    view_mode: null,
     read_at: null,
     archived: false,
     is_public: false,
@@ -276,6 +290,150 @@ describe("ReaderView", () => {
       expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
         "Hello world",
       );
+    });
+  });
+
+  describe("pdf", () => {
+    function mockReadyBookmark(bookmark: Bookmark) {
+      const single = vi.fn().mockResolvedValue({ data: bookmark, error: null });
+      const eqSelect = vi.fn(() => ({ single }));
+      const select = vi.fn(() => ({ eq: eqSelect }));
+      const eqUpdate = vi.fn().mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq: eqUpdate }));
+      from.mockReturnValue({ select, update });
+      return { update };
+    }
+
+    test("a parsed PDF defaults to the markdown view and offers a toggle to the original", async () => {
+      const pdf = makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "pdf",
+        content_md: "Extracted text",
+        pdf_path: "user-1/a.pdf",
+        pdf_parsed: true,
+      });
+      mockReadyBookmark(pdf);
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      expect(wrapper.text()).toContain("Markdown");
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("showPdfOriginal")).toBe(
+        false,
+      );
+      expect(storageCreateSignedUrl).not.toHaveBeenCalled();
+    });
+
+    test("toggling to the original view resolves a signed url, renders it, and persists the choice", async () => {
+      const pdf = makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "pdf",
+        content_md: "Extracted text",
+        pdf_path: "user-1/a.pdf",
+        pdf_parsed: true,
+      });
+      const { update } = mockReadyBookmark(pdf);
+      storageCreateSignedUrl.mockResolvedValue({
+        data: { signedUrl: "https://storage.example/signed" },
+        error: null,
+      });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await wrapper.find(".pdf-view-toggle").trigger("click");
+      await flushPromises();
+
+      expect(update).toHaveBeenCalledWith({ view_mode: "original" });
+      expect(storageCreateSignedUrl).toHaveBeenCalledWith("user-1/a.pdf", 60);
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("showPdfOriginal")).toBe(true);
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("pdfUrl")).toBe(
+        "https://storage.example/signed",
+      );
+      expect(wrapper.text()).toContain("Original PDF");
+    });
+
+    test("a PDF with failed parsing forces the original view and loads it automatically, with no toggle", async () => {
+      const pdf = makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "pdf",
+        content_md: null,
+        pdf_path: "user-1/scanned.pdf",
+        pdf_parsed: false,
+      });
+      mockReadyBookmark(pdf);
+      storageCreateSignedUrl.mockResolvedValue({
+        data: { signedUrl: "https://storage.example/scanned" },
+        error: null,
+      });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      expect(wrapper.find(".pdf-view-bar").exists()).toBe(false);
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("showPdfOriginal")).toBe(true);
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("pdfUrl")).toBe(
+        "https://storage.example/scanned",
+      );
+    });
+
+    test("Open original opens a freshly resolved signed url in a new tab", async () => {
+      const pdf = makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "pdf",
+        content_md: "Extracted text",
+        pdf_path: "user-1/a.pdf",
+        pdf_parsed: true,
+      });
+      mockReadyBookmark(pdf);
+      storageCreateSignedUrl.mockResolvedValue({
+        data: { signedUrl: "https://storage.example/open" },
+        error: null,
+      });
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await wrapper.find(".menu-trigger").trigger("click");
+      await wrapper.find(".open-original").trigger("click");
+      await flushPromises();
+
+      expect(openSpy).toHaveBeenCalledWith("https://storage.example/open", "_blank", "noopener");
+      openSpy.mockRestore();
+    });
+
+    test("Trash original PDF removes the storage object and drops the view toggle", async () => {
+      const pdf = makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "pdf",
+        content_md: "Extracted text",
+        pdf_path: "user-1/a.pdf",
+        pdf_parsed: true,
+      });
+      mockReadyBookmark(pdf);
+      storageRemove.mockResolvedValue({ error: null });
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await wrapper.find(".menu-trigger").trigger("click");
+      await wrapper.find(".trash-pdf-item").trigger("click");
+      await flushPromises();
+
+      expect(storageRemove).toHaveBeenCalledWith(["user-1/a.pdf"]);
+      expect(wrapper.find(".pdf-view-bar").exists()).toBe(false);
+      await wrapper.find(".menu-trigger").trigger("click");
+      expect(wrapper.find(".open-original").exists()).toBe(false);
     });
   });
 });

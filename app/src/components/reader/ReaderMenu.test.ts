@@ -28,6 +28,9 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
     error_message: null,
     created_at: "2026-01-01T00:00:00Z",
     processed_at: null,
+    pdf_path: null,
+    pdf_parsed: false,
+    view_mode: null,
     ...overrides,
   };
 }
@@ -93,6 +96,80 @@ describe("ReaderMenu", () => {
     const link = wrapper.find(".open-original");
     expect(link.attributes("href")).toBe("https://example.com/a");
     expect(link.attributes("target")).toBe("_blank");
+  });
+
+  test("shows a clickable 'Open original' for a PDF with an original file, and emits openOriginalPdf", async () => {
+    const wrapper = mount(ReaderMenu, {
+      props: {
+        bookmark: makeBookmark({ url: null, type: "pdf", pdf_path: "user-1/a.pdf" }),
+      },
+    });
+    await openMenu(wrapper);
+    const item = wrapper.find(".open-original");
+    expect(item.exists()).toBe(true);
+    expect(item.element.tagName).toBe("BUTTON");
+    await item.trigger("click");
+    expect(wrapper.emitted("openOriginalPdf")).toHaveLength(1);
+    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+  });
+
+  test("hides 'Open original' for a PDF once the original has been trashed", async () => {
+    const wrapper = mount(ReaderMenu, {
+      props: { bookmark: makeBookmark({ url: null, type: "pdf", pdf_path: null }) },
+    });
+    await openMenu(wrapper);
+    expect(wrapper.find(".open-original").exists()).toBe(false);
+  });
+
+  test("shows 'Trash original PDF' only once parsing succeeded, and emits trashOriginalPdf when confirmed", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const wrapper = mount(ReaderMenu, {
+      props: {
+        bookmark: makeBookmark({
+          url: null,
+          type: "pdf",
+          pdf_path: "user-1/a.pdf",
+          pdf_parsed: true,
+        }),
+      },
+    });
+    await openMenu(wrapper);
+    const item = wrapper.find(".trash-pdf-item");
+    expect(item.exists()).toBe(true);
+    await item.trigger("click");
+    expect(wrapper.emitted("trashOriginalPdf")).toHaveLength(1);
+  });
+
+  test("hides 'Trash original PDF' when parsing failed (no markdown to fall back to)", async () => {
+    const wrapper = mount(ReaderMenu, {
+      props: {
+        bookmark: makeBookmark({
+          url: null,
+          type: "pdf",
+          pdf_path: "user-1/a.pdf",
+          pdf_parsed: false,
+        }),
+      },
+    });
+    await openMenu(wrapper);
+    expect(wrapper.find(".trash-pdf-item").exists()).toBe(false);
+  });
+
+  test("does not emit trashOriginalPdf when the confirmation is cancelled", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    const wrapper = mount(ReaderMenu, {
+      props: {
+        bookmark: makeBookmark({
+          url: null,
+          type: "pdf",
+          pdf_path: "user-1/a.pdf",
+          pdf_parsed: true,
+        }),
+      },
+    });
+    await openMenu(wrapper);
+    await wrapper.find(".trash-pdf-item").trigger("click");
+    expect(wrapper.emitted("trashOriginalPdf")).toBeUndefined();
   });
 
   test("links 'Translate…' to a Google Translate page-proxy URL when the bookmark has a URL", async () => {

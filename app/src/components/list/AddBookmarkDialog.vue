@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { shallowRef } from "vue";
 import { useBookmarksStore } from "../../stores/bookmarks";
+import { detectFileKind, maxBytesForFileKind } from "../../utils/fileKind";
 
-type Mode = "url" | "snippet";
+type Mode = "url" | "snippet" | "file";
+
+const FILE_KIND_LIMIT_LABEL = { markdown: "500KB", docx: "5MB", pdf: "20MB" } as const;
 
 const store = useBookmarksStore();
 
@@ -11,6 +14,7 @@ const mode = shallowRef<Mode>("url");
 const url = shallowRef("");
 const snippetText = shallowRef("");
 const snippetHtml = shallowRef<string | null>(null);
+const selectedFile = shallowRef<File | null>(null);
 const error = shallowRef<string | null>(null);
 const submitting = shallowRef(false);
 const duplicate = shallowRef(false);
@@ -20,6 +24,7 @@ function open() {
   url.value = "";
   snippetText.value = "";
   snippetHtml.value = null;
+  selectedFile.value = null;
   error.value = null;
   duplicate.value = false;
   isOpen.value = true;
@@ -40,9 +45,34 @@ function onSnippetPaste(event: ClipboardEvent) {
   snippetHtml.value = event.clipboardData?.getData("text/html") || null;
 }
 
+function onFileChange(event: Event) {
+  error.value = null;
+  const file = (event.target as HTMLInputElement).files?.[0] ?? null;
+  if (!file) {
+    selectedFile.value = null;
+    return;
+  }
+
+  const kind = detectFileKind(file.name);
+  if (!kind) {
+    selectedFile.value = null;
+    error.value = "Unsupported file type. Use .md, .markdown, .docx, or .pdf.";
+    return;
+  }
+  if (file.size > maxBytesForFileKind(kind)) {
+    selectedFile.value = null;
+    error.value = `File exceeds the ${FILE_KIND_LIMIT_LABEL[kind]} limit for this file type.`;
+    return;
+  }
+
+  selectedFile.value = file;
+}
+
 async function onSubmit() {
   if (mode.value === "snippet") {
     await onSubmitSnippet();
+  } else if (mode.value === "file") {
+    await onSubmitFile();
   } else {
     await onSubmitUrl();
   }
@@ -74,6 +104,25 @@ async function onSubmitSnippet() {
     const result = snippetHtml.value
       ? await store.addSnippet(snippetHtml.value, snippetText.value)
       : await store.addNote(snippetText.value);
+    if (result.error) {
+      error.value = result.error;
+      return;
+    }
+    isOpen.value = false;
+  } finally {
+    submitting.value = false;
+  }
+}
+
+async function onSubmitFile() {
+  const file = selectedFile.value;
+  if (!file) return;
+
+  submitting.value = true;
+  error.value = null;
+  try {
+    const result =
+      detectFileKind(file.name) === "pdf" ? await store.addPdf(file) : await store.addFile(file);
     if (result.error) {
       error.value = result.error;
       return;
@@ -143,6 +192,14 @@ async function confirmDuplicate() {
           >
             Snippet
           </button>
+          <button
+            type="button"
+            class="mode-btn mode-file"
+            :class="{ active: mode === 'file' }"
+            @click="setMode('file')"
+          >
+            File
+          </button>
         </div>
 
         <template v-if="mode === 'url'">
@@ -157,7 +214,7 @@ async function confirmDuplicate() {
             autofocus
           />
         </template>
-        <template v-else>
+        <template v-else-if="mode === 'snippet'">
           <label class="field-label" for="bookmark-snippet">Snippet</label>
           <textarea
             id="bookmark-snippet"
@@ -168,6 +225,21 @@ async function confirmDuplicate() {
             @paste="onSnippetPaste"
           ></textarea>
         </template>
+        <template v-else>
+          <label class="field-label" for="bookmark-file">File</label>
+          <input
+            id="bookmark-file"
+            type="file"
+            class="field-input file-input"
+            accept=".md,.markdown,.docx,.pdf"
+            autofocus
+            @change="onFileChange"
+          />
+          <p v-if="selectedFile" class="file-selected">{{ selectedFile.name }}</p>
+          <p class="file-hint">
+            Markdown (.md, up to 500KB), Word (.docx, up to 5MB), or PDF (up to 20MB).
+          </p>
+        </template>
 
         <p v-if="error" class="error">{{ error }}</p>
         <div class="dialog-actions">
@@ -175,7 +247,11 @@ async function confirmDuplicate() {
           <button
             class="btn btn-primary submit-btn"
             type="submit"
-            :disabled="submitting || (mode === 'snippet' && !snippetText.trim())"
+            :disabled="
+              submitting ||
+              (mode === 'snippet' && !snippetText.trim()) ||
+              (mode === 'file' && !selectedFile)
+            "
           >
             Add
           </button>
@@ -283,6 +359,23 @@ async function confirmDuplicate() {
   padding: 8px 12px;
   resize: vertical;
   font-family: inherit;
+}
+
+.file-input {
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.file-selected {
+  font-size: 12px;
+  color: var(--rl-text-primary);
+  margin: 6px 0 0;
+}
+
+.file-hint {
+  font-size: 11px;
+  color: var(--rl-text-secondary);
+  margin: 6px 0 0;
 }
 
 .error {

@@ -431,3 +431,12 @@ verify_jwt = true
 # only ever invoked from the logged-in reader view.
 [functions.translate]
 verify_jwt = true
+
+# file-import (markdown/docx) and pdf-import run as the caller's own
+# Supabase session, same as snippet — both are only ever invoked from the
+# logged-in "Add bookmark" dialog.
+[functions.file-import]
+verify_jwt = true
+
+[functions.pdf-import]
+verify_jwt = true
