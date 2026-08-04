@@ -344,6 +344,79 @@ describe("AddBookmarkDialog", () => {
     expect(wrapper.text()).toContain("file is empty");
   });
 
+  test("clicking the dropzone opens the native file picker", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    const input = wrapper.get("input[type=file]").element as HTMLInputElement;
+    const click = vi.spyOn(input, "click");
+    await wrapper.get(".dropzone").trigger("click");
+
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+
+  test("dragging a file over the dropzone highlights it, and leaving clears the highlight", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    const dropzone = wrapper.get(".dropzone");
+    expect(dropzone.classes()).not.toContain("dragging");
+
+    await dropzone.trigger("dragenter");
+    expect(dropzone.classes()).toContain("dragging");
+
+    await dropzone.trigger("dragleave");
+    expect(dropzone.classes()).not.toContain("dragging");
+  });
+
+  test("dropping a valid file selects it, clears the drag highlight, and enables submit", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    const dropzone = wrapper.get(".dropzone");
+    await dropzone.trigger("dragenter");
+
+    const file = new File(["# hi"], "notes.md", { type: "text/markdown" });
+    await dropzone.trigger("drop", { dataTransfer: { files: [file] } });
+
+    expect(dropzone.classes()).not.toContain("dragging");
+    expect(wrapper.text()).toContain("notes.md");
+    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeUndefined();
+  });
+
+  test("dropping an unsupported file shows an error and does not select it", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    const dropzone = wrapper.get(".dropzone");
+    const file = new File(["x"], "legacy.doc");
+    await dropzone.trigger("drop", { dataTransfer: { files: [file] } });
+
+    expect(wrapper.text()).toContain("Unsupported file type");
+    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+  });
+
+  test("a dropped file submits through the same path as a picked file", async () => {
+    const store = useBookmarksStore();
+    store.addFile = vi.fn().mockResolvedValue({ error: null });
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("button.mode-file").trigger("click");
+
+    const file = new File(["# hi"], "notes.md", { type: "text/markdown" });
+    await wrapper.get(".dropzone").trigger("drop", { dataTransfer: { files: [file] } });
+    await wrapper.get("form").trigger("submit");
+    await wrapper.vm.$nextTick();
+
+    expect(store.addFile).toHaveBeenCalledWith(file);
+    expect(wrapper.find("dialog").exists()).toBe(false);
+  });
+
   test("cancelling the duplicate prompt returns to the form without adding", async () => {
     const store = useBookmarksStore();
     store.add = vi.fn().mockResolvedValue({ error: null, duplicate: true });

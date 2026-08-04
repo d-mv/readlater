@@ -18,6 +18,9 @@ const selectedFile = shallowRef<File | null>(null);
 const error = shallowRef<string | null>(null);
 const submitting = shallowRef(false);
 const duplicate = shallowRef(false);
+const fileInput = shallowRef<HTMLInputElement | null>(null);
+const isDragging = shallowRef(false);
+const dragDepth = shallowRef(0);
 
 function open() {
   mode.value = "url";
@@ -46,8 +49,12 @@ function onSnippetPaste(event: ClipboardEvent) {
 }
 
 function onFileChange(event: Event) {
-  error.value = null;
   const file = (event.target as HTMLInputElement).files?.[0] ?? null;
+  handleFile(file);
+}
+
+function handleFile(file: File | null) {
+  error.value = null;
   if (!file) {
     selectedFile.value = null;
     return;
@@ -61,11 +68,39 @@ function onFileChange(event: Event) {
   }
   if (file.size > maxBytesForFileKind(kind)) {
     selectedFile.value = null;
-    error.value = `File exceeds the ${FILE_KIND_LIMIT_LABEL[kind]} limit for this file type.`;
+    error.value = `File exceeds the ${FILE_KIND_LIMIT_LABEL[kind]} limit for this type.`;
     return;
   }
 
   selectedFile.value = file;
+}
+
+function openFilePicker() {
+  fileInput.value?.click();
+}
+
+function onDragEnter(event: DragEvent) {
+  event.preventDefault();
+  dragDepth.value += 1;
+  isDragging.value = true;
+}
+
+function onDragOver(event: DragEvent) {
+  event.preventDefault();
+}
+
+function onDragLeave(event: DragEvent) {
+  event.preventDefault();
+  dragDepth.value = Math.max(0, dragDepth.value - 1);
+  if (dragDepth.value === 0) isDragging.value = false;
+}
+
+function onDrop(event: DragEvent) {
+  event.preventDefault();
+  dragDepth.value = 0;
+  isDragging.value = false;
+  const file = event.dataTransfer?.files?.[0] ?? null;
+  handleFile(file);
 }
 
 async function onSubmit() {
@@ -227,18 +262,55 @@ async function confirmDuplicate() {
         </template>
         <template v-else>
           <label class="field-label" for="bookmark-file">File</label>
-          <input
-            id="bookmark-file"
-            type="file"
-            class="field-input file-input"
-            accept=".md,.markdown,.docx,.pdf"
+          <div
+            class="dropzone"
+            :class="{ dragging: isDragging, filled: selectedFile }"
+            tabindex="0"
+            role="button"
+            aria-label="Choose a file or drop it here"
             autofocus
-            @change="onFileChange"
-          />
-          <p v-if="selectedFile" class="file-selected">{{ selectedFile.name }}</p>
-          <p class="file-hint">
-            Markdown (.md, up to 500KB), Word (.docx, up to 5MB), or PDF (up to 20MB).
-          </p>
+            @click="openFilePicker"
+            @keydown.enter="openFilePicker"
+            @keydown.space.prevent="openFilePicker"
+            @dragenter="onDragEnter"
+            @dragover="onDragOver"
+            @dragleave="onDragLeave"
+            @drop="onDrop"
+          >
+            <input
+              id="bookmark-file"
+              ref="fileInput"
+              type="file"
+              class="file-input-hidden"
+              accept=".md,.markdown,.docx,.pdf"
+              tabindex="-1"
+              @change="onFileChange"
+              @click.stop
+            />
+            <svg
+              class="dropzone-icon"
+              width="28"
+              height="28"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.5"
+            >
+              <path d="M12 15V3m0 0 4 4m-4-4-4 4" stroke-linecap="round" stroke-linejoin="round" />
+              <path
+                d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+            <p v-if="selectedFile" class="dropzone-filename">{{ selectedFile.name }}</p>
+            <p v-else class="dropzone-text">
+              <span class="dropzone-link">Click to upload</span> or drag and drop
+            </p>
+            <p class="file-hint">
+              Markdown (.md, up to 500KB), Word (.docx, up to 5MB), or PDF (up to 20MB)
+            </p>
+          </div>
         </template>
 
         <p v-if="error" class="error">{{ error }}</p>
@@ -361,21 +433,92 @@ async function confirmDuplicate() {
   font-family: inherit;
 }
 
-.file-input {
-  padding: 8px 12px;
-  font-size: 13px;
+.file-input-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.file-selected {
-  font-size: 12px;
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 140px;
+  border-radius: var(--rl-radius);
+  border: 1px dashed var(--rl-border);
+  background: var(--rl-bg);
+  color: var(--rl-text-secondary);
+  padding: 20px 16px;
+  box-sizing: border-box;
+  cursor: pointer;
+  text-align: center;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.dropzone:hover,
+.dropzone:focus-visible {
+  border-color: var(--rl-accent);
+}
+
+.dropzone:focus-visible {
+  outline: 2px solid var(--rl-accent);
+  outline-offset: 2px;
+}
+
+.dropzone.dragging {
+  border-color: var(--rl-accent);
+  border-style: solid;
+  background: color-mix(in srgb, var(--rl-accent) 8%, var(--rl-bg));
+}
+
+.dropzone.filled {
+  border-style: solid;
+  border-color: var(--rl-accent);
+}
+
+.dropzone-icon {
+  color: var(--rl-text-secondary);
+  margin-bottom: 4px;
+}
+
+.dropzone.filled .dropzone-icon,
+.dropzone.dragging .dropzone-icon {
+  color: var(--rl-accent);
+}
+
+.dropzone-text {
+  font-size: 13px;
+  margin: 0;
+}
+
+.dropzone-link {
+  color: var(--rl-accent);
+  font-weight: 500;
+}
+
+.dropzone-filename {
+  font-size: 13px;
+  font-weight: 500;
   color: var(--rl-text-primary);
-  margin: 6px 0 0;
+  margin: 0;
+  word-break: break-all;
 }
 
 .file-hint {
   font-size: 11px;
   color: var(--rl-text-secondary);
-  margin: 6px 0 0;
+  margin: 8px 0 0;
 }
 
 .error {
