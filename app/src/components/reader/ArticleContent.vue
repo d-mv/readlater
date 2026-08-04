@@ -55,7 +55,12 @@ function onResize() {
 onMounted(() => window.addEventListener("resize", onResize));
 onUnmounted(() => window.removeEventListener("resize", onResize));
 
-const md = new MarkdownIt();
+// html: true lets raw HTML in the source (e.g. from converted Word/PDF
+// uploads) pass through to the renderer instead of being escaped as text;
+// DOMPurify.sanitize below still strips anything unsafe. HTML written inside
+// a code span/block is unaffected — markdown-it always escapes that as
+// literal text regardless of this option.
+const md = new MarkdownIt({ html: true });
 
 const defaultLinkOpen =
   md.renderer.rules.link_open ??

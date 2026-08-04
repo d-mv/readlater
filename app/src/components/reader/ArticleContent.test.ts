@@ -34,6 +34,29 @@ describe("ArticleContent", () => {
     expect(wrapper.element.querySelector("[onerror]")).toBeNull();
   });
 
+  test("renders raw HTML embedded in the markdown source, not just markdown syntax", () => {
+    const wrapper = mount(ArticleContent, {
+      props: {
+        contentMd:
+          '<img src="https://example.com/logo.png" style="height:64px"/>\n\n<div align="center">⁂</div>',
+      },
+    });
+    const img = wrapper.find("img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("https://example.com/logo.png");
+    const div = wrapper.find("div[align='center']");
+    expect(div.exists()).toBe(true);
+    expect(div.text()).toBe("⁂");
+  });
+
+  test("keeps HTML-shaped text inside a code span as literal text instead of parsing it as an element", () => {
+    const wrapper = mount(ArticleContent, {
+      props: { contentMd: 'Use `<img src="x"/>` to embed an image.' },
+    });
+    expect(wrapper.find("img").exists()).toBe(false);
+    expect(wrapper.find("code").text()).toBe('<img src="x"/>');
+  });
+
   test("renders nothing when content is null", () => {
     const wrapper = mount(ArticleContent, { props: { contentMd: null } });
     expect(wrapper.find(".article").html()).toContain('class="article"');
