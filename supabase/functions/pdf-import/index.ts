@@ -60,10 +60,13 @@ export async function handlePdfImport(
 
   if (bytes.byteLength > MAX_PDF_BYTES) return json("file exceeds the 20MB limit for PDFs", 400);
 
+  // Path is a fresh UUID per upload and never overwritten, so it's safe to
+  // cache long-term rather than re-pulling the same bytes from Supabase on
+  // every "view original" open.
   const path = pdfObjectPath(user.id);
   const { error: uploadError } = await supabase.storage
     .from(PDF_BUCKET)
-    .upload(path, bytes, { contentType: "application/pdf" });
+    .upload(path, bytes, { contentType: "application/pdf", cacheControl: "31536000" });
   if (uploadError) return json(uploadError.message, 500);
 
   // A PDF with no extractable text layer (scanned images, etc.) is an

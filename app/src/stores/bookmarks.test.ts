@@ -954,6 +954,81 @@ describe("useBookmarksStore", () => {
       expect(order).toHaveBeenCalledTimes(2);
     });
 
+    test("startPolling requests a lightweight column set, not full article content", async () => {
+      const order = vi.fn().mockResolvedValue({ data: [], error: null });
+      const select = vi.fn((_cols: string) => ({ order }));
+      from.mockReturnValue({ select });
+
+      const store = useBookmarksStore();
+      store.startPolling();
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(select).toHaveBeenCalledTimes(1);
+      const requestedColumns = select.mock.calls[0][0];
+      expect(requestedColumns).not.toContain("content_md");
+    });
+
+    test("startPolling only re-fetches full content for bookmarks whose status changed", async () => {
+      const seedRows = [
+        makeBookmark({ id: "1", status: "ready", title: "Unchanged" }),
+        makeBookmark({ id: "2", status: "pending", title: "Stale" }),
+      ];
+      const seedOrder = vi.fn().mockResolvedValue({ data: seedRows, error: null });
+      const lightOrder = vi.fn().mockResolvedValue({
+        data: [
+          { id: "1", status: "ready", archived: false, read_at: null },
+          { id: "2", status: "ready", archived: false, read_at: null },
+        ],
+        error: null,
+      });
+      const inMock = vi.fn().mockResolvedValue({
+        data: [makeBookmark({ id: "2", status: "ready", title: "Now ready" })],
+        error: null,
+      });
+
+      const select = vi.fn((cols: string) =>
+        cols === "id, status, archived, read_at"
+          ? { order: lightOrder }
+          : { order: seedOrder, in: inMock },
+      );
+      from.mockReturnValue({ select });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      store.startPolling();
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(inMock).toHaveBeenCalledWith("id", ["2"]);
+      expect(store.bookmarks.find((b) => b.id === "2")?.title).toBe("Now ready");
+      expect(store.bookmarks.find((b) => b.id === "1")?.title).toBe("Unchanged");
+    });
+
+    test("startPolling skips the full-content query entirely when nothing changed", async () => {
+      const seedRows = [makeBookmark({ id: "1", status: "ready" })];
+      const seedOrder = vi.fn().mockResolvedValue({ data: seedRows, error: null });
+      const lightOrder = vi.fn().mockResolvedValue({
+        data: [{ id: "1", status: "ready", archived: false, read_at: null }],
+        error: null,
+      });
+      const inMock = vi.fn();
+
+      const select = vi.fn((cols: string) =>
+        cols === "id, status, archived, read_at"
+          ? { order: lightOrder }
+          : { order: seedOrder, in: inMock },
+      );
+      from.mockReturnValue({ select });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      store.startPolling();
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(inMock).not.toHaveBeenCalled();
+    });
+
     test("stopPolling cancels further re-fetches", async () => {
       const order = vi.fn().mockResolvedValue({ data: [], error: null });
       from.mockReturnValue({ select: () => ({ order }) });

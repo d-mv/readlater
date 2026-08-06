@@ -10,7 +10,13 @@ export function makeThumbnailUploader(supabase: SupabaseClient) {
     const ext = contentType.split("/")[1] ?? "jpg";
     const path = `youtube/${crypto.randomUUID()}.${ext}`;
 
-    const { error } = await supabase.storage.from(BUCKET).upload(path, bytes, { contentType });
+    // Path is a fresh UUID per upload and never overwritten, so the object is
+    // immutable — cache it for a year instead of the SDK's 1-hour default to
+    // avoid re-pulling the same thumbnail bytes from Supabase on every repeat
+    // view once the default cache entry expires.
+    const { error } = await supabase.storage
+      .from(BUCKET)
+      .upload(path, bytes, { contentType, cacheControl: "31536000" });
     if (error) throw error;
 
     const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);

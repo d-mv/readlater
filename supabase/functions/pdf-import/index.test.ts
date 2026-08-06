@@ -18,9 +18,11 @@ function fakeSupabase(opts: {
   };
   const from = (_table: string) => ({ insert });
 
+  let lastUploadOptions: unknown;
   const storageFrom = (_bucket: string) => ({
-    upload: (path: string, _bytes: Uint8Array, _opts: unknown) => {
+    upload: (path: string, _bytes: Uint8Array, uploadOptions: unknown) => {
       lastUploadPath = path;
+      lastUploadOptions = uploadOptions;
       return Promise.resolve({ error: opts.uploadError ?? null });
     },
     remove: (paths: string[]) => {
@@ -38,6 +40,9 @@ function fakeSupabase(opts: {
     },
     get lastUploadPath() {
       return lastUploadPath;
+    },
+    get lastUploadOptions() {
+      return lastUploadOptions;
     },
     get removed() {
       return removed;
@@ -67,6 +72,12 @@ Deno.test("handlePdfImport: stores the original and saves extracted text as mark
   assertEquals(supabase.lastInsertedRow?.title, "Annual Report");
   assertEquals(supabase.lastInsertedRow?.pdf_path, supabase.lastUploadPath);
   assertMatchUserPrefix(supabase.lastUploadPath, "user-1");
+  // Path is a fresh UUID per upload and never overwritten, so it's safe (and
+  // cheaper on repeat "view original" opens) to cache it long-term.
+  assertEquals(
+    (supabase.lastUploadOptions as { cacheControl?: string } | undefined)?.cacheControl,
+    "31536000",
+  );
   assertEquals(body.bookmark.id, "b1");
 });
 

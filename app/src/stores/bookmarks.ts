@@ -9,6 +9,11 @@ import * as offlineDb from "../lib/offlineDb";
 import { useOfflineCacheStore } from "./offlineCache";
 
 const BOOKMARK_SELECT = "*, tags(id, name, color)";
+// Deliberately excludes content_md/translated_content_md — polling runs every
+// few seconds for as long as the list view is mounted, so pulling full article
+// bodies on every tick blows through Supabase egress for no reason. Only rows
+// whose status/archived/read_at actually changed get a full re-fetch below.
+const POLL_SELECT = "id, status, archived, read_at";
 const UNIQUE_VIOLATION = "23505";
 const POLL_INTERVAL_MS = 5000;
 const PDF_BUCKET = "bookmark-pdfs";
@@ -85,23 +90,29 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return [...counts.entries()].filter(([, count]) => count === tagIds.length).map(([id]) => id);
   }
 
+  // Shared by fetch() and pollForChanges() so both honor the active search/tag
+  // filters and ordering — they only differ in which columns they select.
+  async function queryBookmarks<T>(select: string): Promise<T[]> {
+    let query = supabase.from("bookmarks").select(select);
+
+    const trimmedQuery = searchQuery.value.trim();
+    if (trimmedQuery) {
+      query = query.textSearch("search_vector", trimmedQuery, { type: "websearch" });
+    }
+
+    if (activeTagIds.value.length > 0) {
+      const matchingIds = await bookmarkIdsMatchingAllTags(activeTagIds.value);
+      query = query.in("id", matchingIds);
+    }
+
+    const { data } = await query.order("created_at", { ascending: false });
+    return (data ?? []) as T[];
+  }
+
   async function fetch() {
     loading.value = true;
     try {
-      let query = supabase.from("bookmarks").select(BOOKMARK_SELECT);
-
-      const trimmedQuery = searchQuery.value.trim();
-      if (trimmedQuery) {
-        query = query.textSearch("search_vector", trimmedQuery, { type: "websearch" });
-      }
-
-      if (activeTagIds.value.length > 0) {
-        const matchingIds = await bookmarkIdsMatchingAllTags(activeTagIds.value);
-        query = query.in("id", matchingIds);
-      }
-
-      const { data } = await query.order("created_at", { ascending: false });
-      bookmarks.value = data ?? [];
+      bookmarks.value = await queryBookmarks<Bookmark>(BOOKMARK_SELECT);
     } catch {
       const offlineBookmarks = await loadOfflineBookmarks();
       const trimmedQuery = searchQuery.value.trim().toLowerCase();
@@ -123,6 +134,47 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
   }
 
+  // Lightweight companion to fetch(): compares just id/status/archived/read_at
+  // against what's already loaded, then only pulls full content (content_md,
+  // translated_content_md, etc.) for the rows that actually changed or are new.
+  async function pollForChanges() {
+    type PollRow = Pick<Bookmark, "id" | "status" | "archived" | "read_at">;
+    let rows: PollRow[];
+    try {
+      rows = await queryBookmarks<PollRow>(POLL_SELECT);
+    } catch {
+      return;
+    }
+
+    const currentById = new Map(bookmarks.value.map((b) => [b.id, b]));
+    const staleIds = rows
+      .filter((row) => {
+        const existing = currentById.get(row.id);
+        return (
+          !existing ||
+          existing.status !== row.status ||
+          existing.archived !== row.archived ||
+          existing.read_at !== row.read_at
+        );
+      })
+      .map((row) => row.id);
+
+    const freshById = new Map<string, Bookmark>();
+    if (staleIds.length > 0) {
+      const { data: fresh } = await supabase
+        .from("bookmarks")
+        .select(BOOKMARK_SELECT)
+        .in("id", staleIds);
+      for (const row of fresh ?? []) freshById.set(row.id, row);
+    }
+
+    bookmarks.value = rows
+      .map((row) => freshById.get(row.id) ?? currentById.get(row.id))
+      .filter((b): b is Bookmark => b !== undefined);
+
+    offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
+  }
+
   // The list is otherwise loaded once on mount, so without this a bookmark
   // captured from another tab (bookmarklet popup, share target) or one still
   // being processed server-side never shows up or updates until the page is
@@ -130,7 +182,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   function startPolling() {
     if (pollTimer !== undefined) return;
     pollTimer = setInterval(() => {
-      fetch();
+      pollForChanges();
     }, POLL_INTERVAL_MS);
   }
 
