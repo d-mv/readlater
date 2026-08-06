@@ -24,6 +24,7 @@ const router = createRouter({
       component: () => import("../views/ShareTargetView.vue"),
     },
     { path: "/capture", name: "capture", component: () => import("../views/CaptureView.vue") },
+    { path: "/settings", name: "settings", component: () => import("../views/SettingsView.vue") },
   ],
 });
 

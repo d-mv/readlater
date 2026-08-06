@@ -5,6 +5,7 @@ import { detectBookmarkType } from "../utils/bookmarkType";
 import { truncateTitle } from "../utils/captureText";
 import { arrayBufferToBase64 } from "../utils/base64";
 import { detectFileKind, maxBytesForFileKind } from "../utils/fileKind";
+import { normalizeUrl } from "../utils/normalizeUrl";
 import * as offlineDb from "../lib/offlineDb";
 import { useOfflineCacheStore } from "./offlineCache";
 
@@ -372,7 +373,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   }
 
   async function findByNormalizedUrl(url: string) {
-    const normalized = url.toLowerCase().replace(/\/+$/, "");
+    const normalized = normalizeUrl(url);
     const { data } = await supabase
       .from("bookmarks")
       .select("id, title, created_at")

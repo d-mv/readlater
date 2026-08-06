@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { IconSettings } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
 import { useDebouncedFn } from "../composables/useDebouncedFn";
@@ -68,6 +69,14 @@ function onToggleTag(tagId: string) {
       <h1 class="app-title">Read Later</h1>
       <div class="title-actions">
         <AddBookmarkDialog />
+        <button
+          class="icon-btn"
+          type="button"
+          aria-label="Settings"
+          @click="router.push({ name: 'settings' })"
+        >
+          <IconSettings :size="18" />
+        </button>
         <ThemeToggle />
       </div>
     </div>
@@ -124,6 +133,15 @@ function onToggleTag(tagId: string) {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.icon-btn {
+  display: inline-flex;
+  border: none;
+  background: transparent;
+  color: var(--rl-text-secondary);
+  cursor: pointer;
+  padding: 0;
 }
 
 .search-input {
