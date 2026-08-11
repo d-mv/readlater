@@ -78,15 +78,44 @@ const isYoutube = computed(
 );
 const playing = ref(false);
 
+function sanitizeMarkdownImageLinks(markdown: string): string {
+  if (!markdown) return "";
+  let result = markdown.replace(
+    /\[\s*(!\[[\s\S]*?\]\((?:[^()]+|\([^()]*\))*\))\s*\]\(([^)]+)\)/g,
+    (_match, imgMd, href) => {
+      const srcMatch = imgMd.match(/!\[[\s\S]*?\]\(([^)]+)\)/);
+      const src = srcMatch ? srcMatch[1].trim() : "";
+      const cleanHref = href.trim();
+      if (src && cleanHref === src) {
+        return imgMd;
+      }
+      return `[${imgMd}](${cleanHref})`;
+    },
+  );
+
+  result = result.replace(/\[\s*(<img[\s\S]*?>)\s*\]\(([^)]+)\)/gi, (_match, imgHtml, href) => {
+    const srcMatch = imgHtml.match(/src=["\x27]([^"\x27]+)["\x27]/i);
+    const src = srcMatch ? srcMatch[1].trim() : "";
+    const cleanHref = href.trim();
+    if (src && cleanHref === src) {
+      return imgHtml;
+    }
+    return `[${imgHtml}](${cleanHref})`;
+  });
+
+  return result;
+}
+
 // The worker bakes the title and thumbnail into content_md as a markdown
 // heading + image — both are already shown elsewhere (title in the reader
 // header, thumbnail via the click-to-play affordance above), so rendering
 // content_md as-is would duplicate them.
 const displayContentMd = computed(() => {
-  if (!isYoutube.value) return props.contentMd ?? "";
-  return (props.contentMd ?? "")
-    .replace(/^#\s+.*\n+/, "")
-    .replace(/^!\[thumbnail\]\([^)]*\)\n*/, "");
+  let raw = props.contentMd ?? "";
+  if (isYoutube.value) {
+    raw = raw.replace(/^#\s+.*\n+/, "").replace(/^!\[thumbnail\]\([^)]*\)\n*/, "");
+  }
+  return sanitizeMarkdownImageLinks(raw);
 });
 
 const embedUrl = computed(() => `https://www.youtube-nocookie.com/embed/${props.youtubeVideoId}`);

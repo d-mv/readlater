@@ -97,6 +97,35 @@ describe("ArticleContent", () => {
     expect(link.find("img").attributes("src")).toBe("https://example.com/thumb.jpg");
   });
 
+  test("cleans up broken markdown image link rudiments with internal newlines", () => {
+    const wrapper = mount(ArticleContent, {
+      props: {
+        contentMd: "[\n\n![](https://example.com/photo.jpg)\n\n](https://example.com/photo.jpg)",
+      },
+    });
+    expect(wrapper.find("a").exists()).toBe(false);
+    const img = wrapper.find("img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("https://example.com/photo.jpg");
+    expect(wrapper.text()).not.toContain("[");
+    expect(wrapper.text()).not.toContain("]");
+  });
+
+  test("repairs broken markdown link wrapping image when target differs from image src", () => {
+    const wrapper = mount(ArticleContent, {
+      props: {
+        contentMd:
+          "[\n\n![Thumb](https://example.com/thumb.jpg)\n\n](https://example.com/full-article)",
+      },
+    });
+    const link = wrapper.find("a");
+    expect(link.exists()).toBe(true);
+    expect(link.attributes("href")).toBe("https://example.com/full-article");
+    expect(link.find("img").attributes("src")).toBe("https://example.com/thumb.jpg");
+    expect(wrapper.text()).not.toContain("[");
+    expect(wrapper.text()).not.toContain("]");
+  });
+
   describe("youtube embed", () => {
     const youtubeProps = {
       contentMd:

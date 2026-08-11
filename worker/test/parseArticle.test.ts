@@ -89,4 +89,28 @@ describe("parseArticle", () => {
 
     expect(renderCalled).toBe(false);
   });
+
+  test("cleans up linked images in block elements like figure or div without leaving markdown link rudiments", async () => {
+    const htmlWithLinkedImage = `
+<!doctype html>
+<html>
+<head><title>Article with linked image</title></head>
+<body>
+  <article>
+    <h1>Article with linked image</h1>
+    <p>This is a paragraph before the image that adds enough character count to pass the minimum extracted length check of 200 characters in Readability. Adding more descriptive words here to ensure it reaches two hundred characters easily.</p>
+    <a href="https://example.com/image.png"><figure><img src="https://example.com/image.png" alt="Diagram"></figure></a>
+    <p>This is a paragraph after the image that adds further content to the article to make sure everything parses nicely.</p>
+  </article>
+</body>
+</html>
+`;
+    const result = await parseArticle(
+      "https://example.com/linked-img",
+      async () => htmlWithLinkedImage,
+    );
+    expect(result.content_md).toContain("![Diagram](https://example.com/image.png)");
+    expect(result.content_md).not.toContain("[\n");
+    expect(result.content_md).not.toContain("\n]");
+  });
 });

@@ -37,6 +37,46 @@ function extractArticle(html: string, url: string) {
   return isSubstantial ? article : null;
 }
 
+export function createTurndownService(): TurndownService {
+  const turndown = new TurndownService();
+
+  turndown.addRule("cleanLinkedImagesAndBlocks", {
+    filter: (node) => {
+      if (node.nodeName !== "A") return false;
+      return (
+        node.querySelector("img") !== null ||
+        Array.from(node.children).some((child) =>
+          ["FIGURE", "DIV", "P", "SECTION"].includes(child.nodeName),
+        )
+      );
+    },
+    replacement: (content, node) => {
+      const href = (node as HTMLElement).getAttribute("href") || "";
+      const title = (node as HTMLElement).getAttribute("title") || "";
+      const titleAttr = title ? ` "${title}"` : "";
+
+      const cleanContent = content.trim().replace(/\n{2,}/g, "\n");
+
+      const imgs = (node as HTMLElement).querySelectorAll("img");
+      const img = imgs[0];
+      const textContent = (node as HTMLElement).textContent?.trim() || "";
+      const imgAlt = imgs.length === 1 && img ? img.getAttribute("alt") || "" : "";
+
+      if (imgs.length === 1 && img && href) {
+        const src = img.getAttribute("src") || "";
+        if (src && href.trim() === src.trim() && textContent === imgAlt) {
+          return `\n\n![${imgAlt}](${src}${titleAttr})\n\n`;
+        }
+      }
+
+      if (!cleanContent) return "";
+      return `[${cleanContent}](${href}${titleAttr})`;
+    },
+  });
+
+  return turndown;
+}
+
 export async function parseArticle(
   url: string,
   fetchHtml: FetchHtml = defaultFetchHtml,
@@ -54,7 +94,7 @@ export async function parseArticle(
     throw new Error(`Readability could not extract article content from ${url}`);
   }
 
-  const rawContentMd = new TurndownService().turndown(article.content ?? "");
+  const rawContentMd = createTurndownService().turndown(article.content ?? "");
   const content_md = stripDuplicateTitleHeading(rawContentMd, article.title ?? null);
   const words = wordCount(content_md);
 
