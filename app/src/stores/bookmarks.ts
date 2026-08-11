@@ -510,6 +510,13 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       .catch(() => {});
   }
 
+  async function updateProgress(id: string, progress: number) {
+    const rounded = Math.round(progress * 10000) / 10000;
+    const bookmark = bookmarks.value.find((b) => b.id === id);
+    if (bookmark) bookmark.progress = rounded;
+    await supabase.from("bookmarks").update({ progress: rounded }).eq("id", id);
+  }
+
   return {
     bookmarks,
     filter,
@@ -544,6 +551,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     setPublic,
     addTag,
     removeTag,
+    updateProgress,
   };
 });
 

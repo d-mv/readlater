@@ -72,6 +72,31 @@ describe("ArticleContent", () => {
     expect(link.attributes("rel")).toBe("noopener noreferrer");
   });
 
+  test("removes markdown link around image when link target matches image src", () => {
+    const wrapper = mount(ArticleContent, {
+      props: {
+        contentMd: "[![Image Alt](https://example.com/photo.jpg)](https://example.com/photo.jpg)",
+      },
+    });
+    expect(wrapper.find("a").exists()).toBe(false);
+    const img = wrapper.find("img");
+    expect(img.exists()).toBe(true);
+    expect(img.attributes("src")).toBe("https://example.com/photo.jpg");
+    expect(img.attributes("alt")).toBe("Image Alt");
+  });
+
+  test("preserves link around image when link target differs from image src", () => {
+    const wrapper = mount(ArticleContent, {
+      props: {
+        contentMd: "[![Thumb](https://example.com/thumb.jpg)](https://example.com/full-article)",
+      },
+    });
+    const link = wrapper.find("a");
+    expect(link.exists()).toBe(true);
+    expect(link.attributes("href")).toBe("https://example.com/full-article");
+    expect(link.find("img").attributes("src")).toBe("https://example.com/thumb.jpg");
+  });
+
   describe("youtube embed", () => {
     const youtubeProps = {
       contentMd:

@@ -73,6 +73,7 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     pdf_path: null,
     pdf_parsed: false,
     view_mode: null,
+    progress: 0,
     ...overrides,
   };
 }
@@ -1053,6 +1054,24 @@ describe("useBookmarksStore", () => {
       await vi.advanceTimersByTimeAsync(5000);
 
       expect(order).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("updateProgress", () => {
+    test("updates progress on local bookmark and calls supabase update", async () => {
+      const eqUpdate = vi.fn().mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq: eqUpdate }));
+      from.mockReturnValue({ update });
+
+      const store = useBookmarksStore();
+      const bm = makeBookmark({ id: "bm-1", progress: 0 });
+      store.bookmarks = [bm];
+
+      await store.updateProgress("bm-1", 0.4258);
+
+      expect(store.bookmarks[0].progress).toBe(0.4258);
+      expect(update).toHaveBeenCalledWith({ progress: 0.4258 });
+      expect(eqUpdate).toHaveBeenCalledWith("id", "bm-1");
     });
   });
 });

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { IconLoader2, IconAlertTriangle, IconRefresh } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
 import { useScrollProgress } from "../composables/useScrollProgress";
+import { useDebouncedFn } from "../composables/useDebouncedFn";
 import { readerByline } from "../utils/format";
 import { readingTimeFromWordCount, wordCount } from "../utils/reading";
 import ReaderHeader from "../components/reader/ReaderHeader.vue";
@@ -34,6 +35,46 @@ const isNotReady = computed(
 
 const scrollContainer = useTemplateRef<HTMLDivElement>("scrollContainer");
 const { progress } = useScrollProgress(scrollContainer);
+
+const restoredScrollForId = ref<string | null>(null);
+
+function restoreReadingProgress() {
+  if (!bookmark.value || bookmark.value.status !== "ready" || !scrollContainer.value) return;
+  if (restoredScrollForId.value === bookmark.value.id) return;
+  restoredScrollForId.value = bookmark.value.id;
+
+  const targetProgress = bookmark.value.progress ?? 0;
+  if (targetProgress <= 0) return;
+
+  nextTick(() => {
+    requestAnimationFrame(() => {
+      const el = scrollContainer.value;
+      if (!el) return;
+      const scrollable = el.scrollHeight - el.clientHeight;
+      if (scrollable > 0) {
+        el.scrollTop = Math.round(targetProgress * scrollable);
+      }
+    });
+  });
+}
+
+watch(
+  () => [bookmark.value?.id, bookmark.value?.status, scrollContainer.value],
+  restoreReadingProgress,
+  { immediate: true },
+);
+
+const saveProgressDebounced = useDebouncedFn((prog: number) => {
+  if (bookmark.value && bookmark.value.status === "ready") {
+    store.updateProgress(bookmark.value.id, prog);
+  }
+}, 500);
+
+watch(progress, (newVal) => {
+  if (bookmark.value && restoredScrollForId.value === bookmark.value.id) {
+    saveProgressDebounced(newVal);
+  }
+});
 
 let pollTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -76,8 +117,8 @@ async function onArchive() {
   router.push({ name: "list" });
 }
 
-async function onDelete() {
-  await store.remove(props.id);
+function onDelete() {
+  store.remove(props.id);
   router.push({ name: "list" });
 }
 

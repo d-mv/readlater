@@ -1,13 +1,15 @@
+import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import type { Bookmark } from "../lib/supabase";
 
-const { from, invoke, storageCreateSignedUrl, storageRemove } = vi.hoisted(() => ({
+const { from, invoke, storageCreateSignedUrl, storageRemove, pushMock } = vi.hoisted(() => ({
   from: vi.fn(),
   invoke: vi.fn(),
   storageCreateSignedUrl: vi.fn(),
   storageRemove: vi.fn(),
+  pushMock: vi.fn(),
 }));
 vi.mock("../lib/supabase", () => ({
   supabase: {
@@ -16,8 +18,7 @@ vi.mock("../lib/supabase", () => ({
     storage: { from: () => ({ createSignedUrl: storageCreateSignedUrl, remove: storageRemove }) },
   },
 }));
-
-vi.mock("vue-router", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("vue-router", () => ({ useRouter: () => ({ push: pushMock }) }));
 
 const { default: ReaderView } = await import("./ReaderView.vue");
 
@@ -44,6 +45,7 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     pdf_path: null,
     pdf_parsed: false,
     view_mode: null,
+    progress: 0,
     read_at: null,
     archived: false,
     is_public: false,
@@ -434,6 +436,94 @@ describe("ReaderView", () => {
       expect(wrapper.find(".pdf-view-bar").exists()).toBe(false);
       await wrapper.find(".menu-trigger").trigger("click");
       expect(wrapper.find(".open-original").exists()).toBe(false);
+    });
+  });
+
+  describe("deleting", () => {
+    test("navigates back to the list immediately without awaiting deletion response from store", async () => {
+      let resolveRemove: (val?: unknown) => void = () => {};
+      const removePromise = new Promise((res) => {
+        resolveRemove = res;
+      });
+      const ready = makeBookmark({ id: "1", status: "ready" });
+      const single = vi.fn().mockResolvedValue({ data: ready, error: null });
+      const eqSelect = vi.fn(() => ({ single }));
+      const select = vi.fn(() => ({ eq: eqSelect }));
+      const eqDelete = vi.fn().mockReturnValue(removePromise);
+      const deleteFn = vi.fn(() => ({ eq: eqDelete }));
+      from.mockReturnValue({ select, delete: deleteFn });
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await wrapper.find(".menu-trigger").trigger("click");
+      await wrapper.find(".delete-item").trigger("click");
+
+      expect(pushMock).toHaveBeenCalledWith({ name: "list" });
+
+      resolveRemove();
+      await flushPromises();
+    });
+  });
+
+  describe("reading progress", () => {
+    test("restores scroll position based on saved progress in bookmark", async () => {
+      const ready = makeBookmark({
+        id: "1",
+        status: "ready",
+        progress: 0.5,
+        content_md: "Some long article text",
+      });
+      const single = vi.fn().mockResolvedValue({ data: ready, error: null });
+      const eqSelect = vi.fn(() => ({ single }));
+      const select = vi.fn(() => ({ eq: eqSelect }));
+      from.mockReturnValue({ select });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(scrollEl.scrollTop).toBe(400);
+    });
+
+    test("saves progress as the user scrolls", async () => {
+      const eqUpdate = vi.fn().mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq: eqUpdate }));
+      const ready = makeBookmark({
+        id: "1",
+        status: "ready",
+        progress: 0,
+        content_md: "Text",
+      });
+      const single = vi.fn().mockResolvedValue({ data: ready, error: null });
+      const eqSelect = vi.fn(() => ({ single }));
+      const select = vi.fn(() => ({ eq: eqSelect }));
+      from.mockReturnValue({ select, update });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      Object.defineProperty(scrollEl, "scrollTop", {
+        value: 400,
+        configurable: true,
+        writable: true,
+      });
+
+      scrollEl.dispatchEvent(new Event("scroll"));
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(600);
+
+      expect(update).toHaveBeenCalledWith({ progress: 0.5 });
     });
   });
 });

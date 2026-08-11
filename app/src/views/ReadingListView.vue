@@ -1,3 +1,7 @@
+<script lang="ts">
+let savedScrollPosition = 0;
+</script>
+
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import { useRouter } from "vue-router";
@@ -16,14 +20,24 @@ const router = useRouter();
 const store = useBookmarksStore();
 const offlineCache = useOfflineCacheStore();
 
+function onScroll() {
+  savedScrollPosition =
+    window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+}
+
 onMounted(() => {
   store.fetch();
   store.startPolling();
   offlineCache.init();
+  window.addEventListener("scroll", onScroll, { passive: true });
+  if (savedScrollPosition > 0) {
+    window.scrollTo(0, savedScrollPosition);
+  }
 });
 
 onUnmounted(() => {
   store.stopPolling();
+  window.removeEventListener("scroll", onScroll);
 });
 
 function onOpen(id: string) {
@@ -31,6 +45,8 @@ function onOpen(id: string) {
 }
 
 function onChangeFilter(filter: BookmarkFilter) {
+  savedScrollPosition = 0;
+  window.scrollTo(0, 0);
   store.setFilter(filter);
 }
 
@@ -51,10 +67,14 @@ const runSearch = useDebouncedFn((query: string) => {
 }, 300);
 
 function onSearchInput() {
+  savedScrollPosition = 0;
+  window.scrollTo(0, 0);
   runSearch(searchInput.value);
 }
 
 function onToggleTag(tagId: string) {
+  savedScrollPosition = 0;
+  window.scrollTo(0, 0);
   const next = store.activeTagIds.includes(tagId)
     ? store.activeTagIds.filter((id) => id !== tagId)
     : [...store.activeTagIds, tagId];

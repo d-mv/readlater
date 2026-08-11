@@ -44,6 +44,7 @@ export interface Bookmark {
   pdf_path: string | null;
   pdf_parsed: boolean;
   view_mode: "markdown" | "original" | null;
+  progress?: number | null;
 }
 
 export interface DuplicateBookmark {

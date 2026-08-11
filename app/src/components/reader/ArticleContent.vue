@@ -91,8 +91,33 @@ const displayContentMd = computed(() => {
 
 const embedUrl = computed(() => `https://www.youtube-nocookie.com/embed/${props.youtubeVideoId}`);
 
+function removeSelfImageLinks(html: string): string {
+  if (typeof window === "undefined" || !html) return html;
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+  const links = doc.querySelectorAll("a");
+  links.forEach((a) => {
+    const href = a.getAttribute("href");
+    if (!href) return;
+    const children = Array.from(a.childNodes).filter(
+      (node) =>
+        node.nodeType !== Node.TEXT_NODE || (node.textContent && node.textContent.trim() !== ""),
+    );
+    if (children.length === 1 && children[0].nodeName === "IMG") {
+      const img = children[0] as HTMLImageElement;
+      const src = img.getAttribute("src");
+      if (src && href.trim() === src.trim()) {
+        a.replaceWith(img);
+      }
+    }
+  });
+  return doc.body.innerHTML;
+}
+
 const safeHtml = computed(() =>
-  DOMPurify.sanitize(md.render(displayContentMd.value), { ADD_ATTR: ["target"] }),
+  removeSelfImageLinks(
+    DOMPurify.sanitize(md.render(displayContentMd.value), { ADD_ATTR: ["target"] }),
+  ),
 );
 </script>
 

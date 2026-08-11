@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, shallowRef, type Ref } from "vue";
+import { onUnmounted, shallowRef, watch, type Ref } from "vue";
 
 export function useScrollProgress(target: Ref<HTMLElement | null>) {
   const progress = shallowRef(0);
@@ -10,7 +10,16 @@ export function useScrollProgress(target: Ref<HTMLElement | null>) {
     progress.value = scrollable <= 0 ? 0 : Math.min(1, Math.max(0, el.scrollTop / scrollable));
   }
 
-  onMounted(() => target.value?.addEventListener("scroll", update));
+  watch(
+    target,
+    (el, oldEl) => {
+      oldEl?.removeEventListener("scroll", update);
+      el?.addEventListener("scroll", update);
+      if (el) update();
+    },
+    { immediate: true },
+  );
+
   onUnmounted(() => target.value?.removeEventListener("scroll", update));
 
   return { progress };
