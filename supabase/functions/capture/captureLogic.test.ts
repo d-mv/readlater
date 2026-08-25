@@ -21,6 +21,11 @@ Deno.test("isBareUrl: accepts an http URL with nothing else in the string", () =
   assertEquals(isBareUrl("https://example.com/post"), true);
 });
 
+Deno.test("isBareUrl: accepts a bare root domain URL with no path", () => {
+  assertEquals(isBareUrl("https://example.com"), true);
+  assertEquals(isBareUrl("http://example.org"), true);
+});
+
 Deno.test("isBareUrl: accepts a plain http (not https) URL", () => {
   assertEquals(isBareUrl("http://example.com/post"), true);
 });

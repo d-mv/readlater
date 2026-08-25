@@ -158,12 +158,7 @@ Notes on the shape:
   explicit `grant` in addition to RLS policies, or they're invisible to the
   Data API regardless of policy.
 
-Migrations, in order: `20260725000001_bookmarks.sql` →
-`20260726000001_bookmark_notes.sql` → `20260726000002_tags.sql` →
-`20260726000003_search.sql` → `20260726000004_url_normalization.sql` →
-`20260726000005_public_sharing.sql` → `20260727000001_youtube_video_id.sql` →
-`20260727000002_content_edited.sql` → `20260803000001_translated_content.sql`
-→ `20260804000001_pdf_support.sql`.
+Migrations: `20260825000001_initial_schema.sql` (flattened initial schema).
 
 ## 3. Capture paths
 

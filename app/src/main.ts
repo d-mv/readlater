@@ -5,6 +5,12 @@ import App from "./App.vue";
 import router from "./router";
 import { useAuthStore } from "./stores/auth";
 
+// Automatically reload the page if a dynamically imported chunk fails to load
+// (e.g. after a new deployment updates asset hashes on the server).
+window.addEventListener("vite:preloadError", () => {
+  window.location.reload();
+});
+
 const app = createApp(App);
 
 app.use(createPinia());

@@ -1,13 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
-import { MdEditor } from "md-editor-v3";
 import type { ToolbarNames } from "md-editor-v3";
-import "md-editor-v3/lib/style.css";
 import { IconPlayerPlayFilled } from "@tabler/icons-vue";
 import { useFontSizeStore } from "../../stores/fontSize";
 import { useThemeStore } from "../../stores/theme";
+
+const MdEditor = defineAsyncComponent(() =>
+  import("md-editor-v3").then((m) => {
+    import("md-editor-v3/lib/style.css");
+    return m.MdEditor;
+  }),
+);
 
 const NARROW_VIEWPORT_BREAKPOINT = 640;
 const EDITOR_TOOLBARS: ToolbarNames[] = [

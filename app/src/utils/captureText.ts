@@ -6,7 +6,8 @@ export function isBareUrl(s: string): boolean {
   const t = s.trim();
   try {
     const parsed = new URL(t);
-    return t === parsed.toString() && ALLOWED_SCHEMES.has(parsed.protocol);
+    if (!ALLOWED_SCHEMES.has(parsed.protocol)) return false;
+    return t === parsed.toString() || `${t}/` === parsed.toString();
   } catch {
     return false;
   }

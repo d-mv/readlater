@@ -41,7 +41,7 @@ const displayTitle = computed(() => {
   if (props.bookmark.title) return props.bookmark.title;
   if (isFailed.value) return "Failed to process";
   if (isPending.value) return "Processing…";
-  return props.bookmark.url ?? "Note";
+  return props.bookmark.url ?? (props.bookmark.type === "pdf" ? "PDF" : "Note");
 });
 </script>
 

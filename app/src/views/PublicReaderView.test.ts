@@ -33,6 +33,30 @@ describe("PublicReaderView", () => {
     expect(wrapper.find(".status-placeholder").exists()).toBe(false);
   });
 
+  test("renders a youtube embed with thumbnail when the public row is a video", async () => {
+    rpc.mockResolvedValue({
+      data: [
+        {
+          id: "yt-1",
+          title: "A public video",
+          author: "Creator",
+          reading_time: null,
+          content_md: "# A public video\n\n![thumbnail](https://thumb.example/1.jpg)",
+          type: "youtube",
+          youtube_video_id: "vid123",
+          thumbnail_url: "https://thumb.example/1.jpg",
+        },
+      ],
+      error: null,
+    });
+
+    const wrapper = mount(PublicReaderView, { props: { id: "yt-1" } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("A public video");
+    expect(wrapper.find("button.youtube-play").exists()).toBe(true);
+  });
+
   test("shows a not-found state when the RPC returns no rows", async () => {
     rpc.mockResolvedValue({ data: [], error: null });
 

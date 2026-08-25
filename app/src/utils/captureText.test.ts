@@ -6,6 +6,11 @@ describe("isBareUrl", () => {
     expect(isBareUrl("https://example.com/post")).toBe(true);
   });
 
+  test("accepts a bare root domain URL with no path", () => {
+    expect(isBareUrl("https://example.com")).toBe(true);
+    expect(isBareUrl("http://example.org")).toBe(true);
+  });
+
   test("rejects free-form text containing a URL", () => {
     expect(isBareUrl("check this out: https://example.com/post")).toBe(false);
   });

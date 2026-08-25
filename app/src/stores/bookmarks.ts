@@ -106,7 +106,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       query = query.in("id", matchingIds);
     }
 
-    const { data } = await query.order("created_at", { ascending: false });
+    const { data, error } = await query.order("created_at", { ascending: false });
+    if (error) throw error;
     return (data ?? []) as T[];
   }
 
@@ -114,6 +115,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     loading.value = true;
     try {
       bookmarks.value = await queryBookmarks<Bookmark>(BOOKMARK_SELECT);
+      // Best-effort: a failure here (e.g. private browsing, storage quota) must not blank the list we just rendered.
+      offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
     } catch {
       const offlineBookmarks = await loadOfflineBookmarks();
       const trimmedQuery = searchQuery.value.trim().toLowerCase();
@@ -127,12 +130,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
               b.excerpt?.toLowerCase().includes(trimmedQuery),
           )
         : offlineBookmarks;
+    } finally {
       loading.value = false;
-      return;
     }
-    loading.value = false;
-    // Best-effort: a failure here (e.g. private browsing, storage quota) must not blank the list we just rendered.
-    offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
   }
 
   // Lightweight companion to fetch(): compares just id/status/archived/read_at

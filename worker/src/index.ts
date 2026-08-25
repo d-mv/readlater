@@ -3,7 +3,7 @@ import { parseArticle } from "./parseArticle";
 import { parseYoutube } from "./parseYoutube";
 import { fetchMeta } from "./youtubeMeta";
 import { makeThumbnailUploader } from "./storage";
-import { renderWithBrowser } from "./browserRender";
+import { closeBrowser, renderWithBrowser } from "./browserRender";
 
 const POLL_INTERVAL_MS = 15_000;
 const BATCH_SIZE = 5;
@@ -18,8 +18,23 @@ interface Bookmark {
   type: "article" | "youtube";
 }
 
+let isPolling = false;
+
+// Reset bookmarks stuck in 'processing' (e.g. from an ungraceful container restart) back to 'pending'
+async function recoverStaleProcessing() {
+  const staleThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+  await supabase
+    .from("bookmarks")
+    .update({ status: "pending" })
+    .eq("status", "processing")
+    .lt("processed_at", staleThreshold);
+}
+
 async function processBookmark(bookmark: Bookmark) {
-  await supabase.from("bookmarks").update({ status: "processing" }).eq("id", bookmark.id);
+  await supabase
+    .from("bookmarks")
+    .update({ status: "processing", processed_at: new Date().toISOString() })
+    .eq("id", bookmark.id);
 
   try {
     const result =
@@ -37,25 +52,44 @@ async function processBookmark(bookmark: Bookmark) {
       .update({
         status: "failed",
         error_message: String(err).slice(0, ERROR_MESSAGE_MAX_LENGTH),
+        processed_at: new Date().toISOString(),
       })
       .eq("id", bookmark.id);
   }
 }
 
 async function pollOnce() {
-  const { data: pending } = await supabase
-    .from("bookmarks")
-    .select("id, url, type")
-    .eq("status", "pending")
-    .limit(BATCH_SIZE);
+  if (isPolling) return;
+  isPolling = true;
+  try {
+    await recoverStaleProcessing();
 
-  for (const bookmark of pending ?? []) {
-    await processBookmark(bookmark);
+    const { data: pending } = await supabase
+      .from("bookmarks")
+      .select("id, url, type")
+      .eq("status", "pending")
+      .limit(BATCH_SIZE);
+
+    for (const bookmark of pending ?? []) {
+      await processBookmark(bookmark);
+    }
+  } finally {
+    isPolling = false;
   }
 }
 
 setInterval(() => {
   pollOnce().catch((err) => console.error("poll cycle failed", err));
 }, POLL_INTERVAL_MS);
+
+process.on("SIGINT", async () => {
+  await closeBrowser();
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  await closeBrowser();
+  process.exit(0);
+});
 
 console.log(`worker started, polling every ${POLL_INTERVAL_MS / 1000}s`);

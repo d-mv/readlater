@@ -1,5 +1,8 @@
-export function domainFromUrl(url: string | null): string {
-  if (!url) return "Note";
+export function domainFromUrl(
+  url: string | null,
+  type?: "article" | "youtube" | "note" | "pdf",
+): string {
+  if (!url) return type === "pdf" ? "PDF" : "Note";
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
@@ -9,12 +12,13 @@ export function domainFromUrl(url: string | null): string {
 
 interface ListRowMetaInput {
   url: string | null;
+  type?: "article" | "youtube" | "note" | "pdf";
   reading_time: number | null;
   read_at: string | null;
 }
 
-export function listRowMeta({ url, reading_time, read_at }: ListRowMetaInput): string {
-  const parts = [domainFromUrl(url)];
+export function listRowMeta({ url, type, reading_time, read_at }: ListRowMetaInput): string {
+  const parts = [domainFromUrl(url, type)];
   if (reading_time !== null) parts.push(`${reading_time} min`);
   if (read_at !== null) parts.push("read");
   return parts.join(" · ");

@@ -404,6 +404,40 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks).toHaveLength(1);
     expect(store.bookmarks[0]?.title).toBe("Cached title");
     expect(store.bookmarks[0]?.content_md).toBe("cached body");
+    expect(replaceBookmarksList).not.toHaveBeenCalled();
+  });
+
+  test("fetch falls back to the offline cache when supabase returns an error object without throwing", async () => {
+    const order = vi.fn().mockResolvedValue({ data: null, error: { message: "fetch failed" } });
+    from.mockReturnValue({ select: () => ({ order }) });
+    getBookmarksList.mockResolvedValue([
+      {
+        id: "1",
+        url: "https://arc90.com/x",
+        type: "article",
+        status: "ready",
+        title: "Offline title",
+        author: null,
+        excerpt: null,
+        thumbnail_url: null,
+        word_count: null,
+        reading_time: null,
+        tags: [],
+        is_public: false,
+        archived: false,
+        read_at: null,
+        error_message: null,
+        created_at: "2026-01-01T00:00:00Z",
+        processed_at: null,
+      },
+    ]);
+
+    const store = useBookmarksStore();
+    await store.fetch();
+
+    expect(store.bookmarks).toHaveLength(1);
+    expect(store.bookmarks[0]?.title).toBe("Offline title");
+    expect(replaceBookmarksList).not.toHaveBeenCalled();
   });
 
   test("archive evicts the bookmark from the offline article cache", async () => {

@@ -11,7 +11,7 @@ name = "readlater-app"
 dockerfile = "app/Dockerfile"
 port = 80
 route = "/*"
-build_args = { VITE_SUPABASE_URL = "https://yqdyswhdwbqabbbczmwq.supabase.co", VITE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_6IIVZYRIR-9aKwDDCTVeFA_233jpkmW" }
+build_args = { VITE_SUPABASE_URL = "https://yqdyswhdwbqabbbczmwq.supabase.co", VITE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_a6hvbKs9uwfF3jYdZ69t3Q_naZf-NdB" }
 
 [[deploy.services]]
 name = "readlater-worker"

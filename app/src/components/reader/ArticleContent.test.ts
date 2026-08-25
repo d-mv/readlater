@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import { MdEditor } from "md-editor-v3";
 import ArticleContent from "./ArticleContent.vue";
 
@@ -223,10 +223,11 @@ describe("ArticleContent", () => {
       window.innerWidth = originalInnerWidth;
     });
 
-    test("renders MdEditor bound to modelValue instead of the rendered view when editing", () => {
+    test("renders MdEditor bound to modelValue instead of the rendered view when editing", async () => {
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "# saved", editing: true, modelValue: "draft text" },
       });
+      await flushPromises();
       const editor = wrapper.findComponent(MdEditor);
       expect(editor.exists()).toBe(true);
       expect(editor.props("modelValue")).toBe("draft text");
@@ -237,11 +238,12 @@ describe("ArticleContent", () => {
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "# saved", editing: true, modelValue: "draft text" },
       });
+      await flushPromises();
       wrapper.findComponent(MdEditor).vm.$emit("update:modelValue", "changed text");
       expect(wrapper.emitted("update:modelValue")?.[0]).toEqual(["changed text"]);
     });
 
-    test("hides the youtube click-to-play affordance while editing", () => {
+    test("hides the youtube click-to-play affordance while editing", async () => {
       const wrapper = mount(ArticleContent, {
         props: {
           contentMd: "transcript",
@@ -252,14 +254,16 @@ describe("ArticleContent", () => {
           modelValue: "transcript",
         },
       });
+      await flushPromises();
       expect(wrapper.find("button.youtube-play").exists()).toBe(false);
       expect(wrapper.find("iframe").exists()).toBe(false);
     });
 
-    test("trims the toolbar to bold/italic/link/lists/heading/undo/redo, excluding image/table/mermaid/katex", () => {
+    test("trims the toolbar to bold/italic/link/lists/heading/undo/redo, excluding image/table/mermaid/katex", async () => {
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
       });
+      await flushPromises();
       const toolbars = wrapper.findComponent(MdEditor).props("toolbars") as string[];
       expect(toolbars).toEqual(
         expect.arrayContaining([
@@ -278,17 +282,19 @@ describe("ArticleContent", () => {
       );
     });
 
-    test("sets the editor's toolbar and dialog language to English, not the library's zh-CN default", () => {
+    test("sets the editor's toolbar and dialog language to English, not the library's zh-CN default", async () => {
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
       });
+      await flushPromises();
       expect(wrapper.findComponent(MdEditor).props("language")).toBe("en-US");
     });
 
-    test("disables image upload and mermaid/katex/echarts rendering in the editor", () => {
+    test("disables image upload and mermaid/katex/echarts rendering in the editor", async () => {
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
       });
+      await flushPromises();
       const editor = wrapper.findComponent(MdEditor);
       expect(editor.props("noUploadImg")).toBe(true);
       expect(editor.props("noMermaid")).toBe(true);
@@ -296,36 +302,40 @@ describe("ArticleContent", () => {
       expect(editor.props("noEcharts")).toBe(true);
     });
 
-    test("binds the editor's theme to the app's theme store", () => {
+    test("binds the editor's theme to the app's theme store", async () => {
       document.documentElement.dataset.theme = "dark";
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
       });
+      await flushPromises();
       expect(wrapper.findComponent(MdEditor).props("theme")).toBe("dark");
     });
 
-    test("starts single-pane (no split preview) on a narrow viewport, and includes a preview toggle", () => {
+    test("starts single-pane (no split preview) on a narrow viewport, and includes a preview toggle", async () => {
       window.innerWidth = 400;
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
       });
+      await flushPromises();
       const editor = wrapper.findComponent(MdEditor);
       expect(editor.props("preview")).toBe(false);
       expect(editor.props("toolbars")).toEqual(expect.arrayContaining(["preview"]));
     });
 
-    test("starts split-screen on a wide viewport", () => {
+    test("starts split-screen on a wide viewport", async () => {
       window.innerWidth = 1200;
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
       });
+      await flushPromises();
       expect(wrapper.findComponent(MdEditor).props("preview")).toBe(true);
     });
 
-    test("sanitizes the editor's live preview so raw HTML in the source can't carry an onerror/script payload", () => {
+    test("sanitizes the editor's live preview so raw HTML in the source can't carry an onerror/script payload", async () => {
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
       });
+      await flushPromises();
       const sanitize = wrapper.findComponent(MdEditor).props("sanitize") as (
         html: string,
       ) => string;

@@ -5,7 +5,20 @@ import { readingTimeFromWordCount, wordCount } from "./reading";
 
 export type FetchHtml = (url: string) => Promise<string>;
 
-const defaultFetchHtml: FetchHtml = (url) => fetch(url).then((res) => res.text());
+const defaultFetchHtml: FetchHtml = async (url) => {
+  const res = await fetch(url, {
+    signal: AbortSignal.timeout(15_000),
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; ReadLater/1.0)",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    },
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText}`);
+  }
+  return res.text();
+};
 
 export function stripDuplicateTitleHeading(markdown: string, title: string | null): string {
   if (!title) return markdown;

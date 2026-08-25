@@ -35,6 +35,7 @@ export interface ExportBookmark {
   pdf_path: string | null;
   pdf_parsed: boolean;
   view_mode: Bookmark["view_mode"];
+  progress: number | null;
   tags: ExportTag[];
 }
 
@@ -75,6 +76,7 @@ export function toExportBookmark(bookmark: Bookmark): ExportBookmark {
     pdf_path: bookmark.pdf_path,
     pdf_parsed: bookmark.pdf_parsed,
     view_mode: bookmark.view_mode,
+    progress: bookmark.progress ?? 0,
     tags: bookmark.tags.map((tag) => ({ name: tag.name, color: tag.color })),
   };
 }

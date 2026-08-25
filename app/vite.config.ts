@@ -1,5 +1,5 @@
-import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
+import { defineConfig } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
@@ -37,7 +37,10 @@ export default defineConfig({
           {
             urlPattern: ({ request }) => request.mode === "navigate",
             handler: "NetworkFirst",
-            options: { cacheName: "html-shell" },
+            options: {
+              cacheName: "html-shell", networkTimeoutSeconds: 10,
+              cacheableResponse: { statuses: [0, 200] },
+            },
           },
         ],
         skipWaiting: true,

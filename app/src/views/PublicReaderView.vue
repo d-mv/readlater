@@ -35,7 +35,12 @@ onMounted(async () => {
     <template v-else>
       <h1 class="title">{{ bookmark.title }}</h1>
       <p v-if="readerByline(bookmark)" class="byline">{{ readerByline(bookmark) }}</p>
-      <ArticleContent :content-md="bookmark.content_md" />
+      <ArticleContent
+        :content-md="bookmark.content_md"
+        :type="bookmark.type"
+        :youtube-video-id="bookmark.youtube_video_id"
+        :thumbnail-url="bookmark.thumbnail_url"
+      />
     </template>
   </main>
 </template>

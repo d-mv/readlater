@@ -42,12 +42,13 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
 
 describe("toExportBookmark", () => {
   test("drops id and includes only the tag name/color, not the tag id", () => {
-    const row = toExportBookmark(makeBookmark({}));
+    const row = toExportBookmark(makeBookmark({ progress: 0.75 }));
 
     expect(row).not.toHaveProperty("id");
     expect(row.tags).toEqual([{ name: "reading", color: "#888888" }]);
     expect(row.url).toBe("https://arc90.com/x");
     expect(row.content_md).toBe("content");
+    expect(row.progress).toBe(0.75);
   });
 });
 

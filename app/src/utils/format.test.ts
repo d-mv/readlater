@@ -13,12 +13,27 @@ describe("domainFromUrl", () => {
   test("returns the raw string for an unparseable URL rather than throwing", () => {
     expect(domainFromUrl("not a url")).toBe("not a url");
   });
+
+  test("returns PDF for url-less PDF bookmarks", () => {
+    expect(domainFromUrl(null, "pdf")).toBe("PDF");
+  });
+
+  test("defaults to Note for other url-less bookmarks", () => {
+    expect(domainFromUrl(null, "note")).toBe("Note");
+    expect(domainFromUrl(null)).toBe("Note");
+  });
 });
 
 describe("listRowMeta", () => {
   test("shows domain and reading time for an unread item", () => {
     expect(listRowMeta({ url: "https://arc90.com/x", reading_time: 6, read_at: null })).toBe(
       "arc90.com · 6 min",
+    );
+  });
+
+  test("shows PDF and reading time for a PDF bookmark", () => {
+    expect(listRowMeta({ url: null, type: "pdf", reading_time: 12, read_at: null })).toBe(
+      "PDF · 12 min",
     );
   });
 
