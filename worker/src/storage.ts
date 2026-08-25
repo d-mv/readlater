@@ -4,10 +4,15 @@ const BUCKET = "bookmark-assets";
 
 export function makeThumbnailUploader(supabase: SupabaseClient) {
   return async function uploadThumbnail(thumbnailUrl: string): Promise<string> {
-    const res = await fetch(thumbnailUrl);
+    const res = await fetch(thumbnailUrl, {
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch thumbnail: HTTP ${res.status}`);
+    }
     const bytes = new Uint8Array(await res.arrayBuffer());
     const contentType = res.headers.get("content-type") ?? "image/jpeg";
-    const ext = contentType.split("/")[1] ?? "jpg";
+    const ext = contentType.split("/")[1]?.split(";")[0] ?? "jpg";
     const path = `youtube/${crypto.randomUUID()}.${ext}`;
 
     // Path is a fresh UUID per upload and never overwritten, so the object is

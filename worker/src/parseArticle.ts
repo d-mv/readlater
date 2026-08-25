@@ -95,12 +95,24 @@ export async function parseArticle(
   fetchHtml: FetchHtml = defaultFetchHtml,
   renderHtml?: FetchHtml,
 ): Promise<ParsedArticle> {
-  const html = await fetchHtml(url);
-  let article = extractArticle(html, url);
+  let html = "";
+  let article = null;
+
+  try {
+    html = await fetchHtml(url);
+    article = extractArticle(html, url);
+  } catch {
+    // If plain fetch failed (e.g. 403 Forbidden or network error),
+    // try renderHtml fallback below before giving up.
+  }
 
   if (!article && renderHtml) {
-    const rendered = await renderHtml(url);
-    article = extractArticle(rendered, url);
+    try {
+      const rendered = await renderHtml(url);
+      article = extractArticle(rendered, url);
+    } catch {
+      // browser rendering also failed
+    }
   }
 
   if (!article) {
@@ -112,10 +124,10 @@ export async function parseArticle(
   const words = wordCount(content_md);
 
   return {
-    title: article.title ?? null,
-    author: article.byline ?? null,
-    excerpt: article.excerpt ?? null,
-    content_md,
+    title: article.title ? article.title.replace(/\u0000/g, "") : null,
+    author: article.byline ? article.byline.replace(/\u0000/g, "") : null,
+    excerpt: article.excerpt ? article.excerpt.replace(/\u0000/g, "") : null,
+    content_md: content_md.replace(/\u0000/g, ""),
     word_count: words,
     reading_time: readingTimeFromWordCount(words),
   };

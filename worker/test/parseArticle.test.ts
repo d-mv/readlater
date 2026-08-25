@@ -113,4 +113,25 @@ describe("parseArticle", () => {
     expect(result.content_md).not.toContain("[\n");
     expect(result.content_md).not.toContain("\n]");
   });
+
+  test("falls back to renderHtml when fetchHtml throws (e.g. 403 Forbidden)", async () => {
+    const result = await parseArticle(
+      "https://example.com/blocked",
+      async () => {
+        throw new Error("HTTP 403 Forbidden");
+      },
+      async () => FIXTURE_HTML,
+    );
+
+    expect(result.title).toBe("A short history of the readability algorithm");
+    expect(result.content_md).toContain("Arc90 published a bookmarklet");
+  });
+
+  test("strips null bytes from article output", async () => {
+    const htmlWithNulls = FIXTURE_HTML.replace("Arc90", "Arc\u000090");
+    const result = await parseArticle("https://example.com/nulls", async () => htmlWithNulls);
+
+    expect(result.author).not.toContain("\u0000");
+    expect(result.content_md).not.toContain("\u0000");
+  });
 });
