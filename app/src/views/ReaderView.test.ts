@@ -21,6 +21,7 @@ vi.mock("../lib/supabase", () => ({
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: pushMock }) }));
 
 const { default: ReaderView } = await import("./ReaderView.vue");
+const { useBookmarksStore } = await import("../stores/bookmarks");
 
 function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
   return {
@@ -63,6 +64,43 @@ describe("ReaderView", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  test("fetches the full row when the store only holds a body-less list-projection row", async () => {
+    const store = useBookmarksStore();
+    const listRow = makeBookmark({ id: "1", status: "ready", title: "An article" });
+    delete (listRow as unknown as Record<string, unknown>).content_md;
+    store.bookmarks = [listRow];
+
+    const full = makeBookmark({ id: "1", status: "ready", content_md: "the full body" });
+    const single = vi.fn().mockResolvedValue({ data: full, error: null });
+    const eqSelect = vi.fn(() => ({ single }));
+    const select = vi.fn(() => ({ eq: eqSelect }));
+    from.mockReturnValue({ select });
+
+    const wrapper = mount(ReaderView, { props: { id: "1" } });
+    await flushPromises();
+
+    expect(select).toHaveBeenCalledWith("*, tags(id, name, color)");
+    expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
+      "the full body",
+    );
+  });
+
+  test("does not re-fetch when the store already holds the full row with its body", async () => {
+    const store = useBookmarksStore();
+    store.bookmarks = [makeBookmark({ id: "1", status: "ready", content_md: "already here" })];
+
+    const select = vi.fn();
+    from.mockReturnValue({ select });
+
+    const wrapper = mount(ReaderView, { props: { id: "1" } });
+    await flushPromises();
+
+    expect(select).not.toHaveBeenCalled();
+    expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
+      "already here",
+    );
   });
 
   test("shows a Try again button for a failed article that resets it to pending", async () => {

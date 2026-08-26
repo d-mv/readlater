@@ -36,7 +36,9 @@ const isPending = computed(
 );
 const isFailed = computed(() => props.bookmark.status === "failed");
 const isUnread = computed(() => !props.bookmark.archived && !isRead.value);
-const isTranslated = computed(() => props.bookmark.translated_content_md !== null);
+// Driven by translated_lang rather than translated_content_md: the list query
+// omits the translation body, and the two columns are always written together.
+const isTranslated = computed(() => props.bookmark.translated_lang !== null);
 const displayTitle = computed(() => {
   if (props.bookmark.title) return props.bookmark.title;
   if (isFailed.value) return "Failed to process";

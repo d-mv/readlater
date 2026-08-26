@@ -105,6 +105,67 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks).toHaveLength(2);
   });
 
+  test("fetch requests a list projection without article bodies or the search vector", async () => {
+    const order = vi.fn().mockResolvedValue({ data: [], error: null });
+    const select = vi.fn((_cols: string) => ({ order }));
+    from.mockReturnValue({ select });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+
+    const requestedColumns = select.mock.calls[0][0];
+    expect(requestedColumns).not.toContain("content_md");
+    expect(requestedColumns).not.toContain("translated_content_md");
+    expect(requestedColumns).not.toContain("search_vector");
+    expect(requestedColumns).not.toBe("*, tags(id, name, color)");
+    expect(requestedColumns).toContain("tags(id, name, color)");
+    expect(requestedColumns).toContain("translated_lang");
+  });
+
+  test("fetchOne requests the full row including article bodies", async () => {
+    const row = makeBookmark({ id: "solo" });
+    const single = vi.fn().mockResolvedValue({ data: row, error: null });
+    const eq = vi.fn(() => ({ single }));
+    const select = vi.fn(() => ({ eq }));
+    from.mockReturnValue({ select });
+
+    const store = useBookmarksStore();
+    await store.fetchOne("solo");
+
+    expect(select).toHaveBeenCalledWith("*, tags(id, name, color)");
+  });
+
+  test("polling preserves an already-loaded article body when a row's status changes", async () => {
+    const seedRows = [makeBookmark({ id: "1", status: "pending", content_md: "loaded body" })];
+    const seedOrder = vi.fn().mockResolvedValue({ data: seedRows, error: null });
+    const lightOrder = vi.fn().mockResolvedValue({
+      data: [{ id: "1", status: "ready", archived: false, read_at: null }],
+      error: null,
+    });
+    // The stale-row re-fetch uses the list projection, so it has no content_md.
+    const inMock = vi.fn().mockResolvedValue({
+      data: [{ id: "1", status: "ready", title: "Title", archived: false, read_at: null }],
+      error: null,
+    });
+    const select = vi.fn((cols: string) =>
+      cols === "id, status, archived, read_at"
+        ? { order: lightOrder }
+        : { order: seedOrder, in: inMock },
+    );
+    from.mockReturnValue({ select });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+
+    vi.useFakeTimers();
+    store.startPolling();
+    await vi.advanceTimersByTimeAsync(5000);
+    vi.useRealTimers();
+
+    expect(store.bookmarks[0]?.status).toBe("ready");
+    expect(store.bookmarks[0]?.content_md).toBe("loaded body");
+  });
+
   test("visibleBookmarks shows non-archived rows on the 'all' filter", async () => {
     const rows = [
       makeBookmark({ id: "1", archived: false }),

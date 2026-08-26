@@ -9,7 +9,42 @@ import { normalizeUrl } from "../utils/normalizeUrl";
 import * as offlineDb from "../lib/offlineDb";
 import { useOfflineCacheStore } from "./offlineCache";
 
-const BOOKMARK_SELECT = "*, tags(id, name, color)";
+// Full row, article bodies included — only for the reader (fetchOne) and the
+// insert paths, which touch one row at a time.
+const DETAIL_SELECT = "*, tags(id, name, color)";
+// The list view never renders article bodies, so the list query deliberately
+// omits the large text columns (content_md, translated_content_md) and the
+// generated tsvector. For a personal-scale library that is the difference
+// between a few hundred KB and several MB on every list load / filter change.
+// The reader pulls the body via fetchOne() when an article is actually opened.
+const LIST_COLUMNS = [
+  "id",
+  "url",
+  "type",
+  "status",
+  "title",
+  "author",
+  "excerpt",
+  "thumbnail_url",
+  "youtube_video_id",
+  "content_edited",
+  "word_count",
+  "reading_time",
+  "is_public",
+  "archived",
+  "read_at",
+  "error_message",
+  "created_at",
+  "processed_at",
+  "pdf_path",
+  "pdf_parsed",
+  "view_mode",
+  "progress",
+  // Enough to drive the "translated" list badge without pulling the translation
+  // text itself.
+  "translated_lang",
+].join(", ");
+const LIST_SELECT = `${LIST_COLUMNS}, tags(id, name, color)`;
 // Deliberately excludes content_md/translated_content_md — polling runs every
 // few seconds for as long as the list view is mounted, so pulling full article
 // bodies on every tick blows through Supabase egress for no reason. Only rows
@@ -114,7 +149,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   async function fetch() {
     loading.value = true;
     try {
-      bookmarks.value = await queryBookmarks<Bookmark>(BOOKMARK_SELECT);
+      bookmarks.value = await queryBookmarks<Bookmark>(LIST_SELECT);
       // Best-effort: a failure here (e.g. private browsing, storage quota) must not blank the list we just rendered.
       offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
     } catch {
@@ -164,13 +199,21 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (staleIds.length > 0) {
       const { data: fresh } = await supabase
         .from("bookmarks")
-        .select(BOOKMARK_SELECT)
+        .select(LIST_SELECT)
         .in("id", staleIds);
-      for (const row of fresh ?? []) freshById.set(row.id, row);
+      for (const row of (fresh ?? []) as unknown as Bookmark[]) freshById.set(row.id, row);
     }
 
     bookmarks.value = rows
-      .map((row) => freshById.get(row.id) ?? currentById.get(row.id))
+      .map((row) => {
+        const fresh = freshById.get(row.id);
+        const existing = currentById.get(row.id);
+        // The re-fetch uses the list projection, so it carries no article body —
+        // merge it over the existing row rather than replacing, so a body the
+        // reader already loaded for an open article survives a status change.
+        if (fresh && existing) return { ...existing, ...fresh };
+        return fresh ?? existing;
+      })
       .filter((b): b is Bookmark => b !== undefined);
 
     offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
@@ -216,7 +259,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const { data, error } = await supabase
       .from("bookmarks")
       .insert({ url, title: options?.title, type, status: "pending", user_id: user.id })
-      .select(BOOKMARK_SELECT)
+      .select(DETAIL_SELECT)
       .single();
 
     if (error) {
@@ -261,7 +304,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         status: "ready",
         user_id: user.id,
       })
-      .select(BOOKMARK_SELECT)
+      .select(DETAIL_SELECT)
       .single();
 
     if (error) return { error: error.message };
@@ -415,7 +458,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   }
 
   async function fetchOne(id: string): Promise<Bookmark | null> {
-    const { data } = await supabase.from("bookmarks").select(BOOKMARK_SELECT).eq("id", id).single();
+    const { data } = await supabase.from("bookmarks").select(DETAIL_SELECT).eq("id", id).single();
     if (!data) return null;
 
     const index = bookmarks.value.findIndex((b) => b.id === id);

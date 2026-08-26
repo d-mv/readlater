@@ -26,6 +26,12 @@ const offlineCache = useOfflineCacheStore();
 
 const bookmark = computed(() => store.bookmarks.find((b) => b.id === props.id) ?? null);
 const byline = computed(() => (bookmark.value ? readerByline(bookmark.value) : ""));
+// The list query omits article bodies, so a row that arrived via the list has
+// `content_md === undefined` until fetchOne() pulls the full record. Once
+// loaded it is a string (or null for a body-less type), never undefined.
+const bodyLoaded = computed(
+  () => bookmark.value !== null && bookmark.value.content_md !== undefined,
+);
 const isNotReady = computed(
   () =>
     bookmark.value !== null &&
@@ -94,7 +100,9 @@ function startPolling() {
 }
 
 onMounted(async () => {
-  if (!bookmark.value) await store.fetchOne(props.id);
+  if (!bookmark.value || bookmark.value.content_md === undefined) {
+    await store.fetchOne(props.id);
+  }
   if (bookmark.value?.status === "ready") {
     offlineCache.cacheBookmark(bookmark.value).catch(() => {});
   }
@@ -292,7 +300,7 @@ watch(
       @trash-original-pdf="onTrashOriginalPdf"
     />
     <div ref="scrollContainer" class="scroll-area">
-      <template v-if="bookmark.status === 'ready'">
+      <template v-if="bookmark.status === 'ready' && bodyLoaded">
         <h1 v-if="!editing" class="title">{{ bookmark.title }}</h1>
         <input v-else v-model="draftTitle" class="title-input" type="text" placeholder="Title" />
         <p v-if="byline && !editing" class="byline">{{ byline }}</p>
