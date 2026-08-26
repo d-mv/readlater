@@ -65,8 +65,9 @@ describe("SettingsView", () => {
       data: [{ url_normalized: "https://arc90.com/x" }],
       error: null,
     });
-    const insertedSingle = vi.fn().mockResolvedValue({ data: { id: "new-1" }, error: null });
-    const insert = vi.fn(() => ({ select: () => ({ single: insertedSingle }) }));
+    const insert = vi.fn(() => ({
+      select: vi.fn().mockResolvedValue({ data: [{ id: "new-1" }], error: null }),
+    }));
     from.mockImplementation((table: string) => {
       if (table === "bookmarks") return { select: () => existingSelect(), insert };
       throw new Error(`unexpected table ${table}`);

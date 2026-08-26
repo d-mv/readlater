@@ -54,48 +54,57 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
     );
 
     const { toImport, skipped } = partitionForImport(payload.bookmarks, existingNormalizedUrls);
+    if (toImport.length === 0) return { imported: 0, skipped, error: null };
 
-    let imported = 0;
-    for (const bookmark of toImport) {
-      const { tags, ...fields } = bookmark;
-      const { data: inserted, error } = await supabase
-        .from("bookmarks")
-        .insert({ ...fields, user_id: userId })
-        .select("id")
-        .single();
+    // 1. One bulk insert. `.select("id")` returns the new ids in insertion
+    //    order, so inserted[i] lines up with toImport[i].
+    const rows = toImport.map(({ tags: _tags, ...fields }) => ({ ...fields, user_id: userId }));
+    const { data: inserted, error: insertError } = await supabase
+      .from("bookmarks")
+      .insert(rows)
+      .select("id");
 
-      if (error || !inserted) {
+    if (insertError || !inserted || inserted.length !== toImport.length) {
+      for (const bookmark of toImport) {
         skipped.push({
           url: bookmark.url,
           title: bookmark.title,
-          reason: error?.message ?? "insert failed",
+          reason: insertError?.message ?? "insert failed",
         });
-        continue;
       }
-
-      for (const tag of tags) {
-        const { data: tagRow } = await supabase
-          .from("tags")
-          .upsert(
-            { name: tag.name, color: tag.color },
-            { onConflict: "name", ignoreDuplicates: false },
-          )
-          .select("id")
-          .single();
-        if (!tagRow) continue;
-
-        await supabase
-          .from("bookmark_tags")
-          .upsert(
-            { bookmark_id: inserted.id, tag_id: tagRow.id },
-            { onConflict: "bookmark_id,tag_id" },
-          );
-      }
-
-      imported++;
+      return { imported: 0, skipped, error: null };
     }
 
-    return { imported, skipped, error: null };
+    // 2. One bulk upsert of every distinct tag, then map name -> id.
+    const tagsByName = new Map<string, { name: string; color: string }>();
+    for (const bookmark of toImport) {
+      for (const tag of bookmark.tags) tagsByName.set(tag.name, tag);
+    }
+    const tagIdByName = new Map<string, string>();
+    if (tagsByName.size > 0) {
+      const { data: tagRows } = await supabase
+        .from("tags")
+        .upsert([...tagsByName.values()], { onConflict: "name", ignoreDuplicates: false })
+        .select("id, name");
+      for (const row of (tagRows ?? []) as { id: string; name: string }[]) {
+        tagIdByName.set(row.name, row.id);
+      }
+    }
+
+    // 3. One bulk upsert of all bookmark_tags join rows.
+    const pairs: { bookmark_id: string; tag_id: string }[] = [];
+    toImport.forEach((bookmark, index) => {
+      const bookmarkId = (inserted[index] as { id: string }).id;
+      for (const tag of bookmark.tags) {
+        const tagId = tagIdByName.get(tag.name);
+        if (tagId) pairs.push({ bookmark_id: bookmarkId, tag_id: tagId });
+      }
+    });
+    if (pairs.length > 0) {
+      await supabase.from("bookmark_tags").upsert(pairs, { onConflict: "bookmark_id,tag_id" });
+    }
+
+    return { imported: toImport.length, skipped, error: null };
   }
 
   return { exportBookmarks, importBookmarks };
