@@ -2,13 +2,17 @@ import "fake-indexeddb/auto";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
+import { useBookmarksStore } from "../stores/bookmarks";
 
 const pushMock = vi.fn();
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: pushMock }) }));
 
+const realtimeChannel = { on: () => realtimeChannel, subscribe: () => realtimeChannel };
 vi.mock("../lib/supabase", () => ({
   supabase: {
     from: () => ({ select: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }),
+    channel: () => realtimeChannel,
+    removeChannel: () => {},
   },
 }));
 
@@ -57,5 +61,49 @@ describe("ReadingListView", () => {
     await searchInput.setValue("test");
 
     expect(scrollToSpy).toHaveBeenCalledWith(0, 0);
+  });
+
+  test("typing does not run a search; submitting does", async () => {
+    const wrapper = mount(ReadingListView);
+    await flushPromises();
+    const store = useBookmarksStore();
+    const fetchSpy = vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+
+    await wrapper.get("input.search-input").setValue("readability");
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    await wrapper.get("form.search-form").trigger("submit");
+    expect(store.searchQuery).toBe("readability");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("clearing the search box immediately reloads the full list", async () => {
+    const wrapper = mount(ReadingListView);
+    await flushPromises();
+    const store = useBookmarksStore();
+    const fetchSpy = vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+
+    await wrapper.get("input.search-input").setValue("readability");
+    await wrapper.get("form.search-form").trigger("submit");
+    fetchSpy.mockClear();
+
+    await wrapper.get("input.search-input").setValue("");
+    expect(store.searchQuery).toBe("");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("toggling a tag filters client-side without a query", async () => {
+    const wrapper = mount(ReadingListView);
+    await flushPromises();
+    const store = useBookmarksStore();
+    const fetchSpy = vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+    store.setActiveTagIds([]);
+
+    // Drive the TagFilterBar toggle handler.
+    wrapper.findComponent({ name: "TagFilterBar" }).vm.$emit("toggle", "tag-1");
+    await flushPromises();
+
+    expect(store.activeTagIds).toEqual(["tag-1"]);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

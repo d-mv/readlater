@@ -8,7 +8,6 @@ import { useRouter } from "vue-router";
 import { IconSettings } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
-import { useDebouncedFn } from "../composables/useDebouncedFn";
 import StatusTabs from "../components/list/StatusTabs.vue";
 import BookmarkList from "../components/list/BookmarkList.vue";
 import AddBookmarkDialog from "../components/list/AddBookmarkDialog.vue";
@@ -27,7 +26,8 @@ function onScroll() {
 
 onMounted(() => {
   store.fetch();
-  store.startPolling();
+  // Live list updates via one Realtime subscription instead of a REST poll.
+  store.subscribeToChanges();
   offlineCache.init();
   window.addEventListener("scroll", onScroll, { passive: true });
   if (savedScrollPosition > 0) {
@@ -36,7 +36,6 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-  store.stopPolling();
   window.removeEventListener("scroll", onScroll);
 });
 
@@ -61,17 +60,27 @@ function onToggleOffline(id: string) {
 }
 
 const searchInput = ref("");
-const runSearch = useDebouncedFn((query: string) => {
-  store.setSearchQuery(query);
+
+// Full-text search runs against Postgres, so it costs a query — fire it only
+// on submit (Enter), not on every keystroke. Clearing the box restores the
+// full list immediately.
+function onSearchSubmit() {
+  savedScrollPosition = 0;
+  window.scrollTo(0, 0);
+  store.setSearchQuery(searchInput.value.trim());
   store.fetch();
-}, 300);
+}
 
 function onSearchInput() {
   savedScrollPosition = 0;
   window.scrollTo(0, 0);
-  runSearch(searchInput.value);
+  if (searchInput.value.trim() === "" && store.searchQuery !== "") {
+    store.setSearchQuery("");
+    store.fetch();
+  }
 }
 
+// Tag filtering is resolved client-side against the loaded list — no query.
 function onToggleTag(tagId: string) {
   savedScrollPosition = 0;
   window.scrollTo(0, 0);
@@ -79,7 +88,6 @@ function onToggleTag(tagId: string) {
     ? store.activeTagIds.filter((id) => id !== tagId)
     : [...store.activeTagIds, tagId];
   store.setActiveTagIds(next);
-  store.fetch();
 }
 </script>
 
@@ -100,14 +108,16 @@ function onToggleTag(tagId: string) {
         <ThemeToggle />
       </div>
     </div>
-    <input
-      v-model="searchInput"
-      class="search-input"
-      type="search"
-      placeholder="Search…"
-      maxlength="200"
-      @input="onSearchInput"
-    />
+    <form class="search-form" @submit.prevent="onSearchSubmit">
+      <input
+        v-model="searchInput"
+        class="search-input"
+        type="search"
+        placeholder="Search…"
+        maxlength="200"
+        @input="onSearchInput"
+      />
+    </form>
     <TagFilterBar
       :tags="store.allTags"
       :active-tag-ids="store.activeTagIds"
@@ -162,6 +172,10 @@ function onToggleTag(tagId: string) {
   color: var(--rl-text-secondary);
   cursor: pointer;
   padding: 0;
+}
+
+.search-form {
+  display: contents;
 }
 
 .search-input {

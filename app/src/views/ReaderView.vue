@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
+import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { IconLoader2, IconAlertTriangle, IconRefresh } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
@@ -14,8 +14,6 @@ import ArticleContent from "../components/reader/ArticleContent.vue";
 import ShareDialog from "../components/reader/ShareDialog.vue";
 import TagInput from "../components/reader/TagInput.vue";
 
-const POLL_INTERVAL_MS = 3000;
-
 const props = defineProps<{
   id: string;
 }>();
@@ -29,14 +27,9 @@ const byline = computed(() => (bookmark.value ? readerByline(bookmark.value) : "
 // The list query omits article bodies, so a row that arrived via the list has
 // `content_md === undefined` until fetchOne() pulls the full record. Once
 // loaded it is a string (or null for a body-less type), never undefined.
+const awaitingBody = ref(false);
 const bodyLoaded = computed(
-  () => bookmark.value !== null && bookmark.value.content_md !== undefined,
-);
-const isNotReady = computed(
-  () =>
-    bookmark.value !== null &&
-    bookmark.value.status !== "ready" &&
-    bookmark.value.status !== "failed",
+  () => bookmark.value !== null && bookmark.value.content_md !== undefined && !awaitingBody.value,
 );
 
 const scrollContainer = useTemplateRef<HTMLDivElement>("scrollContainer");
@@ -82,39 +75,45 @@ watch(progress, (newVal) => {
   }
 });
 
-let pollTimer: ReturnType<typeof setInterval> | undefined;
-
-function stopPolling() {
-  if (pollTimer !== undefined) {
-    clearInterval(pollTimer);
-    pollTimer = undefined;
+// The list query carries no article bodies, so pull the full row when the
+// store only holds a body-less list projection (content_md === undefined).
+async function loadFullRow() {
+  awaitingBody.value = true;
+  try {
+    await store.fetchOne(props.id);
+  } finally {
+    awaitingBody.value = false;
   }
 }
 
-function startPolling() {
-  if (pollTimer !== undefined) return;
-  pollTimer = setInterval(async () => {
-    await store.fetchOne(props.id);
-    if (!isNotReady.value) stopPolling();
-  }, POLL_INTERVAL_MS);
-}
-
 onMounted(async () => {
+  // Realtime keeps the row live while the reader is open — a pending article
+  // finishing on the worker lands here without polling.
+  store.subscribeToChanges();
   if (!bookmark.value || bookmark.value.content_md === undefined) {
-    await store.fetchOne(props.id);
+    await loadFullRow();
   }
   if (bookmark.value?.status === "ready") {
     offlineCache.cacheBookmark(bookmark.value).catch(() => {});
   }
-  if (isNotReady.value) startPolling();
 });
+
+// A Realtime UPDATE can flip status pending → ready while the reader is open;
+// the payload carries no body, so fetch the full row (and cache it) once it
+// exists.
+watch(
+  () => bookmark.value?.status,
+  async (status, previous) => {
+    if (status === "ready" && previous && previous !== "ready") {
+      await loadFullRow();
+      if (bookmark.value) offlineCache.cacheBookmark(bookmark.value).catch(() => {});
+    }
+  },
+);
 
 async function onRetry() {
   await store.refresh(props.id);
-  startPolling();
 }
-
-onUnmounted(stopPolling);
 
 function onBack() {
   router.push({ name: "list" });
