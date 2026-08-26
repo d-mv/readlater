@@ -9,6 +9,12 @@ import { closeBrowser, renderWithBrowser } from "./browserRender";
 export { CircuitBreaker, CircuitBreakerOpenError };
 
 const POLL_INTERVAL_MS = 15_000;
+// When the queue stays empty, back the poll interval off toward this ceiling
+// instead of hammering the DB every 15s around the clock.
+const MAX_POLL_INTERVAL_MS = 60_000;
+// Stale-processing recovery is a safety net for crashes, not something that
+// needs to run every cycle — once a minute is plenty.
+const STALE_RECOVERY_EVERY = 4;
 const BATCH_SIZE = 5;
 const ERROR_MESSAGE_MAX_LENGTH = 500;
 const BOOKMARK_TIMEOUT_MS = 45_000;
@@ -38,6 +44,7 @@ export interface Bookmark {
 }
 
 let isPolling = false;
+let pollCycleCount = 0;
 
 function sanitizeValue(val: unknown): unknown {
   if (typeof val === "string") {
@@ -174,16 +181,20 @@ export async function pollOnce(
     uploadThumbnailFn?: (url: string) => Promise<string>;
     renderHtmlFn?: typeof renderWithBrowser;
   } = {},
-) {
-  if (isPolling) return;
+): Promise<number> {
+  if (isPolling) return 0;
   if (supabaseCircuitBreaker.getState() === "OPEN") {
     console.warn("Supabase database circuit breaker is OPEN. Skipping poll cycle.");
-    return;
+    return 0;
   }
   isPolling = true;
+  let pendingCount = 0;
   try {
     await supabaseCircuitBreaker.execute(async () => {
-      await recoverStaleProcessing(client);
+      pollCycleCount += 1;
+      if (pollCycleCount % STALE_RECOVERY_EVERY === 1) {
+        await recoverStaleProcessing(client);
+      }
 
       const { data: pending, error } = await client
         .from("bookmarks")
@@ -195,6 +206,7 @@ export async function pollOnce(
         throw new Error(`Failed to fetch pending bookmarks: ${error.message}`);
       }
 
+      pendingCount = pending?.length ?? 0;
       for (const bookmark of pending ?? []) {
         try {
           await processBookmark(bookmark, client, runners);
@@ -212,14 +224,25 @@ export async function pollOnce(
   } finally {
     isPolling = false;
   }
+  return pendingCount;
 }
 
 if (import.meta.main) {
-  pollOnce().catch((err) => console.error("Initial poll cycle failed", err));
+  // Recursive setTimeout (not setInterval) so cycles never overlap and the
+  // delay can grow while the queue is empty.
+  let interval = POLL_INTERVAL_MS;
 
-  setInterval(() => {
-    pollOnce().catch((err) => console.error("Poll cycle failed", err));
-  }, POLL_INTERVAL_MS);
+  const loop = async () => {
+    let pending = 0;
+    try {
+      pending = await pollOnce();
+    } catch (err) {
+      console.error("Poll cycle failed", err);
+    }
+    interval = pending > 0 ? POLL_INTERVAL_MS : Math.min(interval * 2, MAX_POLL_INTERVAL_MS);
+    setTimeout(loop, interval);
+  };
+  loop();
 
   process.on("SIGINT", async () => {
     await closeBrowser();
