@@ -29,6 +29,15 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
   async function cacheBookmark(bookmark: Bookmark): Promise<void> {
     if (!bookmark.content_md) return;
 
+    // The reader auto-caches every article it opens; without this guard that
+    // re-downloads every inline image and rewrites the record on each open.
+    if (cachedIds.value.has(bookmark.id) || (await offlineDb.getArticle(bookmark.id))) {
+      if (!cachedIds.value.has(bookmark.id)) {
+        cachedIds.value = new Set(cachedIds.value).add(bookmark.id);
+      }
+      return;
+    }
+
     const urls = extractImageUrls(bookmark.content_md, bookmark.thumbnail_url);
     const images = (
       await Promise.all(
