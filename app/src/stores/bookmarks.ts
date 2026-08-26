@@ -8,6 +8,7 @@ import { arrayBufferToBase64 } from "../utils/base64";
 import { detectFileKind, maxBytesForFileKind } from "../utils/fileKind";
 import { normalizeUrl } from "../utils/normalizeUrl";
 import * as offlineDb from "../lib/offlineDb";
+import { useAuthStore } from "./auth";
 import { useOfflineCacheStore } from "./offlineCache";
 
 // Full row, article bodies included — only for the reader (fetchOne) and the
@@ -218,10 +219,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       return { error: "Enter a valid URL." };
     }
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return { error: "You must be signed in." };
+    // The signed-in user is already held in memory by the auth store (kept
+    // fresh via onAuthStateChange) — no need for a getUser() round-trip.
+    const userId = useAuthStore().userId;
+    if (!userId) return { error: "You must be signed in." };
 
     if (!options?.force && bookmarks.value.some((b) => b.url === url)) {
       return { error: null, duplicate: true };
@@ -229,7 +230,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
 
     const { data, error } = await supabase
       .from("bookmarks")
-      .insert({ url, title: options?.title, type, status: "pending", user_id: user.id })
+      .insert({ url, title: options?.title, type, status: "pending", user_id: userId })
       .select(DETAIL_SELECT)
       .single();
 
@@ -260,10 +261,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const trimmed = text.trim();
     if (!trimmed) return { error: "Note text is empty." };
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return { error: "You must be signed in." };
+    const userId = useAuthStore().userId;
+    if (!userId) return { error: "You must be signed in." };
 
     const { data, error } = await supabase
       .from("bookmarks")
@@ -273,7 +272,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         content_md: trimmed,
         type: "note",
         status: "ready",
-        user_id: user.id,
+        user_id: userId,
       })
       .select(DETAIL_SELECT)
       .single();

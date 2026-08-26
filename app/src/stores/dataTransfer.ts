@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { supabase, type Bookmark } from "../lib/supabase";
+import { useAuthStore } from "./auth";
 import {
   buildExportPayload,
   parseExportPayload,
@@ -40,10 +41,8 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
       return { imported: 0, skipped: [], error: message };
     }
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return { imported: 0, skipped: [], error: "You must be signed in." };
+    const userId = useAuthStore().userId;
+    if (!userId) return { imported: 0, skipped: [], error: "You must be signed in." };
 
     // Loaded once up front rather than per-row: this is a personal-library-scale,
     // one-shot operation, so an O(1)-query in-memory Set beats N duplicate queries.
@@ -61,7 +60,7 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
       const { tags, ...fields } = bookmark;
       const { data: inserted, error } = await supabase
         .from("bookmarks")
-        .insert({ ...fields, user_id: user.id })
+        .insert({ ...fields, user_id: userId })
         .select("id")
         .single();
 

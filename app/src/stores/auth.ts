@@ -7,6 +7,8 @@ export const useAuthStore = defineStore("auth", () => {
   const session = shallowRef<Session | null>(null);
 
   const isAuthenticated = computed(() => session.value !== null);
+  // In-memory user id for insert paths — avoids a getUser() network call.
+  const userId = computed(() => session.value?.user.id ?? null);
 
   // Memoized: main.ts calls this once at boot, but the router guard also
   // calls it on every navigation to make sure it never checks
@@ -41,5 +43,5 @@ export const useAuthStore = defineStore("auth", () => {
     session.value = null;
   }
 
-  return { session, isAuthenticated, init, signIn, signOut };
+  return { session, isAuthenticated, userId, init, signIn, signOut };
 });

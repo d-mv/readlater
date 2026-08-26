@@ -26,6 +26,16 @@ describe("useAuthStore", () => {
   test("starts unauthenticated with no session", () => {
     const store = useAuthStore();
     expect(store.isAuthenticated).toBe(false);
+    expect(store.userId).toBeNull();
+  });
+
+  test("exposes the in-memory user id once a session loads", async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: "u1" } } } });
+
+    const store = useAuthStore();
+    await store.init();
+
+    expect(store.userId).toBe("u1");
   });
 
   test("init loads the existing session, if any", async () => {

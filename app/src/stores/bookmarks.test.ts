@@ -4,13 +4,13 @@ import type { Bookmark } from "../lib/supabase";
 
 const {
   from,
-  getUser,
   invoke,
   storageRemove,
   storageCreateSignedUrl,
   channel,
   removeChannel,
   onSpy,
+  authState,
 } = vi.hoisted(() => {
   const onSpy = vi.fn();
   const channelObj = {
@@ -22,19 +22,18 @@ const {
   };
   return {
     from: vi.fn(),
-    getUser: vi.fn(),
     invoke: vi.fn(),
     storageRemove: vi.fn(),
     storageCreateSignedUrl: vi.fn(),
     channel: vi.fn(() => channelObj),
     removeChannel: vi.fn(),
     onSpy,
+    authState: { userId: "user-1" as string | null },
   };
 });
 vi.mock("../lib/supabase", () => ({
   supabase: {
     from,
-    auth: { getUser },
     functions: { invoke },
     channel,
     removeChannel,
@@ -43,6 +42,7 @@ vi.mock("../lib/supabase", () => ({
     },
   },
 }));
+vi.mock("./auth", () => ({ useAuthStore: () => authState }));
 
 /** Invoke the postgres_changes handler the store registered with .on(). */
 function emitRealtime(payload: Record<string, unknown>) {
@@ -112,6 +112,7 @@ describe("useBookmarksStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    authState.userId = "user-1";
     replaceBookmarksList.mockResolvedValue(undefined);
     getBookmarksList.mockResolvedValue([]);
     getArticle.mockResolvedValue(undefined);
@@ -300,7 +301,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add inserts a pending bookmark for the signed-in user and prepends it locally", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = makeBookmark({ id: "new", url: "https://arc90.com/new", status: "pending" });
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const select = vi.fn(() => ({ single }));
@@ -323,7 +323,7 @@ describe("useBookmarksStore", () => {
   });
 
   test("add returns an error and does not touch local state when not signed in", async () => {
-    getUser.mockResolvedValue({ data: { user: null } });
+    authState.userId = null;
 
     const store = useBookmarksStore();
     const result = await store.add("https://arc90.com/new");
@@ -334,8 +334,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add returns an error for an unparseable URL", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-
     const store = useBookmarksStore();
     const result = await store.add("not a url");
 
@@ -344,7 +342,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add reports a duplicate and skips inserting when the URL is already saved", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const rows = [makeBookmark({ id: "1", url: "https://arc90.com/x" })];
     from.mockReturnValue({
       select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
@@ -361,7 +358,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add with force: true skips the duplicate check and inserts anyway", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const rows = [makeBookmark({ id: "1", url: "https://arc90.com/x" })];
     from.mockReturnValueOnce({
       select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
@@ -384,7 +380,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add passes an optional title through to the insert", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = makeBookmark({ id: "new", url: "https://arc90.com/new", status: "pending" });
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const select = vi.fn(() => ({ single }));
@@ -537,7 +532,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("addNote inserts a ready note for the signed-in user and prepends it locally", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = makeBookmark({
       id: "note-1",
       url: null,
@@ -567,8 +561,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("addNote returns an error for blank text without touching the network", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-
     const store = useBookmarksStore();
     const result = await store.addNote("   ");
 
@@ -945,7 +937,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add reports a duplicate via the DB unique index when the URL wasn't in the local list", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const single = vi
       .fn()
       .mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });

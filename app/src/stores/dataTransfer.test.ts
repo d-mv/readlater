@@ -2,10 +2,14 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { EXPORT_VERSION } from "../utils/dataTransfer";
 
-const { from, getUser } = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn() }));
-vi.mock("../lib/supabase", () => ({
-  supabase: { from, auth: { getUser } },
+const { from, authState } = vi.hoisted(() => ({
+  from: vi.fn(),
+  authState: { userId: "user-1" as string | null },
 }));
+vi.mock("../lib/supabase", () => ({
+  supabase: { from },
+}));
+vi.mock("./auth", () => ({ useAuthStore: () => authState }));
 
 const { useDataTransferStore } = await import("./dataTransfer");
 
@@ -13,6 +17,7 @@ describe("useDataTransferStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    authState.userId = "user-1";
   });
 
   describe("exportBookmarks", () => {
@@ -87,7 +92,7 @@ describe("useDataTransferStore", () => {
     });
 
     test("requires an authenticated user", async () => {
-      getUser.mockResolvedValue({ data: { user: null } });
+      authState.userId = null;
 
       const store = useDataTransferStore();
       const result = await store.importBookmarks(validPayload());
@@ -96,8 +101,6 @@ describe("useDataTransferStore", () => {
     });
 
     test("skips rows whose URL already exists and inserts the rest with tags", async () => {
-      getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-
       const bookmark = {
         url: "https://new.example/y",
         type: "article",
@@ -176,8 +179,6 @@ describe("useDataTransferStore", () => {
     });
 
     test("reports an insert failure as a skipped row instead of throwing", async () => {
-      getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-
       const bookmark = {
         url: "https://new.example/y",
         type: "article",

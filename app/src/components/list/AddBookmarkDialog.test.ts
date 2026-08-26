@@ -4,8 +4,9 @@ import { flushPromises, mount } from "@vue/test-utils";
 import AddBookmarkDialog from "./AddBookmarkDialog.vue";
 import { useBookmarksStore } from "../../stores/bookmarks";
 
-const { from, getUser } = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn() }));
-vi.mock("../../lib/supabase", () => ({ supabase: { from, auth: { getUser } } }));
+const { from } = vi.hoisted(() => ({ from: vi.fn() }));
+vi.mock("../../lib/supabase", () => ({ supabase: { from } }));
+vi.mock("../../stores/auth", () => ({ useAuthStore: () => ({ userId: "user-1" }) }));
 
 describe("AddBookmarkDialog", () => {
   beforeEach(() => {
@@ -13,7 +14,6 @@ describe("AddBookmarkDialog", () => {
   });
 
   test("integration: submitting the same URL twice against the real store shows the duplicate prompt", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = {
       id: "new",
       url: "https://arc90.com/x",
