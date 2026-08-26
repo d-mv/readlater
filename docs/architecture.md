@@ -19,12 +19,12 @@ flowchart TD
     Cap -->|url, or text that is a bare http/https URL| Pending[(status=pending)]
     Cap -->|free-form text| Ready[(status=ready, type=note)]
     Snippet -->|Turndown HTML→MD| Ready
-    Pending --> Worker[VPS worker — Docker, polls every 15s]
+    Pending --> Worker[VPS worker — Docker, polls 15s→60s backoff]
     Worker -->|fetch, retry via headless browser if too little extracted| Parse[Readability + Turndown / YouTube oEmbed]
     Worker -->|write markdown, status=ready| DB[(Postgres: bookmarks, tags, bookmark_tags)]
     Ready --> DB
     Worker -->|upload YouTube thumbnails, random UUID paths| Storage[(Supabase Storage, public-read)]
-    PWA[Vue 3 PWA] -->|query, authed session| DB
+    PWA[Vue 3 PWA] -->|first-page query + Realtime subscription| DB
     PWA -->|tag / search / share / mark-read writes| DB
     PWA -->|cache opened articles + images| IDB[(IndexedDB, offline)]
     Public["Public view (/s/:id)"] -->|rpc get_public_bookmark, anon key| DB
@@ -118,11 +118,23 @@ create policy "authenticated only" on tags for all using (auth.role() = 'authent
 create policy "authenticated only" on bookmark_tags for all using (auth.role() = 'authenticated');
 grant select, insert, update, delete on tags, bookmark_tags to authenticated;
 
-create or replace function get_public_bookmark(bookmark_id uuid)
-returns setof bookmarks
+-- Returns a table of public-safe columns only (no user_id, pdf_path, url,
+-- status, error_message, progress, translation, …) — see the
+-- 20260826120001 migration.
+create function get_public_bookmark(bookmark_id uuid)
+returns table (id uuid, type text, title text, author text, excerpt text,
+  content_md text, thumbnail_url text, youtube_video_id text, word_count int,
+  reading_time int, created_at timestamptz)
 language sql security definer set search_path = public
-as $$ select * from bookmarks where id = bookmark_id and is_public = true; $$;
-grant execute on function get_public_bookmark(uuid) to anon;
+as $$ select id, type, title, author, excerpt, content_md, thumbnail_url,
+  youtube_video_id, word_count, reading_time, created_at
+  from bookmarks where id = bookmark_id and is_public = true; $$;
+grant execute on function get_public_bookmark(uuid) to anon, authenticated;
+
+-- The bookmarks table is in the supabase_realtime publication with an explicit
+-- column list (no content_md / translated_content_md / search_vector) and
+-- REPLICA IDENTITY FULL, so the PWA gets live row changes over one websocket
+-- instead of polling — see the 20260826120000 migration.
 ```
 
 Notes on the shape:
@@ -301,11 +313,14 @@ only one user — it costs nothing and bounds a compromised PWA session to
 ## 4. Worker processing
 
 Bun/Node + TypeScript, Docker, polls rather than subscribes to Realtime — at
-personal-bookmark volume a 15s interval is indistinguishable from instant and
+personal-bookmark volume a short interval is indistinguishable from instant and
 avoids holding a websocket open just for this.
 
 ```ts
-setInterval(() => pollOnce().catch(...), 15_000); // worker/src/index.ts
+// worker/src/index.ts — recursive setTimeout, not setInterval, so cycles
+// never overlap and the delay grows while the queue is empty.
+// 15s when there's work → doubles toward a 60s ceiling on empty cycles.
+// Stale-'processing' recovery runs once every 4 cycles, not every one.
 
 // per pending row: status → 'processing', parse, status → 'ready' | 'failed'
 ```
@@ -382,8 +397,17 @@ Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
 
 - **Reading list** (`ReadingListView.vue`, `BookmarkList.vue`,
   `BookmarkRow.vue`) — bordered rows, status tabs (All/Unread/Archived,
-  `StatusTabs.vue`), tag filter bar (`TagFilterBar.vue`, ANDed with search),
-  type icon per row, download/cached icon for offline pre-caching.
+  `StatusTabs.vue`), tag filter bar (`TagFilterBar.vue`), type icon per row,
+  download/cached icon for offline pre-caching. The list query
+  (`LIST_SELECT` in `stores/bookmarks.ts`) is a named-column projection with
+  no `content_md` / `translated_content_md` / `search_vector` — the reader
+  pulls the body via `fetchOne()` (`DETAIL_SELECT = "*"`) on open. Tag
+  filtering and the tag bar are derived client-side from the loaded rows
+  (match-all); no query on toggle.
+- **Live updates** — `store.subscribeToChanges()` opens one Realtime
+  `postgres_changes` channel (RLS-scoped, no body columns in the payload).
+  INSERT prepends, UPDATE merges (keeping a body the reader already loaded),
+  DELETE drops. Replaces the former list/reader `setInterval` polls.
 - **Reader** (`ReaderView.vue`, `ArticleContent.vue`) — markdown rendered via
   `markdown-it`, sanitized through `DOMPurify` before `v-html`. Header
   (`ReaderHeader.vue`) holds back/domain/actions; all row-level actions
@@ -406,10 +430,11 @@ Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
   auth redirect (`app/src/router/index.ts`); it also awaits
   `auth.init()` before deciding, since a bookmarklet-opened popup can
   otherwise run the guard before the app's own session bootstrap resolves.
-- **Search** — `.textSearch('search_vector', query, { type: 'websearch' })`;
-  an empty query string is skipped client-side rather than sent (an empty
-  `websearch_to_tsquery` matches nothing, not everything) and falls back to
-  the normal `order('created_at')` list query.
+- **Search** — `.textSearch('search_vector', query, { type: 'websearch' })`,
+  run on submit (Enter) / clear only, not per keystroke. An empty query is
+  skipped client-side (an empty `websearch_to_tsquery` matches nothing) and
+  falls back to the normal `order('created_at')` list query. A search loads
+  its whole result set unpaged.
 - **Fonts** — self-hosted woff2 (not a CDN). Source Serif 4 for body copy,
   Inter for UI chrome, JetBrains Mono for metadata (domain, reading time,
   timestamp).
@@ -512,10 +537,14 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
   `pdf_parsed: false` (original-only view) rather than attempting OCR.
 - URL normalization ignores tracking params (`utm_*`, `fbclid`, …) — add a
   strip-list if near-duplicate saves show up in practice.
-- `bookmarks.fetch()` in the Pinia store loads the entire table, unpaginated
-  — fine at personal-library scale today, but search/tags/notes all grow row
-  count faster than articles-only did; keyset pagination
-  (`created_at < cursor`) is the fix if it becomes visible.
+- `bookmarks.fetch()` loads the first page (50 rows, newest first); an
+  IntersectionObserver sentinel drives `store.loadMore()`, which pages older
+  rows with a `created_at < cursor` keyset. A search loads its whole (bounded)
+  result set unpaged. Trade-off: the unread badge and tag filter bar derive
+  from the loaded set, so they reflect only the pages loaded so far until the
+  user scrolls further. True `updated_at`-delta sync (so a session reloads
+  only what changed) is the next step if the full first-page fetch per session
+  becomes visible.
 - Note editing — notes have no source to re-fetch, so an edit is just a
   direct `content_md`/`title` update; no inline editor yet.
 - SSRF hardening on the worker's fetch (reject loopback/private/link-local

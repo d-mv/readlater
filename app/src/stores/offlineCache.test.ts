@@ -2,12 +2,18 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Bookmark } from "../lib/supabase";
 
-const { putArticle, deleteArticle, listCachedArticleIds } = vi.hoisted(() => ({
+const { putArticle, deleteArticle, listCachedArticleIds, getArticle } = vi.hoisted(() => ({
   putArticle: vi.fn(),
   deleteArticle: vi.fn(),
   listCachedArticleIds: vi.fn(),
+  getArticle: vi.fn(),
 }));
-vi.mock("../lib/offlineDb", () => ({ putArticle, deleteArticle, listCachedArticleIds }));
+vi.mock("../lib/offlineDb", () => ({
+  putArticle,
+  deleteArticle,
+  listCachedArticleIds,
+  getArticle,
+}));
 
 const { useOfflineCacheStore } = await import("./offlineCache");
 
@@ -49,6 +55,7 @@ describe("useOfflineCacheStore", () => {
     listCachedArticleIds.mockResolvedValue([]);
     putArticle.mockResolvedValue(undefined);
     deleteArticle.mockResolvedValue(undefined);
+    getArticle.mockResolvedValue(undefined);
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({ blob: () => Promise.resolve(new Blob(["x"])) }),
@@ -84,6 +91,29 @@ describe("useOfflineCacheStore", () => {
     await store.cacheBookmark(makeBookmark());
 
     expect(putArticle).toHaveBeenCalledWith(expect.objectContaining({ id: "1", images: [] }));
+    expect(store.isCached("1")).toBe(true);
+  });
+
+  test("cacheBookmark is a no-op when the article is already cached in this session", async () => {
+    const store = useOfflineCacheStore();
+    await store.cacheBookmark(makeBookmark());
+    vi.mocked(fetch).mockClear();
+    putArticle.mockClear();
+
+    await store.cacheBookmark(makeBookmark());
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(putArticle).not.toHaveBeenCalled();
+  });
+
+  test("cacheBookmark is a no-op when the article was cached in a prior session", async () => {
+    getArticle.mockResolvedValue({ id: "1", content_md: "x", images: [], cachedAt: "t" });
+
+    const store = useOfflineCacheStore();
+    await store.cacheBookmark(makeBookmark());
+
+    expect(fetch).not.toHaveBeenCalled();
+    expect(putArticle).not.toHaveBeenCalled();
     expect(store.isCached("1")).toBe(true);
   });
 

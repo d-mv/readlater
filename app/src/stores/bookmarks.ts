@@ -1,5 +1,6 @@
 import { acceptHMRUpdate, defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
+import type { RealtimeChannel, RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { supabase, type Bookmark, type DuplicateBookmark } from "../lib/supabase";
 import { detectBookmarkType } from "../utils/bookmarkType";
 import { truncateTitle } from "../utils/captureText";
@@ -7,16 +8,47 @@ import { arrayBufferToBase64 } from "../utils/base64";
 import { detectFileKind, maxBytesForFileKind } from "../utils/fileKind";
 import { normalizeUrl } from "../utils/normalizeUrl";
 import * as offlineDb from "../lib/offlineDb";
+import { useAuthStore } from "./auth";
 import { useOfflineCacheStore } from "./offlineCache";
 
-const BOOKMARK_SELECT = "*, tags(id, name, color)";
-// Deliberately excludes content_md/translated_content_md — polling runs every
-// few seconds for as long as the list view is mounted, so pulling full article
-// bodies on every tick blows through Supabase egress for no reason. Only rows
-// whose status/archived/read_at actually changed get a full re-fetch below.
-const POLL_SELECT = "id, status, archived, read_at";
+// Full row, article bodies included — only for the reader (fetchOne) and the
+// insert paths, which touch one row at a time.
+const DETAIL_SELECT = "*, tags(id, name, color)";
+// The list view never renders article bodies, so the list query deliberately
+// omits the large text columns (content_md, translated_content_md) and the
+// generated tsvector. For a personal-scale library that is the difference
+// between a few hundred KB and several MB on every list load / filter change.
+// The reader pulls the body via fetchOne() when an article is actually opened.
+const LIST_COLUMNS = [
+  "id",
+  "url",
+  "type",
+  "status",
+  "title",
+  "author",
+  "excerpt",
+  "thumbnail_url",
+  "youtube_video_id",
+  "content_edited",
+  "word_count",
+  "reading_time",
+  "is_public",
+  "archived",
+  "read_at",
+  "error_message",
+  "created_at",
+  "processed_at",
+  "pdf_path",
+  "pdf_parsed",
+  "view_mode",
+  "progress",
+  // Enough to drive the "translated" list badge without pulling the translation
+  // text itself.
+  "translated_lang",
+].join(", ");
+const LIST_SELECT = `${LIST_COLUMNS}, tags(id, name, color)`;
 const UNIQUE_VIOLATION = "23505";
-const POLL_INTERVAL_MS = 5000;
+const PAGE_SIZE = 50;
 const PDF_BUCKET = "bookmark-pdfs";
 const PDF_SIGNED_URL_TTL_SECONDS = 60;
 
@@ -41,13 +73,24 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   const bookmarks = ref<Bookmark[]>([]);
   const filter = shallowRef<BookmarkFilter>("all");
   const loading = shallowRef(false);
+  const loadingMore = shallowRef(false);
+  // Whether an older page might still exist on the server (keyset pagination).
+  const hasMore = shallowRef(false);
   const searchQuery = shallowRef("");
   const activeTagIds = ref<string[]>([]);
-  let pollTimer: ReturnType<typeof setInterval> | undefined;
 
-  const visibleBookmarks = computed(() =>
-    bookmarks.value.filter((b) => (filter.value === "archived" ? b.archived : !b.archived)),
-  );
+  const visibleBookmarks = computed(() => {
+    const wantArchived = filter.value === "archived";
+    const tagIds = activeTagIds.value;
+    return bookmarks.value.filter((b) => {
+      if (b.archived !== wantArchived) return false;
+      if (tagIds.length === 0) return true;
+      // Match-all: every selected tag must be present on the bookmark. Tags
+      // are already embedded on each loaded row, so this needs no extra query.
+      const own = new Set((b.tags ?? []).map((t) => t.id));
+      return tagIds.every((id) => own.has(id));
+    });
+  });
 
   const unreadCount = computed(
     () => bookmarks.value.filter((b) => !b.archived && b.read_at === null).length,
@@ -59,7 +102,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   const allTags = computed(() => {
     const byId = new Map<string, Bookmark["tags"][number]>();
     for (const bookmark of bookmarks.value) {
-      for (const tag of bookmark.tags) byId.set(tag.id, tag);
+      for (const tag of bookmark.tags ?? []) byId.set(tag.id, tag);
     }
     return [...byId.values()];
   });
@@ -76,48 +119,39 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     activeTagIds.value = next;
   }
 
-  // Tags are a many-to-many join, so "match all selected tags" can't be
-  // expressed as a single PostgREST filter on the bookmarks table — resolve
-  // it as a separate lookup against bookmark_tags first.
-  async function bookmarkIdsMatchingAllTags(tagIds: string[]): Promise<string[]> {
-    const { data } = await supabase
-      .from("bookmark_tags")
-      .select("bookmark_id, tag_id")
-      .in("tag_id", tagIds);
-    const counts = new Map<string, number>();
-    for (const row of data ?? []) {
-      counts.set(row.bookmark_id, (counts.get(row.bookmark_id) ?? 0) + 1);
-    }
-    return [...counts.entries()].filter(([, count]) => count === tagIds.length).map(([id]) => id);
-  }
-
-  // Shared by fetch() and pollForChanges() so both honor the active search/tag
-  // filters and ordering — they only differ in which columns they select.
-  async function queryBookmarks<T>(select: string): Promise<T[]> {
-    let query = supabase.from("bookmarks").select(select);
+  // One page of the list, newest first. Applies the active full-text search
+  // filter; tag filtering is resolved client-side against the loaded set (see
+  // visibleBookmarks), so it costs no query. `before` is a keyset cursor on
+  // created_at for loadMore().
+  async function queryBookmarks(
+    opts: { limit?: number; before?: string } = {},
+  ): Promise<Bookmark[]> {
+    let query = supabase.from("bookmarks").select(LIST_SELECT);
 
     const trimmedQuery = searchQuery.value.trim();
     if (trimmedQuery) {
       query = query.textSearch("search_vector", trimmedQuery, { type: "websearch" });
     }
-
-    if (activeTagIds.value.length > 0) {
-      const matchingIds = await bookmarkIdsMatchingAllTags(activeTagIds.value);
-      query = query.in("id", matchingIds);
-    }
+    if (opts.before) query = query.lt("created_at", opts.before);
+    if (opts.limit) query = query.limit(opts.limit);
 
     const { data, error } = await query.order("created_at", { ascending: false });
     if (error) throw error;
-    return (data ?? []) as T[];
+    return (data ?? []) as unknown as Bookmark[];
   }
 
   async function fetch() {
     loading.value = true;
+    // A search result set is bounded and worth showing whole; only the
+    // unfiltered list is paged.
+    const searching = searchQuery.value.trim() !== "";
     try {
-      bookmarks.value = await queryBookmarks<Bookmark>(BOOKMARK_SELECT);
-      // Best-effort: a failure here (e.g. private browsing, storage quota) must not blank the list we just rendered.
-      offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
+      const page = await queryBookmarks(searching ? {} : { limit: PAGE_SIZE });
+      bookmarks.value = page;
+      hasMore.value = !searching && page.length === PAGE_SIZE;
+      persistOfflineList();
     } catch {
+      hasMore.value = false;
       const offlineBookmarks = await loadOfflineBookmarks();
       const trimmedQuery = searchQuery.value.trim().toLowerCase();
       // Postgres full-text search doesn't run against the cached copy — fall
@@ -135,62 +169,81 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     }
   }
 
-  // Lightweight companion to fetch(): compares just id/status/archived/read_at
-  // against what's already loaded, then only pulls full content (content_md,
-  // translated_content_md, etc.) for the rows that actually changed or are new.
-  async function pollForChanges() {
-    type PollRow = Pick<Bookmark, "id" | "status" | "archived" | "read_at">;
-    let rows: PollRow[];
-    try {
-      rows = await queryBookmarks<PollRow>(POLL_SELECT);
-    } catch {
+  // Appends the next older page. No-op during a search (the whole result set is
+  // already loaded) or while a page is in flight.
+  async function loadMore() {
+    if (!hasMore.value || loadingMore.value || searchQuery.value.trim() !== "") return;
+    const cursor = bookmarks.value.at(-1)?.created_at;
+    if (!cursor) {
+      hasMore.value = false;
       return;
     }
-
-    const currentById = new Map(bookmarks.value.map((b) => [b.id, b]));
-    const staleIds = rows
-      .filter((row) => {
-        const existing = currentById.get(row.id);
-        return (
-          !existing ||
-          existing.status !== row.status ||
-          existing.archived !== row.archived ||
-          existing.read_at !== row.read_at
-        );
-      })
-      .map((row) => row.id);
-
-    const freshById = new Map<string, Bookmark>();
-    if (staleIds.length > 0) {
-      const { data: fresh } = await supabase
-        .from("bookmarks")
-        .select(BOOKMARK_SELECT)
-        .in("id", staleIds);
-      for (const row of fresh ?? []) freshById.set(row.id, row);
+    loadingMore.value = true;
+    try {
+      const page = await queryBookmarks({ limit: PAGE_SIZE, before: cursor });
+      const seen = new Set(bookmarks.value.map((b) => b.id));
+      bookmarks.value = [...bookmarks.value, ...page.filter((b) => !seen.has(b.id))];
+      hasMore.value = page.length === PAGE_SIZE;
+      persistOfflineList();
+    } catch {
+      // Leave hasMore untouched so the user can retry by scrolling again.
+    } finally {
+      loadingMore.value = false;
     }
+  }
 
-    bookmarks.value = rows
-      .map((row) => freshById.get(row.id) ?? currentById.get(row.id))
-      .filter((b): b is Bookmark => b !== undefined);
-
+  function persistOfflineList() {
+    // Best-effort: private browsing / storage quota must not blank the list.
     offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
   }
 
-  // The list is otherwise loaded once on mount, so without this a bookmark
-  // captured from another tab (bookmarklet popup, share target) or one still
-  // being processed server-side never shows up or updates until the page is
-  // reloaded.
-  function startPolling() {
-    if (pollTimer !== undefined) return;
-    pollTimer = setInterval(() => {
-      pollForChanges();
-    }, POLL_INTERVAL_MS);
+  // A single postgres_changes subscription keeps `bookmarks` live without the
+  // client polling the REST API: a capture from another tab (bookmarklet
+  // popup, share target), or the worker marking an article ready, lands here
+  // directly. The stream is RLS-scoped to the signed-in user and — by the
+  // publication's column list — carries no article bodies; the reader pulls
+  // those via fetchOne() on open.
+  let channel: RealtimeChannel | undefined;
+
+  function applyChange(payload: RealtimePostgresChangesPayload<Bookmark>) {
+    if (payload.eventType === "INSERT") {
+      // A search view is a filtered server result; a new row may not match it,
+      // so leave it out until the user re-runs the search.
+      if (searchQuery.value.trim() !== "") return;
+      const row = { ...(payload.new as Bookmark), tags: payload.new.tags ?? [] };
+      if (!bookmarks.value.some((b) => b.id === row.id)) {
+        bookmarks.value = [row, ...bookmarks.value];
+      }
+    } else if (payload.eventType === "UPDATE") {
+      const row = payload.new as Bookmark;
+      const existing = bookmarks.value.find((b) => b.id === row.id);
+      // Merge, don't replace: the payload has no body columns, so a body the
+      // reader already loaded for this row must survive. tags is a join, never
+      // in a Realtime payload, so it is preserved too.
+      if (existing) Object.assign(existing, row);
+    } else if (payload.eventType === "DELETE") {
+      const id = (payload.old as { id?: string }).id;
+      if (id) bookmarks.value = bookmarks.value.filter((b) => b.id !== id);
+    }
+    persistOfflineList();
   }
 
-  function stopPolling() {
-    if (pollTimer === undefined) return;
-    clearInterval(pollTimer);
-    pollTimer = undefined;
+  function subscribeToChanges() {
+    if (channel) return;
+    channel = supabase
+      .channel("bookmarks-changes")
+      .on<Bookmark>(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "bookmarks" },
+        applyChange,
+      )
+      .subscribe();
+  }
+
+  function unsubscribeFromChanges() {
+    if (!channel) return;
+    supabase.removeChannel(channel);
+    channel = undefined;
   }
 
   async function add(
@@ -204,10 +257,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       return { error: "Enter a valid URL." };
     }
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return { error: "You must be signed in." };
+    // The signed-in user is already held in memory by the auth store (kept
+    // fresh via onAuthStateChange) — no need for a getUser() round-trip.
+    const userId = useAuthStore().userId;
+    if (!userId) return { error: "You must be signed in." };
 
     if (!options?.force && bookmarks.value.some((b) => b.url === url)) {
       return { error: null, duplicate: true };
@@ -215,8 +268,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
 
     const { data, error } = await supabase
       .from("bookmarks")
-      .insert({ url, title: options?.title, type, status: "pending", user_id: user.id })
-      .select(BOOKMARK_SELECT)
+      .insert({ url, title: options?.title, type, status: "pending", user_id: userId })
+      .select(DETAIL_SELECT)
       .single();
 
     if (error) {
@@ -246,10 +299,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const trimmed = text.trim();
     if (!trimmed) return { error: "Note text is empty." };
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) return { error: "You must be signed in." };
+    const userId = useAuthStore().userId;
+    if (!userId) return { error: "You must be signed in." };
 
     const { data, error } = await supabase
       .from("bookmarks")
@@ -259,9 +310,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         content_md: trimmed,
         type: "note",
         status: "ready",
-        user_id: user.id,
+        user_id: userId,
       })
-      .select(BOOKMARK_SELECT)
+      .select(DETAIL_SELECT)
       .single();
 
     if (error) return { error: error.message };
@@ -415,7 +466,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   }
 
   async function fetchOne(id: string): Promise<Bookmark | null> {
-    const { data } = await supabase.from("bookmarks").select(BOOKMARK_SELECT).eq("id", id).single();
+    const { data } = await supabase.from("bookmarks").select(DETAIL_SELECT).eq("id", id).single();
     if (!data) return null;
 
     const index = bookmarks.value.findIndex((b) => b.id === id);
@@ -521,6 +572,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     bookmarks,
     filter,
     loading,
+    loadingMore,
+    hasMore,
     searchQuery,
     activeTagIds,
     visibleBookmarks,
@@ -530,8 +583,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     setSearchQuery,
     setActiveTagIds,
     fetch,
-    startPolling,
-    stopPolling,
+    loadMore,
+    subscribeToChanges,
+    unsubscribeFromChanges,
     add,
     addNote,
     addSnippet,

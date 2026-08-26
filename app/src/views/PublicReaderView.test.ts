@@ -57,6 +57,34 @@ describe("PublicReaderView", () => {
     expect(wrapper.find("button.youtube-play").exists()).toBe(true);
   });
 
+  test("renders correctly from only the public-safe column projection", async () => {
+    rpc.mockResolvedValue({
+      data: [
+        {
+          id: "abc",
+          type: "article",
+          title: "Trimmed row",
+          author: "Jane",
+          excerpt: null,
+          content_md: "body",
+          thumbnail_url: null,
+          youtube_video_id: null,
+          word_count: 400,
+          reading_time: 2,
+          created_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      error: null,
+    });
+
+    const wrapper = mount(PublicReaderView, { props: { id: "abc" } });
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Trimmed row");
+    expect(wrapper.text()).toContain("By Jane");
+    expect(wrapper.text()).toContain("2 min read");
+  });
+
   test("shows a not-found state when the RPC returns no rows", async () => {
     rpc.mockResolvedValue({ data: [], error: null });
 

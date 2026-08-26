@@ -3,8 +3,9 @@ import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import { EXPORT_VERSION } from "../utils/dataTransfer";
 
-const { from, getUser } = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn() }));
-vi.mock("../lib/supabase", () => ({ supabase: { from, auth: { getUser } } }));
+const { from } = vi.hoisted(() => ({ from: vi.fn() }));
+vi.mock("../lib/supabase", () => ({ supabase: { from } }));
+vi.mock("../stores/auth", () => ({ useAuthStore: () => ({ userId: "user-1" }) }));
 
 const { push } = vi.hoisted(() => ({ push: vi.fn() }));
 vi.mock("vue-router", () => ({ useRouter: () => ({ push }) }));
@@ -60,14 +61,13 @@ describe("SettingsView", () => {
   });
 
   test("importing a file reports the imported count and any skipped rows", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-
     const existingSelect = vi.fn().mockResolvedValue({
       data: [{ url_normalized: "https://arc90.com/x" }],
       error: null,
     });
-    const insertedSingle = vi.fn().mockResolvedValue({ data: { id: "new-1" }, error: null });
-    const insert = vi.fn(() => ({ select: () => ({ single: insertedSingle }) }));
+    const insert = vi.fn(() => ({
+      select: vi.fn().mockResolvedValue({ data: [{ id: "new-1" }], error: null }),
+    }));
     from.mockImplementation((table: string) => {
       if (table === "bookmarks") return { select: () => existingSelect(), insert };
       throw new Error(`unexpected table ${table}`);

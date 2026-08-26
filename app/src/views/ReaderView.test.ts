@@ -4,23 +4,31 @@ import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import type { Bookmark } from "../lib/supabase";
 
-const { from, invoke, storageCreateSignedUrl, storageRemove, pushMock } = vi.hoisted(() => ({
-  from: vi.fn(),
-  invoke: vi.fn(),
-  storageCreateSignedUrl: vi.fn(),
-  storageRemove: vi.fn(),
-  pushMock: vi.fn(),
-}));
+const { from, invoke, storageCreateSignedUrl, storageRemove, pushMock, realtimeChannel } =
+  vi.hoisted(() => {
+    const realtimeChannel = { on: () => realtimeChannel, subscribe: () => realtimeChannel };
+    return {
+      from: vi.fn(),
+      invoke: vi.fn(),
+      storageCreateSignedUrl: vi.fn(),
+      storageRemove: vi.fn(),
+      pushMock: vi.fn(),
+      realtimeChannel,
+    };
+  });
 vi.mock("../lib/supabase", () => ({
   supabase: {
     from,
     functions: { invoke },
+    channel: () => realtimeChannel,
+    removeChannel: () => {},
     storage: { from: () => ({ createSignedUrl: storageCreateSignedUrl, remove: storageRemove }) },
   },
 }));
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: pushMock }) }));
 
 const { default: ReaderView } = await import("./ReaderView.vue");
+const { useBookmarksStore } = await import("../stores/bookmarks");
 
 function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
   return {
@@ -63,6 +71,66 @@ describe("ReaderView", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  test("fetches the full row when the store only holds a body-less list-projection row", async () => {
+    const store = useBookmarksStore();
+    const listRow = makeBookmark({ id: "1", status: "ready", title: "An article" });
+    delete (listRow as unknown as Record<string, unknown>).content_md;
+    store.bookmarks = [listRow];
+
+    const full = makeBookmark({ id: "1", status: "ready", content_md: "the full body" });
+    const single = vi.fn().mockResolvedValue({ data: full, error: null });
+    const eqSelect = vi.fn(() => ({ single }));
+    const select = vi.fn(() => ({ eq: eqSelect }));
+    from.mockReturnValue({ select });
+
+    const wrapper = mount(ReaderView, { props: { id: "1" } });
+    await flushPromises();
+
+    expect(select).toHaveBeenCalledWith("*, tags(id, name, color)");
+    expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
+      "the full body",
+    );
+  });
+
+  test("pulls the full body when a Realtime update flips the article to ready", async () => {
+    const store = useBookmarksStore();
+    store.bookmarks = [makeBookmark({ id: "1", status: "processing", content_md: null })];
+
+    const ready = makeBookmark({ id: "1", status: "ready", content_md: "freshly parsed" });
+    const single = vi.fn().mockResolvedValue({ data: ready, error: null });
+    const select = vi.fn(() => ({ eq: () => ({ single }) }));
+    from.mockReturnValue({ select });
+
+    const wrapper = mount(ReaderView, { props: { id: "1" } });
+    await flushPromises();
+    expect(select).not.toHaveBeenCalled();
+
+    // Simulate the store applying a Realtime UPDATE.
+    store.bookmarks[0]!.status = "ready";
+    await flushPromises();
+
+    expect(select).toHaveBeenCalledWith("*, tags(id, name, color)");
+    expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
+      "freshly parsed",
+    );
+  });
+
+  test("does not re-fetch when the store already holds the full row with its body", async () => {
+    const store = useBookmarksStore();
+    store.bookmarks = [makeBookmark({ id: "1", status: "ready", content_md: "already here" })];
+
+    const select = vi.fn();
+    from.mockReturnValue({ select });
+
+    const wrapper = mount(ReaderView, { props: { id: "1" } });
+    await flushPromises();
+
+    expect(select).not.toHaveBeenCalled();
+    expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
+      "already here",
+    );
   });
 
   test("shows a Try again button for a failed article that resets it to pending", async () => {
@@ -521,9 +589,60 @@ describe("ReaderView", () => {
 
       scrollEl.dispatchEvent(new Event("scroll"));
       await nextTick();
-      await vi.advanceTimersByTimeAsync(600);
+      await vi.advanceTimersByTimeAsync(2000);
 
       expect(update).toHaveBeenCalledWith({ progress: 0.5 });
+    });
+
+    test("ignores scroll movements smaller than the write threshold", async () => {
+      const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+      const ready = makeBookmark({ id: "1", status: "ready", progress: 0, content_md: "Text" });
+      const single = vi.fn().mockResolvedValue({ data: ready, error: null });
+      from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })), update });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      Object.defineProperty(scrollEl, "scrollTop", {
+        value: 8,
+        configurable: true,
+        writable: true,
+      });
+
+      scrollEl.dispatchEvent(new Event("scroll"));
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    test("flushes the pending progress write when the page is hidden", async () => {
+      const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+      const ready = makeBookmark({ id: "1", status: "ready", progress: 0, content_md: "Text" });
+      const single = vi.fn().mockResolvedValue({ data: ready, error: null });
+      from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })), update });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      Object.defineProperty(scrollEl, "scrollTop", {
+        value: 600,
+        configurable: true,
+        writable: true,
+      });
+
+      scrollEl.dispatchEvent(new Event("scroll"));
+      await nextTick();
+      // Before the debounce would fire.
+      window.dispatchEvent(new Event("pagehide"));
+
+      expect(update).toHaveBeenCalledWith({ progress: 0.75 });
     });
   });
 });

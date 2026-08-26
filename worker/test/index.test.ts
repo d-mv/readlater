@@ -249,6 +249,67 @@ describe("pollOnce", () => {
     expect(processedIds).toEqual(["https://example.com/1", "https://example.com/2"]);
   });
 
+  test("returns the number of pending bookmarks it picked up", async () => {
+    const mockClient = {
+      from: () => ({
+        update: () => ({ eq: () => ({ or: () => Promise.resolve({ error: null }) }) }),
+        select: () => ({
+          eq: () => ({
+            limit: () =>
+              Promise.resolve({
+                data: [
+                  { id: "bm-1", url: "https://example.com/1", type: "article" },
+                  { id: "bm-2", url: "https://example.com/2", type: "article" },
+                ],
+                error: null,
+              }),
+          }),
+        }),
+      }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const count = await pollOnce(mockClient, {
+      parseArticleFn: async () => ({
+        title: "t",
+        author: "a",
+        excerpt: "e",
+        content_md: "c",
+        word_count: 1,
+        reading_time: 1,
+      }),
+    });
+
+    expect(count).toBe(2);
+  });
+
+  test("runs stale-processing recovery periodically, not on every cycle", async () => {
+    let recoveryCalls = 0;
+    const mockClient = {
+      from: () => ({
+        update: (payload: Record<string, unknown>) => ({
+          eq: () => ({
+            or: () => {
+              if (payload.error_message === "Processing timed out or worker restarted") {
+                recoveryCalls += 1;
+              }
+              return Promise.resolve({ error: null });
+            },
+          }),
+        }),
+        select: () => ({
+          eq: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }),
+        }),
+      }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    for (let i = 0; i < 4; i++) await pollOnce(mockClient);
+
+    // Exactly one of any four consecutive cycles triggers recovery.
+    expect(recoveryCalls).toBe(1);
+  });
+
   test("trips supabaseCircuitBreaker when database queries fail repeatedly", async () => {
     const mockFailingClient = {
       from: () => ({

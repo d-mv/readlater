@@ -14,8 +14,6 @@ import ArticleContent from "../components/reader/ArticleContent.vue";
 import ShareDialog from "../components/reader/ShareDialog.vue";
 import TagInput from "../components/reader/TagInput.vue";
 
-const POLL_INTERVAL_MS = 3000;
-
 const props = defineProps<{
   id: string;
 }>();
@@ -26,17 +24,20 @@ const offlineCache = useOfflineCacheStore();
 
 const bookmark = computed(() => store.bookmarks.find((b) => b.id === props.id) ?? null);
 const byline = computed(() => (bookmark.value ? readerByline(bookmark.value) : ""));
-const isNotReady = computed(
-  () =>
-    bookmark.value !== null &&
-    bookmark.value.status !== "ready" &&
-    bookmark.value.status !== "failed",
+// The list query omits article bodies, so a row that arrived via the list has
+// `content_md === undefined` until fetchOne() pulls the full record. Once
+// loaded it is a string (or null for a body-less type), never undefined.
+const awaitingBody = ref(false);
+const bodyLoaded = computed(
+  () => bookmark.value !== null && bookmark.value.content_md !== undefined && !awaitingBody.value,
 );
 
 const scrollContainer = useTemplateRef<HTMLDivElement>("scrollContainer");
 const { progress } = useScrollProgress(scrollContainer);
 
 const restoredScrollForId = ref<string | null>(null);
+// Last progress value we persisted — the guard for coalescing writes below.
+let lastWrittenProgress = 0;
 
 function restoreReadingProgress() {
   if (!bookmark.value || bookmark.value.status !== "ready" || !scrollContainer.value) return;
@@ -45,6 +46,9 @@ function restoreReadingProgress() {
 
   const targetProgress = bookmark.value.progress ?? 0;
   if (targetProgress <= 0) return;
+  // The restore scroll re-fires the progress watcher; treat the restored
+  // value as already persisted so it doesn't trigger a redundant write.
+  lastWrittenProgress = targetProgress;
 
   nextTick(() => {
     requestAnimationFrame(() => {
@@ -64,49 +68,81 @@ watch(
   { immediate: true },
 );
 
-const saveProgressDebounced = useDebouncedFn((prog: number) => {
+// Reading progress is a nice-to-have, not something worth a DB write on every
+// debounce tick of a long scroll: coalesce to one write per 2s, only when the
+// position moved a meaningful amount, and flush whatever is pending when the
+// page goes away.
+const PROGRESS_WRITE_DELTA = 0.02;
+let pendingProgress: number | null = null;
+
+function flushProgress() {
+  if (pendingProgress === null) return;
+  const value = pendingProgress;
+  pendingProgress = null;
   if (bookmark.value && bookmark.value.status === "ready") {
-    store.updateProgress(bookmark.value.id, prog);
-  }
-}, 500);
-
-watch(progress, (newVal) => {
-  if (bookmark.value && restoredScrollForId.value === bookmark.value.id) {
-    saveProgressDebounced(newVal);
-  }
-});
-
-let pollTimer: ReturnType<typeof setInterval> | undefined;
-
-function stopPolling() {
-  if (pollTimer !== undefined) {
-    clearInterval(pollTimer);
-    pollTimer = undefined;
+    lastWrittenProgress = value;
+    store.updateProgress(bookmark.value.id, value);
   }
 }
 
-function startPolling() {
-  if (pollTimer !== undefined) return;
-  pollTimer = setInterval(async () => {
+const flushProgressDebounced = useDebouncedFn(flushProgress, 2000);
+
+watch(progress, (newVal) => {
+  if (!bookmark.value || restoredScrollForId.value !== bookmark.value.id) return;
+  if (Math.abs(newVal - lastWrittenProgress) < PROGRESS_WRITE_DELTA) return;
+  pendingProgress = newVal;
+  flushProgressDebounced();
+});
+
+function onPageHide() {
+  flushProgress();
+}
+
+onMounted(() => window.addEventListener("pagehide", onPageHide));
+onUnmounted(() => {
+  window.removeEventListener("pagehide", onPageHide);
+  flushProgress();
+});
+
+// The list query carries no article bodies, so pull the full row when the
+// store only holds a body-less list projection (content_md === undefined).
+async function loadFullRow() {
+  awaitingBody.value = true;
+  try {
     await store.fetchOne(props.id);
-    if (!isNotReady.value) stopPolling();
-  }, POLL_INTERVAL_MS);
+  } finally {
+    awaitingBody.value = false;
+  }
 }
 
 onMounted(async () => {
-  if (!bookmark.value) await store.fetchOne(props.id);
+  // Realtime keeps the row live while the reader is open — a pending article
+  // finishing on the worker lands here without polling.
+  store.subscribeToChanges();
+  if (!bookmark.value || bookmark.value.content_md === undefined) {
+    await loadFullRow();
+  }
   if (bookmark.value?.status === "ready") {
     offlineCache.cacheBookmark(bookmark.value).catch(() => {});
   }
-  if (isNotReady.value) startPolling();
 });
+
+// A Realtime UPDATE can flip status pending → ready while the reader is open;
+// the payload carries no body, so fetch the full row (and cache it) once it
+// exists.
+watch(
+  () => bookmark.value?.status,
+  async (status, previous) => {
+    if (status === "ready" && previous && previous !== "ready") {
+      await loadFullRow();
+      if (bookmark.value) offlineCache.cacheBookmark(bookmark.value).catch(() => {});
+    }
+  },
+);
 
 async function onRetry() {
   await store.refresh(props.id);
-  startPolling();
 }
-
-onUnmounted(stopPolling);
 
 function onBack() {
   router.push({ name: "list" });
@@ -292,7 +328,7 @@ watch(
       @trash-original-pdf="onTrashOriginalPdf"
     />
     <div ref="scrollContainer" class="scroll-area">
-      <template v-if="bookmark.status === 'ready'">
+      <template v-if="bookmark.status === 'ready' && bodyLoaded">
         <h1 v-if="!editing" class="title">{{ bookmark.title }}</h1>
         <input v-else v-model="draftTitle" class="title-input" type="text" placeholder="Title" />
         <p v-if="byline && !editing" class="byline">{{ byline }}</p>

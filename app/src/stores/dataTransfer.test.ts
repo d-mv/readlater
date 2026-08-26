@@ -2,10 +2,14 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { EXPORT_VERSION } from "../utils/dataTransfer";
 
-const { from, getUser } = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn() }));
-vi.mock("../lib/supabase", () => ({
-  supabase: { from, auth: { getUser } },
+const { from, authState } = vi.hoisted(() => ({
+  from: vi.fn(),
+  authState: { userId: "user-1" as string | null },
 }));
+vi.mock("../lib/supabase", () => ({
+  supabase: { from },
+}));
+vi.mock("./auth", () => ({ useAuthStore: () => authState }));
 
 const { useDataTransferStore } = await import("./dataTransfer");
 
@@ -13,6 +17,7 @@ describe("useDataTransferStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    authState.userId = "user-1";
   });
 
   describe("exportBookmarks", () => {
@@ -87,7 +92,7 @@ describe("useDataTransferStore", () => {
     });
 
     test("requires an authenticated user", async () => {
-      getUser.mockResolvedValue({ data: { user: null } });
+      authState.userId = null;
 
       const store = useDataTransferStore();
       const result = await store.importBookmarks(validPayload());
@@ -96,8 +101,6 @@ describe("useDataTransferStore", () => {
     });
 
     test("skips rows whose URL already exists and inserts the rest with tags", async () => {
-      getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-
       const bookmark = {
         url: "https://new.example/y",
         type: "article",
@@ -131,12 +134,12 @@ describe("useDataTransferStore", () => {
         error: null,
       });
 
-      const insertedSingle = vi.fn().mockResolvedValue({ data: { id: "new-1" }, error: null });
-      const insertSelect = vi.fn(() => ({ single: insertedSingle }));
-      const insert = vi.fn(() => ({ select: insertSelect }));
+      const insertSelect = vi.fn().mockResolvedValue({ data: [{ id: "new-1" }], error: null });
+      const insert = vi.fn((_rows: unknown[]) => ({ select: insertSelect }));
 
-      const tagSingle = vi.fn().mockResolvedValue({ data: { id: "tag-1" }, error: null });
-      const tagSelect = vi.fn(() => ({ single: tagSingle }));
+      const tagSelect = vi
+        .fn()
+        .mockResolvedValue({ data: [{ id: "tag-1", name: "reading" }], error: null });
       const tagUpsert = vi.fn(() => ({ select: tagSelect }));
 
       const bookmarkTagsUpsert = vi.fn().mockResolvedValue({ data: null, error: null });
@@ -161,23 +164,25 @@ describe("useDataTransferStore", () => {
       expect(result.skipped).toEqual([
         { url: "https://arc90.com/x", title: "Existing", reason: "already exists" },
       ]);
-      expect(insert).toHaveBeenCalledWith(
+      // One bulk insert of the non-duplicate rows, no per-row calls.
+      expect(insert).toHaveBeenCalledTimes(1);
+      expect(insert).toHaveBeenCalledWith([
         expect.objectContaining({ url: "https://new.example/y", user_id: "user-1" }),
-      );
-      expect(insert).not.toHaveBeenCalledWith(expect.objectContaining({ tags: expect.anything() }));
-      expect(tagUpsert).toHaveBeenCalledWith(
-        { name: "reading", color: "#888888" },
-        { onConflict: "name", ignoreDuplicates: false },
-      );
-      expect(bookmarkTagsUpsert).toHaveBeenCalledWith(
-        { bookmark_id: "new-1", tag_id: "tag-1" },
-        { onConflict: "bookmark_id,tag_id" },
-      );
+      ]);
+      expect(insert.mock.calls[0][0][0]).not.toHaveProperty("tags");
+      // One bulk tag upsert, one bulk join upsert.
+      expect(tagUpsert).toHaveBeenCalledTimes(1);
+      expect(tagUpsert).toHaveBeenCalledWith([{ name: "reading", color: "#888888" }], {
+        onConflict: "name",
+        ignoreDuplicates: false,
+      });
+      expect(bookmarkTagsUpsert).toHaveBeenCalledTimes(1);
+      expect(bookmarkTagsUpsert).toHaveBeenCalledWith([{ bookmark_id: "new-1", tag_id: "tag-1" }], {
+        onConflict: "bookmark_id,tag_id",
+      });
     });
 
     test("reports an insert failure as a skipped row instead of throwing", async () => {
-      getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-
       const bookmark = {
         url: "https://new.example/y",
         type: "article",
@@ -206,10 +211,10 @@ describe("useDataTransferStore", () => {
       };
 
       const existingSelect = vi.fn().mockResolvedValue({ data: [], error: null });
-      const insertedSingle = vi
+      const insertSelect = vi
         .fn()
         .mockResolvedValue({ data: null, error: { message: "constraint violated" } });
-      const insert = vi.fn(() => ({ select: () => ({ single: insertedSingle }) }));
+      const insert = vi.fn(() => ({ select: insertSelect }));
 
       from.mockImplementation((table: string) => {
         if (table === "bookmarks") return { select: () => existingSelect(), insert };
@@ -223,6 +228,66 @@ describe("useDataTransferStore", () => {
       expect(result.skipped).toEqual([
         { url: "https://new.example/y", title: "New", reason: "constraint violated" },
       ]);
+    });
+
+    test("imports many bookmarks in a fixed number of queries", async () => {
+      const mk = (n: number) => ({
+        url: `https://ex.com/${n}`,
+        type: "article",
+        status: "ready",
+        title: `Article ${n}`,
+        author: null,
+        excerpt: null,
+        content_md: "body",
+        translated_content_md: null,
+        translated_lang: null,
+        thumbnail_url: null,
+        youtube_video_id: null,
+        content_edited: false,
+        word_count: 10,
+        reading_time: 1,
+        is_public: false,
+        archived: false,
+        read_at: null,
+        error_message: null,
+        created_at: "2026-01-01T00:00:00Z",
+        processed_at: "2026-01-01T00:01:00Z",
+        pdf_path: null,
+        pdf_parsed: false,
+        view_mode: null,
+        tags: [{ name: "t", color: "#888888" }],
+      });
+      const payloadRows = Array.from({ length: 25 }, (_, i) => mk(i));
+
+      const insert = vi.fn((_rows: unknown[]) => ({
+        select: vi.fn().mockResolvedValue({
+          data: payloadRows.map((_, i) => ({ id: `id-${i}` })),
+          error: null,
+        }),
+      }));
+      const tagUpsert = vi.fn(() => ({
+        select: vi.fn().mockResolvedValue({ data: [{ id: "tag-t", name: "t" }], error: null }),
+      }));
+      const bookmarkTagsUpsert = vi.fn().mockResolvedValue({ data: null, error: null });
+
+      from.mockImplementation((table: string) => {
+        if (table === "bookmarks") {
+          return { select: () => ({ data: [], error: null }), insert };
+        }
+        if (table === "tags") return { upsert: tagUpsert };
+        if (table === "bookmark_tags") return { upsert: bookmarkTagsUpsert };
+        throw new Error(`unexpected table ${table}`);
+      });
+
+      const store = useDataTransferStore();
+      const result = await store.importBookmarks(validPayload(payloadRows));
+
+      expect(result.imported).toBe(25);
+      expect(insert).toHaveBeenCalledTimes(1);
+      expect(insert.mock.calls[0][0]).toHaveLength(25);
+      expect(tagUpsert).toHaveBeenCalledTimes(1);
+      expect(bookmarkTagsUpsert).toHaveBeenCalledTimes(1);
+      expect(bookmarkTagsUpsert.mock.calls[0][0]).toHaveLength(25);
     });
   });
 });

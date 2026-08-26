@@ -2,8 +2,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 
-const { from, getUser } = vi.hoisted(() => ({ from: vi.fn(), getUser: vi.fn() }));
-vi.mock("../lib/supabase", () => ({ supabase: { from, auth: { getUser } } }));
+const { from } = vi.hoisted(() => ({ from: vi.fn() }));
+vi.mock("../lib/supabase", () => ({ supabase: { from } }));
+vi.mock("../stores/auth", () => ({ useAuthStore: () => ({ userId: "user-1" }) }));
 
 const { query, replace } = vi.hoisted(() => ({
   query: {} as Record<string, string>,
@@ -25,7 +26,6 @@ describe("ShareTargetView", () => {
 
   test("saves a pending bookmark and routes to the list when the url param is present", async () => {
     query.url = "https://arc90.com/x";
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = { id: "new", url: "https://arc90.com/x", type: "article", status: "pending" };
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const select = vi.fn(() => ({ single }));
@@ -43,7 +43,6 @@ describe("ShareTargetView", () => {
 
   test("treats shared text that is itself a bare URL the same as a url param", async () => {
     query.text = "https://arc90.com/y";
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = { id: "new", url: "https://arc90.com/y", type: "article", status: "pending" };
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const select = vi.fn(() => ({ single }));
@@ -59,7 +58,6 @@ describe("ShareTargetView", () => {
 
   test("saves free-form shared text as a ready note", async () => {
     query.text = "remember to read this later, it was a great point";
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = { id: "note-1", type: "note", status: "ready" };
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const select = vi.fn(() => ({ single }));
@@ -75,7 +73,6 @@ describe("ShareTargetView", () => {
 
   test("shows a duplicate dialog instead of routing away when the URL was already saved", async () => {
     query.url = "https://arc90.com/x";
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const single = vi
       .fn()
       .mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });

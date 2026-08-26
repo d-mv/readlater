@@ -1,24 +1,68 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Bookmark } from "../lib/supabase";
 
-const { from, getUser, invoke, storageRemove, storageCreateSignedUrl } = vi.hoisted(() => ({
-  from: vi.fn(),
-  getUser: vi.fn(),
-  invoke: vi.fn(),
-  storageRemove: vi.fn(),
-  storageCreateSignedUrl: vi.fn(),
-}));
+const {
+  from,
+  invoke,
+  storageRemove,
+  storageCreateSignedUrl,
+  channel,
+  removeChannel,
+  onSpy,
+  authState,
+} = vi.hoisted(() => {
+  const onSpy = vi.fn();
+  const channelObj = {
+    on: (...args: unknown[]) => {
+      onSpy(...args);
+      return channelObj;
+    },
+    subscribe: () => channelObj,
+  };
+  return {
+    from: vi.fn(),
+    invoke: vi.fn(),
+    storageRemove: vi.fn(),
+    storageCreateSignedUrl: vi.fn(),
+    channel: vi.fn(() => channelObj),
+    removeChannel: vi.fn(),
+    onSpy,
+    authState: { userId: "user-1" as string | null },
+  };
+});
 vi.mock("../lib/supabase", () => ({
   supabase: {
     from,
-    auth: { getUser },
     functions: { invoke },
+    channel,
+    removeChannel,
     storage: {
       from: () => ({ remove: storageRemove, createSignedUrl: storageCreateSignedUrl }),
     },
   },
 }));
+vi.mock("./auth", () => ({ useAuthStore: () => authState }));
+
+/** Invoke the postgres_changes handler the store registered with .on(). */
+function emitRealtime(payload: Record<string, unknown>) {
+  const handler = onSpy.mock.calls.at(-1)?.[2] as (p: Record<string, unknown>) => void;
+  handler(payload);
+}
+
+/**
+ * Chainable stand-in for a PostgREST list query: .textSearch()/.lt()/.limit()
+ * return self, .order() resolves with { data, error }.
+ */
+function listQuery(rows: unknown = [], error: unknown = null) {
+  const self = {
+    textSearch: vi.fn(() => self),
+    lt: vi.fn(() => self),
+    limit: vi.fn(() => self),
+    order: vi.fn().mockResolvedValue({ data: rows, error }),
+  };
+  return self;
+}
 
 const {
   replaceBookmarksList,
@@ -82,6 +126,7 @@ describe("useBookmarksStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    authState.userId = "user-1";
     replaceBookmarksList.mockResolvedValue(undefined);
     getBookmarksList.mockResolvedValue([]);
     getArticle.mockResolvedValue(undefined);
@@ -94,8 +139,7 @@ describe("useBookmarksStore", () => {
 
   test("fetch loads bookmarks ordered by the query and exposes them", async () => {
     const rows = [makeBookmark({ id: "1" }), makeBookmark({ id: "2", archived: true })];
-    const order = vi.fn().mockResolvedValue({ data: rows, error: null });
-    const select = vi.fn(() => ({ order }));
+    const select = vi.fn(() => listQuery(rows));
     from.mockReturnValue({ select });
 
     const store = useBookmarksStore();
@@ -105,13 +149,133 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks).toHaveLength(2);
   });
 
+  test("fetch requests a list projection without article bodies or the search vector", async () => {
+    const select = vi.fn((_cols: string) => listQuery([]));
+    from.mockReturnValue({ select });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+
+    const requestedColumns = select.mock.calls[0][0];
+    expect(requestedColumns).not.toContain("content_md");
+    expect(requestedColumns).not.toContain("translated_content_md");
+    expect(requestedColumns).not.toContain("search_vector");
+    expect(requestedColumns).not.toBe("*, tags(id, name, color)");
+    expect(requestedColumns).toContain("tags(id, name, color)");
+    expect(requestedColumns).toContain("translated_lang");
+  });
+
+  describe("pagination", () => {
+    const page = (n: number, offset = 0) =>
+      Array.from({ length: n }, (_, i) =>
+        makeBookmark({
+          id: `b${offset + i}`,
+          created_at: `2026-01-01T00:00:${String(offset + i).padStart(2, "0")}Z`,
+        }),
+      );
+
+    test("fetch loads just the first page and flags that more may exist", async () => {
+      const query = listQuery(page(50));
+      from.mockReturnValue({ select: () => query });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(query.limit).toHaveBeenCalledWith(50);
+      expect(store.bookmarks).toHaveLength(50);
+      expect(store.hasMore).toBe(true);
+    });
+
+    test("fetch with a short first page reports no more pages", async () => {
+      from.mockReturnValue({ select: () => listQuery(page(12)) });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(store.hasMore).toBe(false);
+    });
+
+    test("loadMore appends the next page keyed off the oldest loaded created_at", async () => {
+      const first = listQuery(page(50));
+      const second = listQuery(page(3, 50));
+      from.mockReturnValueOnce({ select: () => first }).mockReturnValueOnce({
+        select: () => second,
+      });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+      await store.loadMore();
+
+      expect(second.lt).toHaveBeenCalledWith("created_at", "2026-01-01T00:00:49Z");
+      expect(store.bookmarks).toHaveLength(53);
+      expect(store.hasMore).toBe(false);
+    });
+
+    test("loadMore is a no-op when a search is active", async () => {
+      from.mockReturnValue({ select: () => listQuery(page(50)) });
+      const store = useBookmarksStore();
+      store.setSearchQuery("vue");
+      await store.fetch();
+      from.mockClear();
+
+      await store.loadMore();
+
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    test("a search loads the whole result set unpaged", async () => {
+      const query = listQuery(page(50));
+      from.mockReturnValue({ select: () => query });
+
+      const store = useBookmarksStore();
+      store.setSearchQuery("vue");
+      await store.fetch();
+
+      expect(query.limit).not.toHaveBeenCalled();
+      expect(store.hasMore).toBe(false);
+    });
+  });
+
+  test("fetchOne requests the full row including article bodies", async () => {
+    const row = makeBookmark({ id: "solo" });
+    const single = vi.fn().mockResolvedValue({ data: row, error: null });
+    const eq = vi.fn(() => ({ single }));
+    const select = vi.fn(() => ({ eq }));
+    from.mockReturnValue({ select });
+
+    const store = useBookmarksStore();
+    await store.fetchOne("solo");
+
+    expect(select).toHaveBeenCalledWith("*, tags(id, name, color)");
+  });
+
+  test("a realtime UPDATE merges over the existing row, keeping an already-loaded body", async () => {
+    const seedRows = [makeBookmark({ id: "1", status: "pending", content_md: "loaded body" })];
+    from.mockReturnValue({
+      select: () => listQuery(seedRows),
+    });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    store.subscribeToChanges();
+
+    emitRealtime({
+      eventType: "UPDATE",
+      new: { id: "1", status: "ready", title: "Now ready" },
+    });
+
+    expect(store.bookmarks[0]?.status).toBe("ready");
+    expect(store.bookmarks[0]?.title).toBe("Now ready");
+    expect(store.bookmarks[0]?.content_md).toBe("loaded body");
+  });
+
   test("visibleBookmarks shows non-archived rows on the 'all' filter", async () => {
     const rows = [
       makeBookmark({ id: "1", archived: false }),
       makeBookmark({ id: "2", archived: true }),
     ];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
 
     const store = useBookmarksStore();
@@ -127,7 +291,7 @@ describe("useBookmarksStore", () => {
       makeBookmark({ id: "2", archived: true }),
     ];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
 
     const store = useBookmarksStore();
@@ -144,7 +308,7 @@ describe("useBookmarksStore", () => {
       makeBookmark({ id: "3", archived: true, read_at: null }),
     ];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
 
     const store = useBookmarksStore();
@@ -158,7 +322,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
 
@@ -176,7 +340,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
 
@@ -194,7 +358,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
 
@@ -220,7 +384,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add inserts a pending bookmark for the signed-in user and prepends it locally", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = makeBookmark({ id: "new", url: "https://arc90.com/new", status: "pending" });
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const select = vi.fn(() => ({ single }));
@@ -243,7 +406,7 @@ describe("useBookmarksStore", () => {
   });
 
   test("add returns an error and does not touch local state when not signed in", async () => {
-    getUser.mockResolvedValue({ data: { user: null } });
+    authState.userId = null;
 
     const store = useBookmarksStore();
     const result = await store.add("https://arc90.com/new");
@@ -254,8 +417,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add returns an error for an unparseable URL", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-
     const store = useBookmarksStore();
     const result = await store.add("not a url");
 
@@ -264,10 +425,9 @@ describe("useBookmarksStore", () => {
   });
 
   test("add reports a duplicate and skips inserting when the URL is already saved", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const rows = [makeBookmark({ id: "1", url: "https://arc90.com/x" })];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
 
     const store = useBookmarksStore();
@@ -281,10 +441,9 @@ describe("useBookmarksStore", () => {
   });
 
   test("add with force: true skips the duplicate check and inserts anyway", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const rows = [makeBookmark({ id: "1", url: "https://arc90.com/x" })];
     from.mockReturnValueOnce({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
 
     const store = useBookmarksStore();
@@ -304,7 +463,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add passes an optional title through to the insert", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = makeBookmark({ id: "new", url: "https://arc90.com/new", status: "pending" });
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
     const select = vi.fn(() => ({ single }));
@@ -321,7 +479,7 @@ describe("useBookmarksStore", () => {
     const original = makeBookmark({ id: "1", title: "Old title" });
     const updated = makeBookmark({ id: "1", title: "New title" });
     from.mockReturnValueOnce({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: [original], error: null }) }),
+      select: () => listQuery([original]),
     });
 
     const store = useBookmarksStore();
@@ -341,7 +499,7 @@ describe("useBookmarksStore", () => {
   test("fetch persists list metadata without article content to the offline store on success", async () => {
     const rows = [makeBookmark({ id: "1", content_md: "full text" })];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
 
     const store = useBookmarksStore();
@@ -356,7 +514,7 @@ describe("useBookmarksStore", () => {
   test("fetch keeps the freshly loaded list even if persisting the offline copy fails", async () => {
     const rows = [makeBookmark({ id: "1" })];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
     replaceBookmarksList.mockRejectedValue(new Error("private browsing: indexedDB disabled"));
 
@@ -368,8 +526,9 @@ describe("useBookmarksStore", () => {
   });
 
   test("fetch falls back to the offline cache when the network request fails", async () => {
-    const order = vi.fn().mockRejectedValue(new Error("offline"));
-    from.mockReturnValue({ select: () => ({ order }) });
+    const query = listQuery();
+    query.order.mockRejectedValue(new Error("offline"));
+    from.mockReturnValue({ select: () => query });
     getBookmarksList.mockResolvedValue([
       {
         id: "1",
@@ -408,8 +567,7 @@ describe("useBookmarksStore", () => {
   });
 
   test("fetch falls back to the offline cache when supabase returns an error object without throwing", async () => {
-    const order = vi.fn().mockResolvedValue({ data: null, error: { message: "fetch failed" } });
-    from.mockReturnValue({ select: () => ({ order }) });
+    from.mockReturnValue({ select: () => listQuery(null, { message: "fetch failed" }) });
     getBookmarksList.mockResolvedValue([
       {
         id: "1",
@@ -445,7 +603,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
 
@@ -457,7 +615,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("addNote inserts a ready note for the signed-in user and prepends it locally", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const inserted = makeBookmark({
       id: "note-1",
       url: null,
@@ -487,8 +644,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("addNote returns an error for blank text without touching the network", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
-
     const store = useBookmarksStore();
     const result = await store.addNote("   ");
 
@@ -592,7 +747,7 @@ describe("useBookmarksStore", () => {
       makeBookmark({ id: "1", type: "pdf", pdf_path: "user-1/a.pdf", pdf_parsed: true }),
     ];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
     const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
 
@@ -633,7 +788,7 @@ describe("useBookmarksStore", () => {
       makeBookmark({ id: "1", type: "pdf", pdf_path: "user-1/a.pdf", pdf_parsed: true }),
     ];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
     const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
     storageRemove.mockResolvedValue({ error: null });
@@ -661,7 +816,7 @@ describe("useBookmarksStore", () => {
   test("translateBookmark invokes the translate edge function with the bookmark id and caches the result locally", async () => {
     const rows = [makeBookmark({ id: "1", content_md: "Bonjour" })];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
     invoke.mockResolvedValue({
       data: { translated_text: "Hello", translated_lang: "EN" },
@@ -683,7 +838,7 @@ describe("useBookmarksStore", () => {
   test("translateBookmark propagates an error from the edge function without touching local state", async () => {
     const rows = [makeBookmark({ id: "1", content_md: "Bonjour" })];
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
     });
     invoke.mockResolvedValue({ data: null, error: { message: "DeepL error" } });
 
@@ -700,7 +855,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
 
@@ -718,7 +873,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
 
@@ -742,7 +897,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
@@ -789,7 +944,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
     vi.spyOn(window, "confirm").mockReturnValue(false);
@@ -807,7 +962,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
 
@@ -847,7 +1002,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const update = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       update,
     });
 
@@ -865,7 +1020,6 @@ describe("useBookmarksStore", () => {
   });
 
   test("add reports a duplicate via the DB unique index when the URL wasn't in the local list", async () => {
-    getUser.mockResolvedValue({ data: { user: { id: "user-1" } } });
     const single = vi
       .fn()
       .mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });
@@ -906,7 +1060,7 @@ describe("useBookmarksStore", () => {
     from.mockImplementation((table: string) => {
       if (table === "tags") return { upsert: tagUpsert };
       if (table === "bookmark_tags") return { upsert: joinUpsert };
-      return { select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }) };
+      return { select: () => listQuery(rows) };
     });
 
     const store = useBookmarksStore();
@@ -933,7 +1087,7 @@ describe("useBookmarksStore", () => {
 
     from.mockImplementation((table: string) => {
       if (table === "bookmark_tags") return { delete: del };
-      return { select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }) };
+      return { select: () => listQuery(rows) };
     });
 
     const store = useBookmarksStore();
@@ -951,7 +1105,7 @@ describe("useBookmarksStore", () => {
     const eq = vi.fn().mockResolvedValue({ error: null });
     const del = vi.fn(() => ({ eq }));
     from.mockReturnValue({
-      select: () => ({ order: vi.fn().mockResolvedValue({ data: rows, error: null }) }),
+      select: () => listQuery(rows),
       delete: del,
     });
 
@@ -966,128 +1120,124 @@ describe("useBookmarksStore", () => {
     expect(removeCachedBookmark).toHaveBeenCalledWith("1");
   });
 
-  describe("polling", () => {
-    beforeEach(() => {
-      vi.useFakeTimers();
-    });
-
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    test("startPolling re-fetches on an interval to pick up remote changes", async () => {
-      const order = vi.fn().mockResolvedValue({ data: [], error: null });
-      from.mockReturnValue({ select: () => ({ order }) });
-
-      const store = useBookmarksStore();
-      store.startPolling();
-
-      expect(order).toHaveBeenCalledTimes(0);
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(order).toHaveBeenCalledTimes(1);
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(order).toHaveBeenCalledTimes(2);
-    });
-
-    test("startPolling requests a lightweight column set, not full article content", async () => {
-      const order = vi.fn().mockResolvedValue({ data: [], error: null });
-      const select = vi.fn((_cols: string) => ({ order }));
-      from.mockReturnValue({ select });
-
-      const store = useBookmarksStore();
-      store.startPolling();
-      await vi.advanceTimersByTimeAsync(5000);
-
-      expect(select).toHaveBeenCalledTimes(1);
-      const requestedColumns = select.mock.calls[0][0];
-      expect(requestedColumns).not.toContain("content_md");
-    });
-
-    test("startPolling only re-fetches full content for bookmarks whose status changed", async () => {
-      const seedRows = [
-        makeBookmark({ id: "1", status: "ready", title: "Unchanged" }),
-        makeBookmark({ id: "2", status: "pending", title: "Stale" }),
-      ];
-      const seedOrder = vi.fn().mockResolvedValue({ data: seedRows, error: null });
-      const lightOrder = vi.fn().mockResolvedValue({
-        data: [
-          { id: "1", status: "ready", archived: false, read_at: null },
-          { id: "2", status: "ready", archived: false, read_at: null },
-        ],
-        error: null,
+  describe("realtime", () => {
+    function seedStore(rows: Bookmark[]) {
+      from.mockReturnValue({
+        select: () => listQuery(rows),
       });
-      const inMock = vi.fn().mockResolvedValue({
-        data: [makeBookmark({ id: "2", status: "ready", title: "Now ready" })],
-        error: null,
-      });
+    }
 
-      const select = vi.fn((cols: string) =>
-        cols === "id, status, archived, read_at"
-          ? { order: lightOrder }
-          : { order: seedOrder, in: inMock },
+    test("subscribeToChanges opens one postgres_changes channel and is idempotent", async () => {
+      seedStore([]);
+      const store = useBookmarksStore();
+
+      store.subscribeToChanges();
+      store.subscribeToChanges();
+
+      expect(channel).toHaveBeenCalledTimes(1);
+      expect(channel).toHaveBeenCalledWith("bookmarks-changes");
+      expect(onSpy).toHaveBeenCalledWith(
+        "postgres_changes",
+        expect.objectContaining({ event: "*", schema: "public", table: "bookmarks" }),
+        expect.any(Function),
       );
-      from.mockReturnValue({ select });
+    });
+
+    test("an INSERT event prepends the new row", async () => {
+      seedStore([makeBookmark({ id: "1" })]);
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+
+      emitRealtime({ eventType: "INSERT", new: makeBookmark({ id: "2", title: "Fresh" }) });
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["2", "1"]);
+    });
+
+    test("an INSERT event is ignored while a search is active", async () => {
+      from.mockReturnValue({ select: () => listQuery([makeBookmark({ id: "1" })]) });
+      const store = useBookmarksStore();
+      store.setSearchQuery("hello");
+      await store.fetch();
+      store.subscribeToChanges();
+
+      emitRealtime({ eventType: "INSERT", new: makeBookmark({ id: "2" }) });
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["1"]);
+    });
+
+    test("a duplicate INSERT (echo of a local add) is not added twice", async () => {
+      seedStore([makeBookmark({ id: "1" })]);
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+
+      emitRealtime({ eventType: "INSERT", new: makeBookmark({ id: "1" }) });
+
+      expect(store.bookmarks).toHaveLength(1);
+    });
+
+    test("a DELETE event drops the row and its offline metadata", async () => {
+      seedStore([makeBookmark({ id: "1" }), makeBookmark({ id: "2" })]);
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+
+      emitRealtime({ eventType: "DELETE", old: { id: "1" } });
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["2"]);
+    });
+
+    test("unsubscribeFromChanges removes the channel and lets a later subscribe reopen it", async () => {
+      seedStore([]);
+      const store = useBookmarksStore();
+
+      store.subscribeToChanges();
+      store.unsubscribeFromChanges();
+      store.subscribeToChanges();
+
+      expect(removeChannel).toHaveBeenCalledTimes(1);
+      expect(channel).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("client-side filtering", () => {
+    test("visibleBookmarks keeps only rows carrying every active tag (match-all)", async () => {
+      const vue = { id: "t-vue", name: "vue", color: "#111" };
+      const perf = { id: "t-perf", name: "perf", color: "#222" };
+      from.mockReturnValue({
+        select: () =>
+          listQuery([
+            makeBookmark({ id: "1", tags: [vue, perf] }),
+            makeBookmark({ id: "2", tags: [vue] }),
+            makeBookmark({ id: "3", tags: [perf] }),
+          ]),
+      });
 
       const store = useBookmarksStore();
       await store.fetch();
+      store.setActiveTagIds(["t-vue", "t-perf"]);
 
-      store.startPolling();
-      await vi.advanceTimersByTimeAsync(5000);
-
-      expect(inMock).toHaveBeenCalledWith("id", ["2"]);
-      expect(store.bookmarks.find((b) => b.id === "2")?.title).toBe("Now ready");
-      expect(store.bookmarks.find((b) => b.id === "1")?.title).toBe("Unchanged");
+      expect(store.visibleBookmarks.map((b) => b.id)).toEqual(["1"]);
     });
 
-    test("startPolling skips the full-content query entirely when nothing changed", async () => {
-      const seedRows = [makeBookmark({ id: "1", status: "ready" })];
-      const seedOrder = vi.fn().mockResolvedValue({ data: seedRows, error: null });
-      const lightOrder = vi.fn().mockResolvedValue({
-        data: [{ id: "1", status: "ready", archived: false, read_at: null }],
-        error: null,
+    test("setActiveTagIds does not issue a query", async () => {
+      from.mockReturnValue({
+        select: () => listQuery([]),
       });
-      const inMock = vi.fn();
-
-      const select = vi.fn((cols: string) =>
-        cols === "id, status, archived, read_at"
-          ? { order: lightOrder }
-          : { order: seedOrder, in: inMock },
-      );
-      from.mockReturnValue({ select });
-
       const store = useBookmarksStore();
       await store.fetch();
+      from.mockClear();
 
-      store.startPolling();
-      await vi.advanceTimersByTimeAsync(5000);
+      store.setActiveTagIds(["t-vue"]);
 
-      expect(inMock).not.toHaveBeenCalled();
+      expect(from).not.toHaveBeenCalled();
     });
 
-    test("stopPolling cancels further re-fetches", async () => {
-      const order = vi.fn().mockResolvedValue({ data: [], error: null });
-      from.mockReturnValue({ select: () => ({ order }) });
-
+    test("setSearchQuery does not issue a query on its own", async () => {
       const store = useBookmarksStore();
-      store.startPolling();
-      await vi.advanceTimersByTimeAsync(5000);
-      expect(order).toHaveBeenCalledTimes(1);
-
-      store.stopPolling();
-      await vi.advanceTimersByTimeAsync(15000);
-      expect(order).toHaveBeenCalledTimes(1);
-    });
-
-    test("startPolling is idempotent — calling it again doesn't stack extra timers", async () => {
-      const order = vi.fn().mockResolvedValue({ data: [], error: null });
-      from.mockReturnValue({ select: () => ({ order }) });
-
-      const store = useBookmarksStore();
-      store.startPolling();
-      store.startPolling();
-      await vi.advanceTimersByTimeAsync(5000);
-
-      expect(order).toHaveBeenCalledTimes(1);
+      store.setSearchQuery("hello");
+      expect(from).not.toHaveBeenCalled();
     });
   });
 
