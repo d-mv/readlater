@@ -589,9 +589,60 @@ describe("ReaderView", () => {
 
       scrollEl.dispatchEvent(new Event("scroll"));
       await nextTick();
-      await vi.advanceTimersByTimeAsync(600);
+      await vi.advanceTimersByTimeAsync(2000);
 
       expect(update).toHaveBeenCalledWith({ progress: 0.5 });
+    });
+
+    test("ignores scroll movements smaller than the write threshold", async () => {
+      const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+      const ready = makeBookmark({ id: "1", status: "ready", progress: 0, content_md: "Text" });
+      const single = vi.fn().mockResolvedValue({ data: ready, error: null });
+      from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })), update });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      Object.defineProperty(scrollEl, "scrollTop", {
+        value: 8,
+        configurable: true,
+        writable: true,
+      });
+
+      scrollEl.dispatchEvent(new Event("scroll"));
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    test("flushes the pending progress write when the page is hidden", async () => {
+      const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+      const ready = makeBookmark({ id: "1", status: "ready", progress: 0, content_md: "Text" });
+      const single = vi.fn().mockResolvedValue({ data: ready, error: null });
+      from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })), update });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      Object.defineProperty(scrollEl, "scrollTop", {
+        value: 600,
+        configurable: true,
+        writable: true,
+      });
+
+      scrollEl.dispatchEvent(new Event("scroll"));
+      await nextTick();
+      // Before the debounce would fire.
+      window.dispatchEvent(new Event("pagehide"));
+
+      expect(update).toHaveBeenCalledWith({ progress: 0.75 });
     });
   });
 });

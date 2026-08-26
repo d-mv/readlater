@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, useTemplateRef, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { IconLoader2, IconAlertTriangle, IconRefresh } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
@@ -36,6 +36,8 @@ const scrollContainer = useTemplateRef<HTMLDivElement>("scrollContainer");
 const { progress } = useScrollProgress(scrollContainer);
 
 const restoredScrollForId = ref<string | null>(null);
+// Last progress value we persisted — the guard for coalescing writes below.
+let lastWrittenProgress = 0;
 
 function restoreReadingProgress() {
   if (!bookmark.value || bookmark.value.status !== "ready" || !scrollContainer.value) return;
@@ -44,6 +46,9 @@ function restoreReadingProgress() {
 
   const targetProgress = bookmark.value.progress ?? 0;
   if (targetProgress <= 0) return;
+  // The restore scroll re-fires the progress watcher; treat the restored
+  // value as already persisted so it doesn't trigger a redundant write.
+  lastWrittenProgress = targetProgress;
 
   nextTick(() => {
     requestAnimationFrame(() => {
@@ -63,16 +68,40 @@ watch(
   { immediate: true },
 );
 
-const saveProgressDebounced = useDebouncedFn((prog: number) => {
+// Reading progress is a nice-to-have, not something worth a DB write on every
+// debounce tick of a long scroll: coalesce to one write per 2s, only when the
+// position moved a meaningful amount, and flush whatever is pending when the
+// page goes away.
+const PROGRESS_WRITE_DELTA = 0.02;
+let pendingProgress: number | null = null;
+
+function flushProgress() {
+  if (pendingProgress === null) return;
+  const value = pendingProgress;
+  pendingProgress = null;
   if (bookmark.value && bookmark.value.status === "ready") {
-    store.updateProgress(bookmark.value.id, prog);
+    lastWrittenProgress = value;
+    store.updateProgress(bookmark.value.id, value);
   }
-}, 500);
+}
+
+const flushProgressDebounced = useDebouncedFn(flushProgress, 2000);
 
 watch(progress, (newVal) => {
-  if (bookmark.value && restoredScrollForId.value === bookmark.value.id) {
-    saveProgressDebounced(newVal);
-  }
+  if (!bookmark.value || restoredScrollForId.value !== bookmark.value.id) return;
+  if (Math.abs(newVal - lastWrittenProgress) < PROGRESS_WRITE_DELTA) return;
+  pendingProgress = newVal;
+  flushProgressDebounced();
+});
+
+function onPageHide() {
+  flushProgress();
+}
+
+onMounted(() => window.addEventListener("pagehide", onPageHide));
+onUnmounted(() => {
+  window.removeEventListener("pagehide", onPageHide);
+  flushProgress();
 });
 
 // The list query carries no article bodies, so pull the full row when the
