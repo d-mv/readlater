@@ -8,13 +8,37 @@ const pushMock = vi.fn();
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: pushMock }) }));
 
 const realtimeChannel = { on: () => realtimeChannel, subscribe: () => realtimeChannel };
+const listQuery = () => {
+  const q: Record<string, unknown> = {};
+  for (const m of ["select", "textSearch", "lt", "limit"]) q[m] = () => q;
+  q.order = () => Promise.resolve({ data: [], error: null });
+  return q;
+};
 vi.mock("../lib/supabase", () => ({
   supabase: {
-    from: () => ({ select: () => ({ order: () => Promise.resolve({ data: [], error: null }) }) }),
+    from: () => listQuery(),
     channel: () => realtimeChannel,
     removeChannel: () => {},
   },
 }));
+
+class FakeIntersectionObserver {
+  static instances: FakeIntersectionObserver[] = [];
+  callback: IntersectionObserverCallback;
+  constructor(cb: IntersectionObserverCallback) {
+    this.callback = cb;
+    FakeIntersectionObserver.instances.push(this);
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  trigger(isIntersecting: boolean) {
+    this.callback(
+      [{ isIntersecting } as IntersectionObserverEntry],
+      this as unknown as IntersectionObserver,
+    );
+  }
+}
 
 const { default: ReadingListView } = await import("./ReadingListView.vue");
 
@@ -22,6 +46,8 @@ describe("ReadingListView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    FakeIntersectionObserver.instances = [];
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver);
   });
 
   test("renders reading list view header and search bar", async () => {
@@ -105,5 +131,35 @@ describe("ReadingListView", () => {
 
     expect(store.activeTagIds).toEqual(["tag-1"]);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test("the load-more sentinel calls store.loadMore when it scrolls into view", async () => {
+    mount(ReadingListView);
+    await flushPromises();
+    const store = useBookmarksStore();
+    const loadMoreSpy = vi.spyOn(store, "loadMore").mockResolvedValue(undefined);
+
+    // Simulate an unfiltered list with a full first page and more to come.
+    store.bookmarks = [{ id: "1", archived: false, tags: [] } as never];
+    store.hasMore = true;
+    await flushPromises();
+
+    FakeIntersectionObserver.instances.at(-1)?.trigger(true);
+
+    expect(loadMoreSpy).toHaveBeenCalled();
+  });
+
+  test("an out-of-view sentinel does not call loadMore", async () => {
+    mount(ReadingListView);
+    await flushPromises();
+    const store = useBookmarksStore();
+    const loadMoreSpy = vi.spyOn(store, "loadMore").mockResolvedValue(undefined);
+    store.bookmarks = [{ id: "1", archived: false, tags: [] } as never];
+    store.hasMore = true;
+    await flushPromises();
+
+    FakeIntersectionObserver.instances.at(-1)?.trigger(false);
+
+    expect(loadMoreSpy).not.toHaveBeenCalled();
   });
 });

@@ -48,6 +48,7 @@ const LIST_COLUMNS = [
 ].join(", ");
 const LIST_SELECT = `${LIST_COLUMNS}, tags(id, name, color)`;
 const UNIQUE_VIOLATION = "23505";
+const PAGE_SIZE = 50;
 const PDF_BUCKET = "bookmark-pdfs";
 const PDF_SIGNED_URL_TTL_SECONDS = 60;
 
@@ -72,6 +73,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   const bookmarks = ref<Bookmark[]>([]);
   const filter = shallowRef<BookmarkFilter>("all");
   const loading = shallowRef(false);
+  const loadingMore = shallowRef(false);
+  // Whether an older page might still exist on the server (keyset pagination).
+  const hasMore = shallowRef(false);
   const searchQuery = shallowRef("");
   const activeTagIds = ref<string[]>([]);
 
@@ -115,28 +119,39 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     activeTagIds.value = next;
   }
 
-  // Applies the active full-text search filter and ordering. Tag filtering is
-  // resolved client-side against the loaded set (see visibleBookmarks), so it
-  // costs no query.
-  async function queryBookmarks<T>(select: string): Promise<T[]> {
-    let query = supabase.from("bookmarks").select(select);
+  // One page of the list, newest first. Applies the active full-text search
+  // filter; tag filtering is resolved client-side against the loaded set (see
+  // visibleBookmarks), so it costs no query. `before` is a keyset cursor on
+  // created_at for loadMore().
+  async function queryBookmarks(
+    opts: { limit?: number; before?: string } = {},
+  ): Promise<Bookmark[]> {
+    let query = supabase.from("bookmarks").select(LIST_SELECT);
 
     const trimmedQuery = searchQuery.value.trim();
     if (trimmedQuery) {
       query = query.textSearch("search_vector", trimmedQuery, { type: "websearch" });
     }
+    if (opts.before) query = query.lt("created_at", opts.before);
+    if (opts.limit) query = query.limit(opts.limit);
 
     const { data, error } = await query.order("created_at", { ascending: false });
     if (error) throw error;
-    return (data ?? []) as T[];
+    return (data ?? []) as unknown as Bookmark[];
   }
 
   async function fetch() {
     loading.value = true;
+    // A search result set is bounded and worth showing whole; only the
+    // unfiltered list is paged.
+    const searching = searchQuery.value.trim() !== "";
     try {
-      bookmarks.value = await queryBookmarks<Bookmark>(LIST_SELECT);
+      const page = await queryBookmarks(searching ? {} : { limit: PAGE_SIZE });
+      bookmarks.value = page;
+      hasMore.value = !searching && page.length === PAGE_SIZE;
       persistOfflineList();
     } catch {
+      hasMore.value = false;
       const offlineBookmarks = await loadOfflineBookmarks();
       const trimmedQuery = searchQuery.value.trim().toLowerCase();
       // Postgres full-text search doesn't run against the cached copy — fall
@@ -151,6 +166,29 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         : offlineBookmarks;
     } finally {
       loading.value = false;
+    }
+  }
+
+  // Appends the next older page. No-op during a search (the whole result set is
+  // already loaded) or while a page is in flight.
+  async function loadMore() {
+    if (!hasMore.value || loadingMore.value || searchQuery.value.trim() !== "") return;
+    const cursor = bookmarks.value.at(-1)?.created_at;
+    if (!cursor) {
+      hasMore.value = false;
+      return;
+    }
+    loadingMore.value = true;
+    try {
+      const page = await queryBookmarks({ limit: PAGE_SIZE, before: cursor });
+      const seen = new Set(bookmarks.value.map((b) => b.id));
+      bookmarks.value = [...bookmarks.value, ...page.filter((b) => !seen.has(b.id))];
+      hasMore.value = page.length === PAGE_SIZE;
+      persistOfflineList();
+    } catch {
+      // Leave hasMore untouched so the user can retry by scrolling again.
+    } finally {
+      loadingMore.value = false;
     }
   }
 
@@ -534,6 +572,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     bookmarks,
     filter,
     loading,
+    loadingMore,
+    hasMore,
     searchQuery,
     activeTagIds,
     visibleBookmarks,
@@ -543,6 +583,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     setSearchQuery,
     setActiveTagIds,
     fetch,
+    loadMore,
     subscribeToChanges,
     unsubscribeFromChanges,
     add,
