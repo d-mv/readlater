@@ -52,3 +52,19 @@ export interface DuplicateBookmark {
   existingTitle: string | null;
   existingSavedAt: string;
 }
+
+// The public-safe subset returned by the get_public_bookmark RPC — no owner
+// id, storage path, url, status, or other internal columns.
+export interface PublicBookmark {
+  id: string;
+  type: Bookmark["type"];
+  title: string | null;
+  author: string | null;
+  excerpt: string | null;
+  content_md: string | null;
+  thumbnail_url: string | null;
+  youtube_video_id: string | null;
+  word_count: number | null;
+  reading_time: number | null;
+  created_at: string;
+}

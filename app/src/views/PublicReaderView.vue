@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
-import { supabase, type Bookmark } from "../lib/supabase";
+import { supabase, type PublicBookmark } from "../lib/supabase";
 import { readerByline } from "../utils/format";
 import ArticleContent from "../components/reader/ArticleContent.vue";
 
@@ -8,18 +8,18 @@ const props = defineProps<{
   id: string;
 }>();
 
-const bookmark = ref<Bookmark | null>(null);
+const bookmark = ref<PublicBookmark | null>(null);
 const loading = ref(true);
 
 onMounted(async () => {
   const { data, error } = await supabase.rpc("get_public_bookmark", { bookmark_id: props.id });
   loading.value = false;
 
-  // get_public_bookmark is `returns setof bookmarks`, so supabase-js gives
-  // back an array — zero rows means either the id doesn't exist or the
+  // get_public_bookmark returns a table of public-safe columns, so supabase-js
+  // gives back an array — zero rows means either the id doesn't exist or the
   // bookmark isn't public. Both render the same "not found" state; nothing
   // here distinguishes which case it was.
-  const row = Array.isArray(data) ? data[0] : undefined;
+  const row = Array.isArray(data) ? (data[0] as PublicBookmark | undefined) : undefined;
   if (!error && row) bookmark.value = row;
 });
 </script>
