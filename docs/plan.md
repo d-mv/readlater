@@ -100,6 +100,8 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.3 List-session races in the bookmarks store
 
+**Status:** done (app 0.0.3).
+
 - **Where:** `app/src/stores/bookmarks.ts:126-229`.
 - **Problem:** the list's meaning is re-derived from live `searchQuery` in four
   places; no async path checks it is still current.

@@ -223,6 +223,94 @@ describe("useBookmarksStore", () => {
       expect(from).not.toHaveBeenCalled();
     });
 
+    /** A list query whose response the test resolves by hand. */
+    function deferredListQuery() {
+      let resolve!: (rows: unknown) => void;
+      const self = {
+        textSearch: vi.fn(() => self),
+        lt: vi.fn(() => self),
+        limit: vi.fn(() => self),
+        order: vi.fn(
+          () =>
+            new Promise((r) => {
+              resolve = (rows) => r({ data: rows, error: null });
+            }),
+        ),
+        resolve: (rows: unknown) => resolve(rows),
+      };
+      return self;
+    }
+
+    test("a loadMore that resolves after a search does not leak unfiltered rows into the results", async () => {
+      from.mockReturnValueOnce({ select: () => listQuery(page(50)) });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      const more = deferredListQuery();
+      from.mockReturnValueOnce({ select: () => more });
+      const pendingMore = store.loadMore();
+
+      const hits = [makeBookmark({ id: "hit", created_at: "2026-02-01T00:00:00Z" })];
+      from.mockReturnValueOnce({ select: () => listQuery(hits) });
+      store.setSearchQuery("vue");
+      await store.fetch();
+
+      more.resolve(page(50, 50));
+      await pendingMore;
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["hit"]);
+      expect(store.hasMore).toBe(false);
+    });
+
+    test("a slower, superseded fetch does not overwrite the newer result", async () => {
+      const store = useBookmarksStore();
+
+      const searchQuery = deferredListQuery();
+      from.mockReturnValueOnce({ select: () => searchQuery });
+      store.setSearchQuery("vue");
+      const searchFetch = store.fetch();
+
+      from.mockReturnValueOnce({ select: () => listQuery(page(50)) });
+      store.setSearchQuery("");
+      await store.fetch();
+
+      searchQuery.resolve([makeBookmark({ id: "stale-hit" })]);
+      await searchFetch;
+
+      expect(store.bookmarks).toHaveLength(50);
+      expect(store.bookmarks.some((b) => b.id === "stale-hit")).toBe(false);
+      expect(store.hasMore).toBe(true);
+      expect(store.loading).toBe(false);
+    });
+
+    test("search results never replace the offline list", async () => {
+      from.mockReturnValue({ select: () => listQuery([makeBookmark({ id: "hit" })]) });
+      const store = useBookmarksStore();
+      store.setSearchQuery("vue");
+      await store.fetch();
+      store.subscribeToChanges();
+      emitRealtime({ eventType: "UPDATE", new: makeBookmark({ id: "hit", title: "Renamed" }) });
+
+      expect(replaceBookmarksList).not.toHaveBeenCalled();
+    });
+
+    test("a row added by fetchOne does not become the paging cursor", async () => {
+      from.mockReturnValueOnce({ select: () => listQuery(page(50)) });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      const old = makeBookmark({ id: "old", created_at: "2020-01-01T00:00:00Z" });
+      const single = vi.fn().mockResolvedValue({ data: old, error: null });
+      from.mockReturnValueOnce({ select: () => ({ eq: () => ({ single }) }) });
+      await store.fetchOne("old");
+
+      const more = listQuery(page(3, 50));
+      from.mockReturnValueOnce({ select: () => more });
+      await store.loadMore();
+
+      expect(more.lt).toHaveBeenCalledWith("created_at", "2026-01-01T00:00:49Z");
+    });
+
     test("a search loads the whole result set unpaged", async () => {
       const query = listQuery(page(50));
       from.mockReturnValue({ select: () => query });

@@ -565,9 +565,10 @@ DB):
   images, so CORS failures are skipped silently — and swapped to `blob:` URLs
   at render time when offline. An already-cached id is not re-cached.
 - `bookmarksList` store — keyed by bookmark id → lightweight metadata
-  (everything but `content_md`), replaced after every successful list
-  load/page and Realtime event, read as a fallback when `fetch()` fails
-  offline.
+  (everything but `content_md`), replaced after every successful load/page
+  of the *unfiltered* list and on Realtime events while showing it — never
+  from search results or the offline snapshot — and read as a fallback when
+  `fetch()` fails offline.
 
 `cacheBookmark(id)` (wrapped by the `offlineCache` Pinia store) has two
 triggers: automatically after `ReaderView` successfully loads an article, or
@@ -615,6 +616,10 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
   whole library.
 - **Realtime INSERTs are dropped while a search is active** — a new row may
   not match; re-running the search shows it. UPDATE/DELETE still apply.
+- **List session.** The store tags what `bookmarks` holds (`recent` window
+  with its own keyset cursor, `search` result, `offline` snapshot); every
+  `fetch()` bumps a generation and older fetch/`loadMore` responses are
+  discarded, so a slow response can't overwrite a newer list.
 - **Import bulk-insert failure** reports every row as skipped rather than
   falling back to per-row inserts (client-side dedup already removes the
   common unique-URL collisions).

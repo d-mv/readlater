@@ -119,18 +119,33 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     activeTagIds.value = next;
   }
 
-  // One page of the list, newest first. Applies the active full-text search
-  // filter; tag filtering is resolved client-side against the loaded set (see
+  // What `bookmarks` currently holds, so async results and live events can
+  // tell whether they still apply:
+  // - "recent": the unfiltered newest-first window, paged by `cursor` (the
+  //   created_at of the oldest *paged* row — rows added by fetchOne() or
+  //   Realtime don't move it). The only kind mirrored to the offline list.
+  // - "search": a whole, unpaged full-text result set for `query`.
+  // - "offline": a read-only snapshot from IndexedDB after a failed fetch.
+  // Every fetch() bumps `listGeneration`; a response (fetch or loadMore)
+  // started under an older generation is discarded.
+  type ListSession =
+    | { kind: "recent"; cursor: string | null }
+    | { kind: "search"; query: string }
+    | { kind: "offline"; query: string };
+  let listSession: ListSession = { kind: "recent", cursor: null };
+  let listGeneration = 0;
+
+  // One page of the list, newest first. `query` applies full-text search;
+  // tag filtering is resolved client-side against the loaded set (see
   // visibleBookmarks), so it costs no query. `before` is a keyset cursor on
   // created_at for loadMore().
   async function queryBookmarks(
-    opts: { limit?: number; before?: string } = {},
+    opts: { query?: string; limit?: number; before?: string } = {},
   ): Promise<Bookmark[]> {
     let query = supabase.from("bookmarks").select(LIST_SELECT);
 
-    const trimmedQuery = searchQuery.value.trim();
-    if (trimmedQuery) {
-      query = query.textSearch("search_vector", trimmedQuery, { type: "websearch" });
+    if (opts.query) {
+      query = query.textSearch("search_vector", opts.query, { type: "websearch" });
     }
     if (opts.before) query = query.lt("created_at", opts.before);
     if (opts.limit) query = query.limit(opts.limit);
@@ -141,48 +156,64 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   }
 
   async function fetch() {
+    const generation = ++listGeneration;
+    const isCurrent = () => generation === listGeneration;
+    // Snapshot the query: the input can change while this request is in flight.
+    const query = searchQuery.value.trim();
     loading.value = true;
-    // A search result set is bounded and worth showing whole; only the
-    // unfiltered list is paged.
-    const searching = searchQuery.value.trim() !== "";
     try {
-      const page = await queryBookmarks(searching ? {} : { limit: PAGE_SIZE });
+      // A search result set is bounded and worth showing whole; only the
+      // unfiltered list is paged.
+      const page = await queryBookmarks(query ? { query } : { limit: PAGE_SIZE });
+      if (!isCurrent()) return;
       bookmarks.value = page;
-      hasMore.value = !searching && page.length === PAGE_SIZE;
-      persistOfflineList();
+      if (query) {
+        listSession = { kind: "search", query };
+        hasMore.value = false;
+      } else {
+        listSession = { kind: "recent", cursor: page.at(-1)?.created_at ?? null };
+        hasMore.value = page.length === PAGE_SIZE;
+        persistOfflineList();
+      }
     } catch {
-      hasMore.value = false;
+      if (!isCurrent()) return;
       const offlineBookmarks = await loadOfflineBookmarks();
-      const trimmedQuery = searchQuery.value.trim().toLowerCase();
+      if (!isCurrent()) return;
+      const needle = query.toLowerCase();
       // Postgres full-text search doesn't run against the cached copy — fall
       // back to a plain substring match over title/excerpt (content_md isn't
       // cached in list metadata, so offline search can't reach article bodies).
-      bookmarks.value = trimmedQuery
+      bookmarks.value = needle
         ? offlineBookmarks.filter(
             (b) =>
-              b.title?.toLowerCase().includes(trimmedQuery) ||
-              b.excerpt?.toLowerCase().includes(trimmedQuery),
+              b.title?.toLowerCase().includes(needle) || b.excerpt?.toLowerCase().includes(needle),
           )
         : offlineBookmarks;
+      listSession = { kind: "offline", query };
+      hasMore.value = false;
     } finally {
-      loading.value = false;
+      if (isCurrent()) loading.value = false;
     }
   }
 
-  // Appends the next older page. No-op during a search (the whole result set is
-  // already loaded) or while a page is in flight.
+  // Appends the next older page. Only the unfiltered list pages; a no-op
+  // during a search or offline, or while a page is in flight.
   async function loadMore() {
-    if (!hasMore.value || loadingMore.value || searchQuery.value.trim() !== "") return;
-    const cursor = bookmarks.value.at(-1)?.created_at;
-    if (!cursor) {
+    const session = listSession;
+    if (session.kind !== "recent" || !hasMore.value || loadingMore.value) return;
+    if (!session.cursor) {
       hasMore.value = false;
       return;
     }
+    const generation = listGeneration;
     loadingMore.value = true;
     try {
-      const page = await queryBookmarks({ limit: PAGE_SIZE, before: cursor });
+      const page = await queryBookmarks({ limit: PAGE_SIZE, before: session.cursor });
+      // A fetch() started meanwhile (search, clear, refresh) owns the list now.
+      if (generation !== listGeneration || listSession !== session) return;
       const seen = new Set(bookmarks.value.map((b) => b.id));
       bookmarks.value = [...bookmarks.value, ...page.filter((b) => !seen.has(b.id))];
+      listSession = { kind: "recent", cursor: page.at(-1)?.created_at ?? session.cursor };
       hasMore.value = page.length === PAGE_SIZE;
       persistOfflineList();
     } catch {
@@ -193,6 +224,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   }
 
   function persistOfflineList() {
+    // Only the unfiltered list is a true copy of "my recent bookmarks"; a
+    // search result or an offline snapshot must never replace it.
+    if (listSession.kind !== "recent") return;
     // Best-effort: private browsing / storage quota must not blank the list.
     offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
   }
@@ -207,9 +241,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
 
   function applyChange(payload: RealtimePostgresChangesPayload<Bookmark>) {
     if (payload.eventType === "INSERT") {
-      // A search view is a filtered server result; a new row may not match it,
-      // so leave it out until the user re-runs the search.
-      if (searchQuery.value.trim() !== "") return;
+      // A search view is a filtered result; a new row may not match it, so
+      // leave it out until the user re-runs the search.
+      if (listSession.kind !== "recent" && listSession.query !== "") return;
       const row = { ...(payload.new as Bookmark), tags: payload.new.tags ?? [] };
       if (!bookmarks.value.some((b) => b.id === row.id)) {
         bookmarks.value = [row, ...bookmarks.value];
