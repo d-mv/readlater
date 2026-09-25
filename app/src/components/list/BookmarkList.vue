@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import BookmarkRow from "./BookmarkRow.vue";
 import type { Bookmark } from "../../lib/supabase";
+import Empty from "../../shared/ui/Empty.vue";
 
 withDefaults(
   defineProps<{
@@ -17,10 +18,10 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <div class="list">
-    <p data-testid="empty-state" v-if="bookmarks.length === 0" class="empty-state">
+  <div>
+    <Empty v-if="bookmarks.length === 0" test-id="empty-state" class="my-13">
       Nothing here yet.
-    </p>
+    </Empty>
     <BookmarkRow
       v-for="bookmark in bookmarks"
       :key="bookmark.id"
@@ -31,12 +32,3 @@ const emit = defineEmits<{
     />
   </div>
 </template>
-
-<style scoped>
-.empty-state {
-  padding: 32px 16px;
-  text-align: center;
-  color: var(--rl-text-muted);
-  font-size: 13px;
-}
-</style>

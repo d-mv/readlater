@@ -32,7 +32,7 @@ const containerClasses: Record<TabsVariant, string> = {
 
 const optionClasses: Record<TabsVariant, { base: string; active: string }> = {
   underline: {
-    base: "border-0 border-b-2 border-solid border-transparent bg-transparent px-0 pt-0 pb-8 text-ink-muted cursor-pointer [font:inherit]",
+    base: "border-0 border-b-2 border-solid border-transparent bg-transparent px-0 pt-0 pb-8 text-ink-muted cursor-pointer [font-family:inherit] [font-size:inherit] [line-height:inherit]",
     active: "font-medium text-ink border-b-accent",
   },
   segmented: {

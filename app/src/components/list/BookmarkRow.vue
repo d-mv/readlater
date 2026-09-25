@@ -12,6 +12,8 @@ import {
 } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
 import { listRowMeta } from "../../utils/format";
+import IconButton from "../../shared/ui/IconButton.vue";
+import { cn } from "../../shared/clsx";
 
 const props = withDefaults(
   defineProps<{
@@ -48,192 +50,62 @@ const displayTitle = computed(() => {
 </script>
 
 <template>
-  <div data-testid="row" class="row">
-    <button class="row-main" type="button" @click="emit('open', bookmark.id)">
-      <span class="icon-box">
-        <IconLoader2 v-if="isPending" :size="16" class="icon icon-spin" />
-        <IconAlertTriangle v-else-if="isFailed" :size="16" class="icon icon-failed" />
-        <component :is="iconComponent" v-else :size="16" class="icon" />
+  <div data-testid="row" class="flex w-full items-center gap-4 border-t-[0.5px] border-line px-16">
+    <button
+      class="flex min-w-0 flex-1 cursor-pointer items-center gap-12 border-0 bg-transparent px-0 py-14 text-left [font:inherit]"
+      type="button"
+      @click="emit('open', bookmark.id)"
+    >
+      <span class="flex size-32 shrink-0 items-center justify-center rounded-sm bg-raised">
+        <IconLoader2 v-if="isPending" :size="16" class="animate-spin text-ink-muted" />
+        <IconAlertTriangle v-else-if="isFailed" :size="16" class="text-danger" />
+        <component :is="iconComponent" v-else :size="16" class="text-ink-muted" />
       </span>
-      <span class="text">
-        <span class="title-row">
+      <span class="flex min-w-0 flex-1 flex-col">
+        <span class="flex min-w-0 items-center gap-4">
           <span
             data-testid="title"
-            class="title"
-            :class="{ 'title-read': isRead, 'title-pending': isPending, 'title-failed': isFailed }"
+            :class="
+              cn(
+                'truncate text-base font-medium text-ink',
+                isRead && 'font-normal text-ink-faint',
+                isPending && 'italic text-ink-faint',
+                isFailed && 'text-danger',
+              )
+            "
             :data-read="isRead || undefined"
             >{{ displayTitle }}</span
           >
           <IconWorld
-            data-testid="public-badge"
             v-if="bookmark.is_public"
+            data-testid="public-badge"
             :size="12"
-            class="public-badge"
+            class="shrink-0 text-accent"
             aria-label="Shared publicly"
           />
         </span>
-        <span class="meta-row">
-          <span class="meta">{{ meta }}</span>
+        <span class="mt-4 flex min-w-0 items-center gap-4">
+          <span class="truncate text-xs text-ink-faint">{{ meta }}</span>
           <IconLanguageHiragana
-            data-testid="translated-badge"
             v-if="isTranslated"
+            data-testid="translated-badge"
             :size="12"
-            class="translated-badge"
+            class="shrink-0 text-ink-faint"
             aria-label="Translated"
           />
         </span>
       </span>
     </button>
-    <button
-      data-testid="offline-toggle"
+    <IconButton
       v-if="isUnread"
-      class="offline-toggle"
-      :class="{ 'offline-toggle-cached': isCached }"
-      :aria-pressed="isCached"
-      type="button"
-      :aria-label="isCached ? 'Remove offline copy' : 'Save offline'"
+      test-id="offline-toggle"
+      :title="isCached ? 'Remove offline copy' : 'Save offline'"
+      :pressed="isCached"
+      :class="cn('size-28 shrink-0 rounded-sm text-ink-faint', isCached && 'text-accent')"
       @click="emit('toggleOffline', bookmark.id)"
     >
       <IconCheck v-if="isCached" :size="16" />
       <IconDownload v-else :size="16" />
-    </button>
+    </IconButton>
   </div>
 </template>
-
-<style scoped>
-.row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  width: 100%;
-  padding: 0 16px;
-  border-top: 0.5px solid var(--rl-border);
-}
-
-.row-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-  padding: 14px 0;
-  border: none;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
-  font: inherit;
-}
-
-.offline-toggle {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--rl-text-muted);
-  cursor: pointer;
-}
-
-.offline-toggle-cached {
-  color: var(--rl-accent);
-}
-
-.icon-box {
-  flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  background: var(--rl-surface);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.icon {
-  color: var(--rl-text-secondary);
-}
-
-.text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  flex: 1;
-}
-
-.title-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-
-.title {
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--rl-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.public-badge {
-  flex-shrink: 0;
-  color: var(--rl-accent);
-}
-
-.title-read {
-  font-weight: 400;
-  color: var(--rl-text-muted);
-}
-
-.title-pending {
-  font-style: italic;
-  color: var(--rl-text-muted);
-}
-
-.title-failed {
-  color: var(--rl-danger);
-}
-
-.icon-failed {
-  color: var(--rl-danger);
-}
-
-.icon-spin {
-  animation: rl-spin 1s linear infinite;
-}
-
-@keyframes rl-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.meta-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-  margin-top: 4px;
-}
-
-.meta {
-  font-size: 12px;
-  color: var(--rl-text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.translated-badge {
-  flex-shrink: 0;
-  color: var(--rl-text-muted);
-}
-</style>

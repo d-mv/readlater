@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Tag } from "../../lib/supabase";
+import Pill from "../../shared/ui/Pill.vue";
 
 const props = defineProps<{
   tags: Tag[];
@@ -16,47 +17,23 @@ function isActive(tagId: string): boolean {
 </script>
 
 <template>
-  <div data-testid="tag-filter-bar" v-if="tags.length > 0" class="tag-filter-bar">
-    <button
-      data-testid="tag-chip"
+  <div
+    v-if="tags.length > 0"
+    data-testid="tag-filter-bar"
+    class="flex flex-wrap gap-8 px-16 pt-8 pb-4"
+  >
+    <Pill
       v-for="tag in tags"
       :key="tag.id"
-      class="tag-chip"
-      :class="{ 'tag-chip-active': isActive(tag.id) }"
-      :aria-pressed="isActive(tag.id)"
-      type="button"
-      :style="{ '--tag-color': tag.color }"
+      as="button"
+      test-id="tag-chip"
+      :tone="isActive(tag.id) ? 'solid' : 'outline'"
+      :pressed="isActive(tag.id)"
+      :color="tag.color"
+      class="h-26 px-12"
       @click="emit('toggle', tag.id)"
     >
       {{ tag.name }}
-    </button>
+    </Pill>
   </div>
 </template>
-
-<style scoped>
-.tag-filter-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 16px 4px;
-}
-
-.tag-chip {
-  display: inline-flex;
-  align-items: center;
-  height: 26px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 0.5px solid var(--rl-border);
-  background: transparent;
-  color: var(--rl-text-secondary);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.tag-chip-active {
-  border-color: var(--tag-color, var(--rl-accent));
-  background: var(--tag-color, var(--rl-accent));
-  color: var(--rl-on-accent);
-}
-</style>

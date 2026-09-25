@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { BookmarkFilter } from "../../stores/bookmarks";
+import Tabs, { type TabOption } from "../../shared/ui/Tabs.vue";
+import Pill from "../../shared/ui/Pill.vue";
 
 defineProps<{
   activeFilter: BookmarkFilter;
@@ -9,67 +11,22 @@ defineProps<{
 const emit = defineEmits<{
   change: [filter: BookmarkFilter];
 }>();
+
+const options: TabOption<BookmarkFilter>[] = [
+  { value: "all", label: "All", testId: "tab" },
+  { value: "archived", label: "Archived", testId: "tab" },
+];
 </script>
 
 <template>
-  <div class="tabs">
-    <button
-      data-testid="tab"
-      class="tab"
-      type="button"
-      :class="{ 'tab-active': activeFilter === 'all' }"
-      :aria-pressed="activeFilter === 'all'"
-      @click="emit('change', 'all')"
+  <Tabs
+    :options="options"
+    :model-value="activeFilter"
+    class="border-b-[0.5px] border-line px-16 py-12"
+    @update:model-value="emit('change', $event)"
+  >
+    <Pill v-if="unreadCount > 0" tone="wash" class="ml-auto px-10 py-4 text-2xs"
+      >{{ unreadCount }} unread</Pill
     >
-      All
-    </button>
-    <button
-      data-testid="tab"
-      class="tab"
-      type="button"
-      :class="{ 'tab-active': activeFilter === 'archived' }"
-      :aria-pressed="activeFilter === 'archived'"
-      @click="emit('change', 'archived')"
-    >
-      Archived
-    </button>
-    <span v-if="unreadCount > 0" class="badge">{{ unreadCount }} unread</span>
-  </div>
+  </Tabs>
 </template>
-
-<style scoped>
-.tabs {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 12px 16px;
-  border-bottom: 0.5px solid var(--rl-border);
-}
-
-.tab {
-  border: none;
-  background: transparent;
-  padding: 0 0 8px;
-  font-size: 13px;
-  color: var(--rl-text-secondary);
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  font: inherit;
-}
-
-.tab-active {
-  font-weight: 500;
-  color: var(--rl-text-primary);
-  border-bottom-color: var(--rl-accent);
-}
-
-.badge {
-  margin-left: auto;
-  background: var(--rl-accent-tint);
-  color: var(--rl-on-accent-tint);
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
-}
-</style>
