@@ -10,17 +10,7 @@ function onSuccess() {
 </script>
 
 <template>
-  <main class="login-view">
+  <main class="flex min-h-screen items-center justify-center bg-canvas">
     <LoginForm @success="onSuccess" />
   </main>
 </template>
-
-<style scoped>
-.login-view {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--rl-bg);
-}
-</style>

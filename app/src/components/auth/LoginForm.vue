@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { shallowRef } from "vue";
 import { useAuthStore } from "../../stores/auth";
+import Button from "../../shared/ui/Button.vue";
+import Input from "../../shared/ui/Input.vue";
+import Message from "../../shared/ui/Message.vue";
 
 const emit = defineEmits<{
   success: [];
@@ -30,96 +33,30 @@ async function onSubmit() {
 </script>
 
 <template>
-  <form class="login-form" @submit.prevent="onSubmit">
-    <p class="brand">Read Later</p>
-    <p class="subtitle">Sign in to your archive</p>
+  <form class="mx-auto max-w-320 px-24 py-40" @submit.prevent="onSubmit">
+    <p class="m-0 mb-4 text-center text-lg font-medium text-ink">Read Later</p>
+    <p class="m-0 mb-24 text-center text-sm text-ink-muted">Sign in to your archive</p>
 
-    <label class="field-label" for="email">Email</label>
-    <input
+    <label class="mb-4 block text-xs text-ink-muted" for="email">Email</label>
+    <Input
       id="email"
       v-model="email"
       type="email"
       placeholder="you@example.com"
-      class="field-input"
+      class="mb-12 bg-raised"
     />
 
-    <label class="field-label" for="password">Password</label>
-    <input
+    <label class="mb-4 block text-xs text-ink-muted" for="password">Password</label>
+    <Input
       id="password"
       v-model="password"
       type="password"
       placeholder="••••••••"
-      class="field-input"
+      class="mb-12 bg-raised"
     />
 
-    <p data-testid="error" v-if="error" class="error">{{ error }}</p>
+    <Message v-if="error" tone="accent" test-id="error" class="-mt-4 mb-12">{{ error }}</Message>
 
-    <button class="submit" type="submit" :disabled="submitting">Sign in</button>
+    <Button type="submit" size="lg" class="w-full px-6" :disabled="submitting">Sign in</Button>
   </form>
 </template>
-
-<style scoped>
-.login-form {
-  max-width: 320px;
-  margin: 0 auto;
-  padding: 40px 24px;
-}
-
-.brand {
-  font-size: 18px;
-  font-weight: 500;
-  color: var(--rl-text-primary);
-  text-align: center;
-  margin: 0 0 4px;
-}
-
-.subtitle {
-  font-size: 13px;
-  color: var(--rl-text-secondary);
-  text-align: center;
-  margin: 0 0 24px;
-}
-
-.field-label {
-  font-size: 12px;
-  color: var(--rl-text-secondary);
-  display: block;
-  margin-bottom: 4px;
-}
-
-.field-input {
-  width: 100%;
-  height: 40px;
-  border-radius: var(--rl-radius);
-  border: 0.5px solid var(--rl-border);
-  background: var(--rl-surface);
-  color: var(--rl-text-primary);
-  padding: 0 12px;
-  font-size: 14px;
-  margin-bottom: 12px;
-  box-sizing: border-box;
-}
-
-.error {
-  color: var(--rl-accent);
-  font-size: 13px;
-  margin: -4px 0 12px;
-}
-
-.submit {
-  width: 100%;
-  height: 40px;
-  border-radius: var(--rl-radius);
-  border: none;
-  background: var(--rl-accent);
-  color: var(--rl-on-accent);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.submit:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-</style>
