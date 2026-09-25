@@ -27,7 +27,7 @@ const domain = computed(() => domainFromUrl(props.bookmark.url));
 
 <template>
   <div class="header">
-    <button class="icon-btn back-btn" type="button" @click="emit('back')">
+    <button data-testid="back-btn" class="icon-btn back-btn" type="button" @click="emit('back')">
       <IconChevronLeft :size="20" />
     </button>
     <span class="domain">{{ domain }}</span>

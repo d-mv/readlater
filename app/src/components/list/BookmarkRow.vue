@@ -48,7 +48,7 @@ const displayTitle = computed(() => {
 </script>
 
 <template>
-  <div class="row">
+  <div data-testid="row" class="row">
     <button class="row-main" type="button" @click="emit('open', bookmark.id)">
       <span class="icon-box">
         <IconLoader2 v-if="isPending" :size="16" class="icon icon-spin" />
@@ -58,11 +58,14 @@ const displayTitle = computed(() => {
       <span class="text">
         <span class="title-row">
           <span
+            data-testid="title"
             class="title"
             :class="{ 'title-read': isRead, 'title-pending': isPending, 'title-failed': isFailed }"
+            :data-read="isRead || undefined"
             >{{ displayTitle }}</span
           >
           <IconWorld
+            data-testid="public-badge"
             v-if="bookmark.is_public"
             :size="12"
             class="public-badge"
@@ -72,6 +75,7 @@ const displayTitle = computed(() => {
         <span class="meta-row">
           <span class="meta">{{ meta }}</span>
           <IconLanguageHiragana
+            data-testid="translated-badge"
             v-if="isTranslated"
             :size="12"
             class="translated-badge"
@@ -81,9 +85,11 @@ const displayTitle = computed(() => {
       </span>
     </button>
     <button
+      data-testid="offline-toggle"
       v-if="isUnread"
       class="offline-toggle"
       :class="{ 'offline-toggle-cached': isCached }"
+      :aria-pressed="isCached"
       type="button"
       :aria-label="isCached ? 'Remove offline copy' : 'Save offline'"
       @click="emit('toggleOffline', bookmark.id)"

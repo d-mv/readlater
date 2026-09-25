@@ -1,11 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 
-// Mirrors supabase-js's default storage key derivation: `sb-${hostname's
-// first label}-auth-token` — see @supabase/supabase-js's SupabaseClient
-// constructor. Keeping this in sync with app/.env's VITE_SUPABASE_URL is what
-// lets us seed a session without a real login round-trip.
-const SUPABASE_HOST = "yqdyswhdwbqabbbczmwq.supabase.co";
-const AUTH_STORAGE_KEY = "sb-yqdyswhdwbqabbbczmwq-auth-token";
+import { AUTH_STORAGE_KEY, SUPABASE_HOST } from "./supabaseEnv";
+
 const USER_ID = "e2e-user-1";
 
 const CORS_HEADERS = {
@@ -106,9 +102,9 @@ test("a translated bookmark shows the translated-language badge in the list, an 
 
   await page.goto("/");
 
-  const translatedRow = page.locator(".row", { hasText: "Translated article" });
-  const plainRow = page.locator(".row", { hasText: "Plain article" });
+  const translatedRow = page.locator('[data-testid="row"]', { hasText: "Translated article" });
+  const plainRow = page.locator('[data-testid="row"]', { hasText: "Plain article" });
 
-  await expect(translatedRow.locator(".translated-badge")).toBeVisible();
-  await expect(plainRow.locator(".translated-badge")).toHaveCount(0);
+  await expect(translatedRow.locator('[data-testid="translated-badge"]')).toBeVisible();
+  await expect(plainRow.locator('[data-testid="translated-badge"]')).toHaveCount(0);
 });

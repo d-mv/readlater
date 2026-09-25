@@ -12,7 +12,7 @@ describe("TagInput", () => {
 
   test("emits add with the trimmed draft text on enter and clears the input", async () => {
     const wrapper = mount(TagInput, { props: { tags: [] } });
-    const input = wrapper.find(".tag-draft-input");
+    const input = wrapper.find('[data-testid="tag-draft-input"]');
     await input.setValue("  reading  ");
     await input.trigger("keydown.enter");
 
@@ -22,7 +22,7 @@ describe("TagInput", () => {
 
   test("does not emit add for an empty draft", async () => {
     const wrapper = mount(TagInput, { props: { tags: [] } });
-    const input = wrapper.find(".tag-draft-input");
+    const input = wrapper.find('[data-testid="tag-draft-input"]');
     await input.setValue("   ");
     await input.trigger("keydown.enter");
 
@@ -31,7 +31,7 @@ describe("TagInput", () => {
 
   test("emits remove with the tag id when its remove button is clicked", async () => {
     const wrapper = mount(TagInput, { props: { tags } });
-    await wrapper.find(".remove-btn").trigger("click");
+    await wrapper.find('[data-testid="remove-btn"]').trigger("click");
     expect(wrapper.emitted("remove")).toEqual([["1"]]);
   });
 });

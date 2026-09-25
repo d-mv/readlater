@@ -1,11 +1,7 @@
 import { test, expect, type Page, type Route } from "@playwright/test";
 
-// Mirrors supabase-js's default storage key derivation: `sb-${hostname's
-// first label}-auth-token` — see @supabase/supabase-js's SupabaseClient
-// constructor. Keeping this in sync with app/.env's VITE_SUPABASE_URL is what
-// lets us seed a session without a real login round-trip.
-const SUPABASE_HOST = "yqdyswhdwbqabbbczmwq.supabase.co";
-const AUTH_STORAGE_KEY = "sb-yqdyswhdwbqabbbczmwq-auth-token";
+import { AUTH_STORAGE_KEY, SUPABASE_HOST } from "./supabaseEnv";
+
 const USER_ID = "e2e-user-1";
 const BOOKMARK_ID = "e2e-note-1";
 
@@ -121,25 +117,25 @@ test("translating a note shows the translation inline, and it's still there afte
 
   await page.goto(`/b/${BOOKMARK_ID}`);
   await expect(page.getByRole("heading", { name: "Bonjour le monde" })).toBeVisible();
-  await expect(page.locator(".article")).toContainText("Bonjour le monde");
+  await expect(page.locator('[data-testid="article"]')).toContainText("Bonjour le monde");
 
-  await page.locator(".menu-trigger").click();
-  await page.locator(".translate-item").click();
+  await page.locator('[data-testid="menu-trigger"]').click();
+  await page.locator('[data-testid="translate-item"]').click();
 
-  await expect(page.locator(".translate-bar")).toContainText("Translated");
-  await expect(page.locator(".article")).toContainText("[translated] Bonjour le monde");
+  await expect(page.locator('[data-testid="translate-bar"]')).toContainText("Translated");
+  await expect(page.locator('[data-testid="article"]')).toContainText("[translated] Bonjour le monde");
 
-  await page.locator(".translate-toggle").click();
-  await expect(page.locator(".translate-bar")).toContainText("Original");
-  await expect(page.locator(".article")).toContainText("Bonjour le monde");
-  await expect(page.locator(".article")).not.toContainText("[translated]");
+  await page.locator('[data-testid="translate-toggle"]').click();
+  await expect(page.locator('[data-testid="translate-bar"]')).toContainText("Original");
+  await expect(page.locator('[data-testid="article"]')).toContainText("Bonjour le monde");
+  await expect(page.locator('[data-testid="article"]')).not.toContainText("[translated]");
 
   // The edge function persisted the translation server-side (simulated by
   // mockBackend mutating `bookmark`), so a fresh load of the same bookmark
   // should show the translated version by default without any extra click.
   await page.reload();
-  await expect(page.locator(".article")).toContainText("[translated] Bonjour le monde");
-  await expect(page.locator(".translate-bar")).toContainText("Translated");
+  await expect(page.locator('[data-testid="article"]')).toContainText("[translated] Bonjour le monde");
+  await expect(page.locator('[data-testid="translate-bar"]')).toContainText("Translated");
 });
 
 test("opening a note that already has a cached translation shows it by default without calling DeepL", async ({
@@ -155,13 +151,13 @@ test("opening a note that already has a cached translation shows it by default w
 
   await page.goto(`/b/${BOOKMARK_ID}`);
 
-  await expect(page.locator(".translate-bar")).toContainText("Translated");
-  await expect(page.locator(".article")).toContainText("[translated] Bonjour le monde");
+  await expect(page.locator('[data-testid="translate-bar"]')).toContainText("Translated");
+  await expect(page.locator('[data-testid="article"]')).toContainText("[translated] Bonjour le monde");
   expect(translateCalls).toBe(0);
 
   // Clicking Translate again should just confirm the cached view — not spend
   // another DeepL call.
-  await page.locator(".menu-trigger").click();
-  await page.locator(".translate-item").click();
+  await page.locator('[data-testid="menu-trigger"]').click();
+  await page.locator('[data-testid="translate-item"]').click();
   expect(translateCalls).toBe(0);
 });

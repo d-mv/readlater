@@ -7,6 +7,7 @@ const store = useFontSizeStore();
 <template>
   <div class="font-size-control">
     <button
+      data-testid="font-size-decrease"
       class="icon-btn font-size-decrease"
       type="button"
       aria-label="Decrease font size"
@@ -16,6 +17,7 @@ const store = useFontSizeStore();
       A<span class="small">A</span>
     </button>
     <button
+      data-testid="font-size-increase"
       class="icon-btn font-size-increase"
       type="button"
       aria-label="Increase font size"

@@ -47,28 +47,28 @@ describe("ReaderHeader", () => {
 
   test("emits back when the back button is clicked", async () => {
     const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
-    await wrapper.find(".back-btn").trigger("click");
+    await wrapper.find('[data-testid="back-btn"]').trigger("click");
     expect(wrapper.emitted("back")).toHaveLength(1);
   });
 
   test("forwards archive from the menu", async () => {
     const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
-    await wrapper.find(".menu-trigger").trigger("click");
-    await wrapper.find(".archive-item").trigger("click");
+    await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+    await wrapper.find('[data-testid="archive-item"]').trigger("click");
     expect(wrapper.emitted("archive")).toHaveLength(1);
   });
 
   test("forwards share from the menu", async () => {
     const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
-    await wrapper.find(".menu-trigger").trigger("click");
-    await wrapper.find(".share-item").trigger("click");
+    await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+    await wrapper.find('[data-testid="share-item"]').trigger("click");
     expect(wrapper.emitted("share")).toHaveLength(1);
   });
 
   test("forwards edit from the menu", async () => {
     const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
-    await wrapper.find(".menu-trigger").trigger("click");
-    await wrapper.find(".edit-item").trigger("click");
+    await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+    await wrapper.find('[data-testid="edit-item"]').trigger("click");
     expect(wrapper.emitted("edit")).toHaveLength(1);
   });
 
@@ -76,8 +76,8 @@ describe("ReaderHeader", () => {
     const wrapper = mount(ReaderHeader, {
       props: { bookmark: makeBookmark({ url: null, type: "note", content_md: "Some text" }) },
     });
-    await wrapper.find(".menu-trigger").trigger("click");
-    await wrapper.find(".translate-item").trigger("click");
+    await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+    await wrapper.find('[data-testid="translate-item"]').trigger("click");
     expect(wrapper.emitted("translate")).toHaveLength(1);
   });
 
@@ -85,8 +85,8 @@ describe("ReaderHeader", () => {
     const wrapper = mount(ReaderHeader, {
       props: { bookmark: makeBookmark({ url: null, type: "pdf", pdf_path: "user-1/a.pdf" }) },
     });
-    await wrapper.find(".menu-trigger").trigger("click");
-    await wrapper.find(".open-original").trigger("click");
+    await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+    await wrapper.find('[data-testid="open-original"]').trigger("click");
     expect(wrapper.emitted("openOriginalPdf")).toHaveLength(1);
   });
 
@@ -102,8 +102,8 @@ describe("ReaderHeader", () => {
         }),
       },
     });
-    await wrapper.find(".menu-trigger").trigger("click");
-    await wrapper.find(".trash-pdf-item").trigger("click");
+    await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+    await wrapper.find('[data-testid="trash-pdf-item"]').trigger("click");
     expect(wrapper.emitted("trashOriginalPdf")).toHaveLength(1);
     confirmSpy.mockRestore();
   });

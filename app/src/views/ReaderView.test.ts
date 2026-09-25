@@ -146,7 +146,7 @@ describe("ReaderView", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("Couldn't process this article.");
-    const retryButton = wrapper.get("button.retry-btn");
+    const retryButton = wrapper.get('button[data-testid="retry-btn"]');
 
     await retryButton.trigger("click");
     await flushPromises();
@@ -171,8 +171,8 @@ describe("ReaderView", () => {
     }
 
     async function enterEditMode(wrapper: ReturnType<typeof mount>) {
-      await wrapper.find(".menu-trigger").trigger("click");
-      await wrapper.find(".edit-item").trigger("click");
+      await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.find('[data-testid="edit-item"]').trigger("click");
     }
 
     test("Edit switches to a title input and the markdown editor, seeded from the bookmark", async () => {
@@ -188,8 +188,8 @@ describe("ReaderView", () => {
       await flushPromises();
       await enterEditMode(wrapper);
 
-      expect(wrapper.find("h1.title").exists()).toBe(false);
-      const titleInput = wrapper.get("input.title-input");
+      expect(wrapper.find('h1[data-testid="title"]').exists()).toBe(false);
+      const titleInput = wrapper.get('input[data-testid="title-input"]');
       expect((titleInput.element as HTMLInputElement).value).toBe("Original title");
     });
 
@@ -206,13 +206,13 @@ describe("ReaderView", () => {
       await flushPromises();
       await enterEditMode(wrapper);
 
-      await wrapper.get("input.title-input").setValue("Edited title");
+      await wrapper.get('input[data-testid="title-input"]').setValue("Edited title");
       // Simulate the editor reporting new draft content, the same way md-editor-v3 does via update:modelValue.
       await wrapper
         .findComponent({ name: "ArticleContent" })
         .vm.$emit("update:modelValue", "one two three four");
 
-      await wrapper.find(".save-edit-btn").trigger("click");
+      await wrapper.find('[data-testid="save-edit-btn"]').trigger("click");
       await flushPromises();
 
       expect(update).toHaveBeenCalledWith({
@@ -224,8 +224,8 @@ describe("ReaderView", () => {
         translated_content_md: null,
         translated_lang: null,
       });
-      expect(wrapper.find("h1.title").text()).toBe("Edited title");
-      expect(wrapper.find("input.title-input").exists()).toBe(false);
+      expect(wrapper.find('h1[data-testid="title"]').text()).toBe("Edited title");
+      expect(wrapper.find('input[data-testid="title-input"]').exists()).toBe(false);
     });
 
     test("Cancel discards the draft without saving", async () => {
@@ -241,11 +241,11 @@ describe("ReaderView", () => {
       await flushPromises();
       await enterEditMode(wrapper);
 
-      await wrapper.get("input.title-input").setValue("Edited title");
-      await wrapper.find(".cancel-edit-btn").trigger("click");
+      await wrapper.get('input[data-testid="title-input"]').setValue("Edited title");
+      await wrapper.find('[data-testid="cancel-edit-btn"]').trigger("click");
 
       expect(update).not.toHaveBeenCalled();
-      expect(wrapper.find("h1.title").text()).toBe("Original title");
+      expect(wrapper.find('h1[data-testid="title"]').text()).toBe("Original title");
     });
   });
 
@@ -258,8 +258,8 @@ describe("ReaderView", () => {
     }
 
     async function clickTranslate(wrapper: ReturnType<typeof mount>) {
-      await wrapper.find(".menu-trigger").trigger("click");
-      await wrapper.find(".translate-item").trigger("click");
+      await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.find('[data-testid="translate-item"]').trigger("click");
     }
 
     test("replaces the rendered content with the translation and offers a 'Show original' toggle", async () => {
@@ -289,7 +289,7 @@ describe("ReaderView", () => {
         "Hello world",
       );
 
-      await wrapper.find(".translate-toggle").trigger("click");
+      await wrapper.find('[data-testid="translate-toggle"]').trigger("click");
       expect(wrapper.text()).toContain("Original");
       expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
         "Bonjour le monde",
@@ -322,14 +322,14 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
       await clickTranslate(wrapper);
-      await wrapper.find(".menu-trigger").trigger("click");
-      await wrapper.find(".edit-item").trigger("click");
+      await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.find('[data-testid="edit-item"]').trigger("click");
 
       respond({ data: { translated_text: "Hi", translated_lang: "EN" }, error: null });
       await flushPromises();
 
-      expect(wrapper.find("input.title-input").exists()).toBe(true);
-      expect(wrapper.find(".translate-bar").exists()).toBe(false);
+      expect(wrapper.find('input[data-testid="title-input"]').exists()).toBe(true);
+      expect(wrapper.find('[data-testid="translate-bar"]').exists()).toBe(false);
       expect(wrapper.findComponent({ name: "ArticleContent" }).props("editing")).toBe(true);
     });
 
@@ -351,7 +351,7 @@ describe("ReaderView", () => {
       await flushPromises();
 
       expect(wrapper.text()).not.toContain("DeepL quota exceeded");
-      expect(wrapper.find(".translate-bar").exists()).toBe(false);
+      expect(wrapper.find('[data-testid="translate-bar"]').exists()).toBe(false);
     });
 
     test("shows the edge function's error message when translation fails", async () => {
@@ -410,7 +410,7 @@ describe("ReaderView", () => {
 
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
-      await wrapper.find(".translate-toggle").trigger("click"); // switch to original first
+      await wrapper.find('[data-testid="translate-toggle"]').trigger("click"); // switch to original first
       await clickTranslate(wrapper);
       await flushPromises();
 
@@ -473,7 +473,7 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
-      await wrapper.find(".pdf-view-toggle").trigger("click");
+      await wrapper.find('[data-testid="pdf-view-toggle"]').trigger("click");
       await flushPromises();
 
       expect(update).toHaveBeenCalledWith({ view_mode: "original" });
@@ -504,7 +504,7 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
-      expect(wrapper.find(".pdf-view-bar").exists()).toBe(false);
+      expect(wrapper.find('[data-testid="pdf-view-bar"]').exists()).toBe(false);
       expect(wrapper.findComponent({ name: "ArticleContent" }).props("showPdfOriginal")).toBe(true);
       expect(wrapper.findComponent({ name: "ArticleContent" }).props("pdfUrl")).toBe(
         "https://storage.example/scanned",
@@ -530,8 +530,8 @@ describe("ReaderView", () => {
 
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
-      await wrapper.find(".menu-trigger").trigger("click");
-      await wrapper.find(".open-original").trigger("click");
+      await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.find('[data-testid="open-original"]').trigger("click");
       await flushPromises();
 
       expect(openSpy).toHaveBeenCalledWith("https://storage.example/open", "_blank", "noopener");
@@ -554,14 +554,14 @@ describe("ReaderView", () => {
 
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
-      await wrapper.find(".menu-trigger").trigger("click");
-      await wrapper.find(".trash-pdf-item").trigger("click");
+      await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.find('[data-testid="trash-pdf-item"]').trigger("click");
       await flushPromises();
 
       expect(storageRemove).toHaveBeenCalledWith(["user-1/a.pdf"]);
-      expect(wrapper.find(".pdf-view-bar").exists()).toBe(false);
-      await wrapper.find(".menu-trigger").trigger("click");
-      expect(wrapper.find(".open-original").exists()).toBe(false);
+      expect(wrapper.find('[data-testid="pdf-view-bar"]').exists()).toBe(false);
+      await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+      expect(wrapper.find('[data-testid="open-original"]').exists()).toBe(false);
     });
   });
 
@@ -583,8 +583,8 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
-      await wrapper.find(".menu-trigger").trigger("click");
-      await wrapper.find(".delete-item").trigger("click");
+      await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.find('[data-testid="delete-item"]').trigger("click");
 
       expect(pushMock).toHaveBeenCalledWith({ name: "list" });
 
@@ -609,7 +609,7 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
-      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      const scrollEl = wrapper.find('[data-testid="scroll-area"]').element as HTMLDivElement;
       Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
       Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
 
@@ -638,7 +638,7 @@ describe("ReaderView", () => {
       await flushPromises();
 
       // While the body is loading only a placeholder renders — nothing to scroll.
-      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      const scrollEl = wrapper.find('[data-testid="scroll-area"]').element as HTMLDivElement;
       Object.defineProperty(scrollEl, "scrollHeight", { value: 200, configurable: true });
       Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
       vi.advanceTimersByTime(100);
@@ -670,7 +670,7 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
-      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      const scrollEl = wrapper.find('[data-testid="scroll-area"]').element as HTMLDivElement;
       Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
       Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
       // A stray scroll on the placeholder (10%) must not overwrite the saved 50%.
@@ -699,7 +699,7 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
-      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      const scrollEl = wrapper.find('[data-testid="scroll-area"]').element as HTMLDivElement;
       Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
       Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
       Object.defineProperty(scrollEl, "scrollTop", {
@@ -736,7 +736,7 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
-      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      const scrollEl = wrapper.find('[data-testid="scroll-area"]').element as HTMLDivElement;
       Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
       Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
       Object.defineProperty(scrollEl, "scrollTop", {
@@ -761,7 +761,7 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
-      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      const scrollEl = wrapper.find('[data-testid="scroll-area"]').element as HTMLDivElement;
       Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
       Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
       Object.defineProperty(scrollEl, "scrollTop", {
@@ -786,7 +786,7 @@ describe("ReaderView", () => {
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
-      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      const scrollEl = wrapper.find('[data-testid="scroll-area"]').element as HTMLDivElement;
       Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
       Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
       Object.defineProperty(scrollEl, "scrollTop", {

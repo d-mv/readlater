@@ -422,7 +422,7 @@ more than it saves. Check that Tailwind's preflight doesn't break
 
 ### 7.6 Steps
 
-0. **Tests first.** 108 `find('.class')` selectors (38 distinct classes) in
+0. ✅ *(done, app 0.2.1: `data-testid` hooks, `aria-pressed`/`data-*` for state; e2e derive the Supabase host from `app/.env` and run on port 5183)* **Tests first.** 108 `find('.class')` selectors (38 distinct classes) in
    the Vitest suites, plus Playwright specs, will break once class names
    disappear. Move them to roles, labels or `data-testid` while the old CSS
    is still in place, and keep the suite green.

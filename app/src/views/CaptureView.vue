@@ -44,24 +44,47 @@ onMounted(async () => {
 
 <template>
   <main class="capture">
-    <div v-if="outcome.kind === 'working'" class="status-placeholder">
+    <div
+      data-testid="status-placeholder"
+      v-if="outcome.kind === 'working'"
+      class="status-placeholder"
+    >
       <p class="status-text">Saving…</p>
     </div>
-    <div v-else-if="outcome.kind === 'saved'" class="status-placeholder">
+    <div
+      data-testid="status-placeholder"
+      v-else-if="outcome.kind === 'saved'"
+      class="status-placeholder"
+    >
       <p class="status-text">Saved</p>
       <button class="btn btn-secondary" type="button" @click="close">Close</button>
     </div>
-    <div v-else-if="outcome.kind === 'error'" class="status-placeholder">
+    <div
+      data-testid="status-placeholder"
+      v-else-if="outcome.kind === 'error'"
+      class="status-placeholder"
+    >
       <p class="status-text">{{ outcome.message }}</p>
       <button class="btn btn-secondary" type="button" @click="close">Close</button>
     </div>
-    <div v-else-if="outcome.kind === 'duplicate'" class="status-placeholder">
+    <div
+      data-testid="status-placeholder"
+      v-else-if="outcome.kind === 'duplicate'"
+      class="status-placeholder"
+    >
       <p class="status-text">
         Already saved on {{ new Date(outcome.savedAt).toLocaleDateString() }}
       </p>
       <div class="duplicate-actions">
         <button class="btn btn-secondary" type="button" @click="close">Cancel</button>
-        <button class="btn btn-primary" type="button" @click="onContinueRefresh">Continue</button>
+        <button
+          data-testid="continue-btn"
+          class="btn btn-primary"
+          type="button"
+          @click="onContinueRefresh"
+        >
+          Continue
+        </button>
       </div>
     </div>
   </main>

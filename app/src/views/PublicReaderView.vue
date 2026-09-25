@@ -26,14 +26,14 @@ onMounted(async () => {
 
 <template>
   <main class="public-reader">
-    <div v-if="loading" class="status-placeholder">
+    <div data-testid="status-placeholder" v-if="loading" class="status-placeholder">
       <p class="status-text">Loading…</p>
     </div>
-    <div v-else-if="!bookmark" class="status-placeholder">
+    <div data-testid="status-placeholder" v-else-if="!bookmark" class="status-placeholder">
       <p class="status-text">Not found</p>
     </div>
     <template v-else>
-      <h1 class="title">{{ bookmark.title }}</h1>
+      <h1 data-testid="title" class="title">{{ bookmark.title }}</h1>
       <p v-if="readerByline(bookmark)" class="byline">{{ readerByline(bookmark) }}</p>
       <ArticleContent
         :content-md="bookmark.content_md"

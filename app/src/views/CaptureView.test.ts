@@ -84,7 +84,7 @@ describe("CaptureView", () => {
     await flushPromises();
     expect(wrapper.text()).toContain("Already saved");
 
-    await wrapper.find("button.btn-primary").trigger("click");
+    await wrapper.find('[data-testid="continue-btn"]').trigger("click");
     await flushPromises();
 
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: "pending" }));

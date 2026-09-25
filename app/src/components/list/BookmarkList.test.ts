@@ -39,12 +39,12 @@ describe("BookmarkList", () => {
     const wrapper = mount(BookmarkList, {
       props: { bookmarks: [makeBookmark({ id: "1" }), makeBookmark({ id: "2" })] },
     });
-    expect(wrapper.findAll(".row")).toHaveLength(2);
+    expect(wrapper.findAll('[data-testid="row"]')).toHaveLength(2);
   });
 
   test("shows an empty state when there are no bookmarks", () => {
     const wrapper = mount(BookmarkList, { props: { bookmarks: [] } });
-    expect(wrapper.find(".empty-state").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="empty-state"]').exists()).toBe(true);
   });
 
   test("re-emits open with the clicked bookmark's id", async () => {
@@ -57,7 +57,7 @@ describe("BookmarkList", () => {
     const wrapper = mount(BookmarkList, {
       props: { bookmarks: [makeBookmark({ id: "xyz", archived: false, read_at: null })] },
     });
-    await wrapper.find(".offline-toggle").trigger("click");
+    await wrapper.find('[data-testid="offline-toggle"]').trigger("click");
     expect(wrapper.emitted("toggleOffline")).toEqual([["xyz"]]);
   });
 
@@ -68,6 +68,6 @@ describe("BookmarkList", () => {
         cachedIds: new Set(["xyz"]),
       },
     });
-    expect(wrapper.find(".offline-toggle").classes()).toContain("offline-toggle-cached");
+    expect(wrapper.find('[data-testid="offline-toggle"]').attributes("aria-pressed")).toBe("true");
   });
 });

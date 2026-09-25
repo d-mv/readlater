@@ -30,7 +30,7 @@ describe("PublicReaderView", () => {
 
     expect(rpc).toHaveBeenCalledWith("get_public_bookmark", { bookmark_id: "abc" });
     expect(wrapper.text()).toContain("A public note");
-    expect(wrapper.find(".status-placeholder").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="status-placeholder"]').exists()).toBe(false);
   });
 
   test("renders a youtube embed with thumbnail when the public row is a video", async () => {
@@ -54,7 +54,7 @@ describe("PublicReaderView", () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain("A public video");
-    expect(wrapper.find("button.youtube-play").exists()).toBe(true);
+    expect(wrapper.find('button[data-testid="youtube-play"]').exists()).toBe(true);
   });
 
   test("renders correctly from only the public-safe column projection", async () => {

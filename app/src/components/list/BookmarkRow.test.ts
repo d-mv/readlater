@@ -51,17 +51,17 @@ describe("BookmarkRow", () => {
     const wrapper = mount(BookmarkRow, {
       props: { bookmark: makeBookmark({ read_at: "2026-01-02T00:00:00Z" }) },
     });
-    expect(wrapper.find(".title").classes()).toContain("title-read");
+    expect(wrapper.find('[data-testid="title"]').attributes("data-read")).toBe("true");
   });
 
   test("shows a public badge when the bookmark is shared", () => {
     const wrapper = mount(BookmarkRow, { props: { bookmark: makeBookmark({ is_public: true }) } });
-    expect(wrapper.find(".public-badge").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="public-badge"]').exists()).toBe(true);
   });
 
   test("hides the public badge when the bookmark is not shared", () => {
     const wrapper = mount(BookmarkRow, { props: { bookmark: makeBookmark({ is_public: false }) } });
-    expect(wrapper.find(".public-badge").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="public-badge"]').exists()).toBe(false);
   });
 
   test("falls back to the URL when there's no title yet", () => {
@@ -73,28 +73,28 @@ describe("BookmarkRow", () => {
     const wrapper = mount(BookmarkRow, {
       props: { bookmark: makeBookmark({ archived: false, read_at: null }) },
     });
-    expect(wrapper.find(".offline-toggle").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="offline-toggle"]').exists()).toBe(true);
   });
 
   test("hides the save-offline toggle once a bookmark is read", () => {
     const wrapper = mount(BookmarkRow, {
       props: { bookmark: makeBookmark({ read_at: "2026-01-02T00:00:00Z" }) },
     });
-    expect(wrapper.find(".offline-toggle").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="offline-toggle"]').exists()).toBe(false);
   });
 
   test("hides the save-offline toggle for archived rows", () => {
     const wrapper = mount(BookmarkRow, {
       props: { bookmark: makeBookmark({ archived: true, read_at: null }) },
     });
-    expect(wrapper.find(".offline-toggle").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="offline-toggle"]').exists()).toBe(false);
   });
 
   test("emits toggleOffline with the bookmark id without triggering open", async () => {
     const wrapper = mount(BookmarkRow, {
       props: { bookmark: makeBookmark({ id: "abc", archived: false, read_at: null }) },
     });
-    await wrapper.find(".offline-toggle").trigger("click");
+    await wrapper.find('[data-testid="offline-toggle"]').trigger("click");
     expect(wrapper.emitted("toggleOffline")).toEqual([["abc"]]);
     expect(wrapper.emitted("open")).toBeUndefined();
   });
@@ -103,6 +103,6 @@ describe("BookmarkRow", () => {
     const wrapper = mount(BookmarkRow, {
       props: { bookmark: makeBookmark({ archived: false, read_at: null }), isCached: true },
     });
-    expect(wrapper.find(".offline-toggle").classes()).toContain("offline-toggle-cached");
+    expect(wrapper.find('[data-testid="offline-toggle"]').attributes("aria-pressed")).toBe("true");
   });
 });

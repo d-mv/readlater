@@ -92,7 +92,7 @@ async function onFileSelected(event: Event) {
         <IconDownload :size="16" />
         {{ exporting ? "Exporting…" : "Export bookmarks" }}
       </button>
-      <p v-if="exportError" class="error">{{ exportError }}</p>
+      <p data-testid="error" v-if="exportError" class="error">{{ exportError }}</p>
     </section>
 
     <section class="panel">
@@ -111,12 +111,12 @@ async function onFileSelected(event: Event) {
         <IconUpload :size="16" />
         {{ importing ? "Importing…" : "Choose file to import" }}
       </button>
-      <p v-if="importError" class="error">{{ importError }}</p>
-      <p v-if="importedCount !== null" class="result">
+      <p data-testid="error" v-if="importError" class="error">{{ importError }}</p>
+      <p data-testid="result" v-if="importedCount !== null" class="result">
         Imported {{ importedCount }} bookmark{{ importedCount === 1 ? "" : "s" }}.
         <template v-if="skippedRows.length > 0"> Skipped {{ skippedRows.length }}: </template>
       </p>
-      <ul v-if="skippedRows.length > 0" class="skipped-list">
+      <ul data-testid="skipped-list" v-if="skippedRows.length > 0" class="skipped-list">
         <li v-for="(row, index) in skippedRows" :key="index">
           {{ row.title || row.url || "Untitled" }} — {{ row.reason }}
         </li>

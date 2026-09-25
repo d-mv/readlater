@@ -111,6 +111,7 @@ onUnmounted(() => {
 <template>
   <div ref="menuRef" class="reader-menu">
     <button
+      data-testid="menu-trigger"
       class="icon-btn menu-trigger"
       type="button"
       aria-haspopup="true"
@@ -120,12 +121,13 @@ onUnmounted(() => {
     >
       <IconDotsVertical :size="20" />
     </button>
-    <div v-if="open" class="menu-panel" role="menu">
+    <div data-testid="menu-panel" v-if="open" class="menu-panel" role="menu">
       <div class="menu-row font-size-row">
         <span class="menu-label">Font size</span>
         <FontSizeControl />
       </div>
       <a
+        data-testid="open-original"
         v-if="bookmark.url"
         class="menu-item open-original"
         :href="bookmark.url"
@@ -138,6 +140,7 @@ onUnmounted(() => {
         Open original
       </a>
       <button
+        data-testid="open-original"
         v-else-if="canOpenOriginalPdf"
         class="menu-item open-original"
         type="button"
@@ -148,6 +151,7 @@ onUnmounted(() => {
         Open original
       </button>
       <button
+        data-testid="translate-item"
         v-if="canTranslateInline"
         class="menu-item translate-item"
         type="button"
@@ -158,6 +162,7 @@ onUnmounted(() => {
         Translate…
       </button>
       <a
+        data-testid="translate-page-item"
         v-if="translatePageUrl"
         class="menu-item translate-page-item"
         :href="translatePageUrl"
@@ -170,6 +175,7 @@ onUnmounted(() => {
         Translate page
       </a>
       <button
+        data-testid="edit-item"
         class="menu-item edit-item"
         type="button"
         role="menuitem"
@@ -179,6 +185,7 @@ onUnmounted(() => {
         Edit
       </button>
       <button
+        data-testid="mark-read"
         v-if="canMarkRead"
         class="menu-item mark-read"
         type="button"
@@ -189,6 +196,7 @@ onUnmounted(() => {
         Mark as read
       </button>
       <button
+        data-testid="mark-unread"
         v-if="canMarkUnread"
         class="menu-item mark-unread"
         type="button"
@@ -199,8 +207,10 @@ onUnmounted(() => {
         Mark as unread
       </button>
       <button
+        data-testid="share-item"
         class="menu-item share-item"
         :class="{ 'share-item-active': bookmark.is_public }"
+        :data-public="bookmark.is_public || undefined"
         type="button"
         role="menuitem"
         @click="select(() => emit('share'))"
@@ -209,6 +219,7 @@ onUnmounted(() => {
         Share…
       </button>
       <button
+        data-testid="trash-pdf-item"
         v-if="canTrashOriginalPdf"
         class="menu-item trash-pdf-item menu-item-danger"
         type="button"
@@ -219,6 +230,7 @@ onUnmounted(() => {
         Trash original PDF
       </button>
       <button
+        data-testid="archive-item"
         class="menu-item archive-item"
         type="button"
         role="menuitem"
@@ -228,6 +240,7 @@ onUnmounted(() => {
         Archive
       </button>
       <button
+        data-testid="delete-item"
         class="menu-item delete-item menu-item-danger"
         type="button"
         role="menuitem"

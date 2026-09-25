@@ -44,7 +44,7 @@ describe("SettingsView", () => {
 
     expect(clickSpy).toHaveBeenCalledOnce();
     expect(URL.createObjectURL).toHaveBeenCalledOnce();
-    expect(wrapper.find(".error").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="error"]').exists()).toBe(false);
 
     clickSpy.mockRestore();
   });
@@ -57,7 +57,7 @@ describe("SettingsView", () => {
     await wrapper.get("button.btn-primary").trigger("click");
     await flushPromises();
 
-    expect(wrapper.get(".error").text()).toBe("network down");
+    expect(wrapper.get('[data-testid="error"]').text()).toBe("network down");
   });
 
   test("importing a file reports the imported count and any skipped rows", async () => {
@@ -139,10 +139,10 @@ describe("SettingsView", () => {
     await input.trigger("change");
     await flushPromises();
 
-    expect(wrapper.get(".result").text()).toContain("Imported 1 bookmark");
-    expect(wrapper.get(".result").text()).toContain("Skipped 1");
-    expect(wrapper.get(".skipped-list").text()).toContain("Existing");
-    expect(wrapper.get(".skipped-list").text()).toContain("already exists");
+    expect(wrapper.get('[data-testid="result"]').text()).toContain("Imported 1 bookmark");
+    expect(wrapper.get('[data-testid="result"]').text()).toContain("Skipped 1");
+    expect(wrapper.get('[data-testid="skipped-list"]').text()).toContain("Existing");
+    expect(wrapper.get('[data-testid="skipped-list"]').text()).toContain("already exists");
   });
 
   test("shows an error for a file that isn't a valid export", async () => {
@@ -154,6 +154,6 @@ describe("SettingsView", () => {
     await input.trigger("change");
     await flushPromises();
 
-    expect(wrapper.get(".error").text()).toContain("valid JSON");
+    expect(wrapper.get('[data-testid="error"]').text()).toContain("valid JSON");
   });
 });

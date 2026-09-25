@@ -36,7 +36,7 @@ function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
 }
 
 async function openMenu(wrapper: ReturnType<typeof mount>) {
-  await wrapper.find(".menu-trigger").trigger("click");
+  await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
 }
 
 describe("ReaderMenu", () => {
@@ -46,45 +46,45 @@ describe("ReaderMenu", () => {
 
   test("hides the menu panel until the trigger is clicked", async () => {
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
-    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
     await openMenu(wrapper);
-    expect(wrapper.find(".menu-panel").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(true);
   });
 
   test("marks the share item active when the bookmark is public", async () => {
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark({ is_public: true }) } });
     await openMenu(wrapper);
-    expect(wrapper.find(".share-item").classes()).toContain("share-item-active");
+    expect(wrapper.find('[data-testid="share-item"]').attributes("data-public")).toBe("true");
   });
 
   test("emits share and closes the menu when the share item is clicked", async () => {
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
     await openMenu(wrapper);
-    await wrapper.find(".share-item").trigger("click");
+    await wrapper.find('[data-testid="share-item"]').trigger("click");
     expect(wrapper.emitted("share")).toHaveLength(1);
-    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
   });
 
   test("emits archive when the archive item is clicked", async () => {
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
     await openMenu(wrapper);
-    await wrapper.find(".archive-item").trigger("click");
+    await wrapper.find('[data-testid="archive-item"]').trigger("click");
     expect(wrapper.emitted("archive")).toHaveLength(1);
   });
 
   test("emits edit and closes the menu when the edit item is clicked", async () => {
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
     await openMenu(wrapper);
-    await wrapper.find(".edit-item").trigger("click");
+    await wrapper.find('[data-testid="edit-item"]').trigger("click");
     expect(wrapper.emitted("edit")).toHaveLength(1);
-    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
   });
 
   test("shows the edit item for every bookmark type", async () => {
     for (const type of ["article", "youtube", "note"] as const) {
       const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark({ type }) } });
       await openMenu(wrapper);
-      expect(wrapper.find(".edit-item").exists()).toBe(true);
+      expect(wrapper.find('[data-testid="edit-item"]').exists()).toBe(true);
     }
   });
 
@@ -93,7 +93,7 @@ describe("ReaderMenu", () => {
       props: { bookmark: makeBookmark({ url: "https://example.com/a" }) },
     });
     await openMenu(wrapper);
-    const link = wrapper.find(".open-original");
+    const link = wrapper.find('[data-testid="open-original"]');
     expect(link.attributes("href")).toBe("https://example.com/a");
     expect(link.attributes("target")).toBe("_blank");
   });
@@ -105,12 +105,12 @@ describe("ReaderMenu", () => {
       },
     });
     await openMenu(wrapper);
-    const item = wrapper.find(".open-original");
+    const item = wrapper.find('[data-testid="open-original"]');
     expect(item.exists()).toBe(true);
     expect(item.element.tagName).toBe("BUTTON");
     await item.trigger("click");
     expect(wrapper.emitted("openOriginalPdf")).toHaveLength(1);
-    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
   });
 
   test("hides 'Open original' for a PDF once the original has been trashed", async () => {
@@ -118,7 +118,7 @@ describe("ReaderMenu", () => {
       props: { bookmark: makeBookmark({ url: null, type: "pdf", pdf_path: null }) },
     });
     await openMenu(wrapper);
-    expect(wrapper.find(".open-original").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="open-original"]').exists()).toBe(false);
   });
 
   test("shows 'Trash original PDF' only once parsing succeeded, and emits trashOriginalPdf when confirmed", async () => {
@@ -134,7 +134,7 @@ describe("ReaderMenu", () => {
       },
     });
     await openMenu(wrapper);
-    const item = wrapper.find(".trash-pdf-item");
+    const item = wrapper.find('[data-testid="trash-pdf-item"]');
     expect(item.exists()).toBe(true);
     await item.trigger("click");
     expect(wrapper.emitted("trashOriginalPdf")).toHaveLength(1);
@@ -152,7 +152,7 @@ describe("ReaderMenu", () => {
       },
     });
     await openMenu(wrapper);
-    expect(wrapper.find(".trash-pdf-item").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="trash-pdf-item"]').exists()).toBe(false);
   });
 
   test("does not emit trashOriginalPdf when the confirmation is cancelled", async () => {
@@ -168,7 +168,7 @@ describe("ReaderMenu", () => {
       },
     });
     await openMenu(wrapper);
-    await wrapper.find(".trash-pdf-item").trigger("click");
+    await wrapper.find('[data-testid="trash-pdf-item"]').trigger("click");
     expect(wrapper.emitted("trashOriginalPdf")).toBeUndefined();
   });
 
@@ -180,13 +180,13 @@ describe("ReaderMenu", () => {
     });
     await openMenu(wrapper);
 
-    const item = wrapper.find(".translate-item");
+    const item = wrapper.find('[data-testid="translate-item"]');
     expect(item.element.tagName).toBe("BUTTON");
     await item.trigger("click");
     expect(wrapper.emitted("translate")).toHaveLength(1);
 
     await openMenu(wrapper);
-    const link = wrapper.find(".translate-page-item");
+    const link = wrapper.find('[data-testid="translate-page-item"]');
     expect(link.attributes("href")).toContain("translate.google.com/translate?");
     expect(link.attributes("href")).toContain(encodeURIComponent("https://example.com/a"));
     expect(link.attributes("target")).toBe("_blank");
@@ -197,8 +197,8 @@ describe("ReaderMenu", () => {
       props: { bookmark: makeBookmark({ url: "https://example.com/a", content_md: null }) },
     });
     await openMenu(wrapper);
-    expect(wrapper.find(".translate-item").exists()).toBe(false);
-    expect(wrapper.find(".translate-page-item").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="translate-item"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="translate-page-item"]').exists()).toBe(true);
   });
 
   test("emits translate and closes the menu when the translate item is clicked for URL-less bookmarks (notes)", async () => {
@@ -208,12 +208,12 @@ describe("ReaderMenu", () => {
       },
     });
     await openMenu(wrapper);
-    const item = wrapper.find(".translate-item");
+    const item = wrapper.find('[data-testid="translate-item"]');
     expect(item.exists()).toBe(true);
     expect(item.element.tagName).toBe("BUTTON");
     await item.trigger("click");
     expect(wrapper.emitted("translate")).toHaveLength(1);
-    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
   });
 
   test("hides 'Translate…' when there is neither a URL nor content", async () => {
@@ -221,15 +221,15 @@ describe("ReaderMenu", () => {
       props: { bookmark: makeBookmark({ url: null, type: "note", content_md: null }) },
     });
     await openMenu(wrapper);
-    expect(wrapper.find(".translate-item").exists()).toBe(false);
-    expect(wrapper.find(".translate-page-item").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="translate-item"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="translate-page-item"]').exists()).toBe(false);
   });
 
   test("emits delete when confirmed", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
     await openMenu(wrapper);
-    await wrapper.find(".delete-item").trigger("click");
+    await wrapper.find('[data-testid="delete-item"]').trigger("click");
     expect(wrapper.emitted("delete")).toHaveLength(1);
   });
 
@@ -237,14 +237,14 @@ describe("ReaderMenu", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
     await openMenu(wrapper);
-    await wrapper.find(".delete-item").trigger("click");
+    await wrapper.find('[data-testid="delete-item"]').trigger("click");
     expect(wrapper.emitted("delete")).toBeUndefined();
   });
 
   test("shows 'Mark as read' and emits markRead when unread", async () => {
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark({ read_at: null }) } });
     await openMenu(wrapper);
-    const btn = wrapper.find(".mark-read");
+    const btn = wrapper.find('[data-testid="mark-read"]');
     expect(btn.exists()).toBe(true);
     await btn.trigger("click");
     expect(wrapper.emitted("markRead")).toHaveLength(1);
@@ -255,7 +255,7 @@ describe("ReaderMenu", () => {
       props: { bookmark: makeBookmark({ read_at: "2026-01-02T00:00:00Z" }) },
     });
     await openMenu(wrapper);
-    expect(wrapper.find(".mark-read").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="mark-read"]').exists()).toBe(false);
   });
 
   test("shows 'Mark as unread' and emits markUnread when read", async () => {
@@ -263,7 +263,7 @@ describe("ReaderMenu", () => {
       props: { bookmark: makeBookmark({ read_at: "2026-01-02T00:00:00Z" }) },
     });
     await openMenu(wrapper);
-    const btn = wrapper.find(".mark-unread");
+    const btn = wrapper.find('[data-testid="mark-unread"]');
     expect(btn.exists()).toBe(true);
     await btn.trigger("click");
     expect(wrapper.emitted("markUnread")).toHaveLength(1);
@@ -272,16 +272,16 @@ describe("ReaderMenu", () => {
   test("hides 'Mark as unread' while still unread", async () => {
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark({ read_at: null }) } });
     await openMenu(wrapper);
-    expect(wrapper.find(".mark-unread").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="mark-unread"]').exists()).toBe(false);
   });
 
   test("closes the menu on Escape", async () => {
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
     await openMenu(wrapper);
-    expect(wrapper.find(".menu-panel").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(true);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await wrapper.vm.$nextTick();
-    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
   });
 
   test("closes the menu on an outside click", async () => {
@@ -290,10 +290,10 @@ describe("ReaderMenu", () => {
       attachTo: document.body,
     });
     await openMenu(wrapper);
-    expect(wrapper.find(".menu-panel").exists()).toBe(true);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(true);
     document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     await wrapper.vm.$nextTick();
-    expect(wrapper.find(".menu-panel").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
     wrapper.unmount();
   });
 });

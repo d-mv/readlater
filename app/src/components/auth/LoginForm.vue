@@ -52,7 +52,7 @@ async function onSubmit() {
       class="field-input"
     />
 
-    <p v-if="error" class="error">{{ error }}</p>
+    <p data-testid="error" v-if="error" class="error">{{ error }}</p>
 
     <button class="submit" type="submit" :disabled="submitting">Sign in</button>
   </form>

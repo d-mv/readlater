@@ -384,18 +384,38 @@ watch(
       @open-original-pdf="onOpenOriginalPdf"
       @trash-original-pdf="onTrashOriginalPdf"
     />
-    <div ref="scrollContainer" class="scroll-area">
+    <div data-testid="scroll-area" ref="scrollContainer" class="scroll-area">
       <template v-if="bookmark.status === 'ready' && bodyLoaded">
-        <h1 v-if="!editing" class="title">{{ bookmark.title }}</h1>
-        <input v-else v-model="draftTitle" class="title-input" type="text" placeholder="Title" />
+        <h1 data-testid="title" v-if="!editing" class="title">{{ bookmark.title }}</h1>
+        <input
+          data-testid="title-input"
+          v-else
+          v-model="draftTitle"
+          class="title-input"
+          type="text"
+          placeholder="Title"
+        />
         <p v-if="byline && !editing" class="byline">{{ byline }}</p>
         <div v-if="editing" class="edit-actions">
-          <button class="btn-secondary cancel-edit-btn" type="button" @click="onCancelEdit">
+          <button
+            data-testid="cancel-edit-btn"
+            class="btn-secondary cancel-edit-btn"
+            type="button"
+            @click="onCancelEdit"
+          >
             Cancel
           </button>
-          <button class="btn-primary save-edit-btn" type="button" @click="onSaveEdit">Save</button>
+          <button
+            data-testid="save-edit-btn"
+            class="btn-primary save-edit-btn"
+            type="button"
+            @click="onSaveEdit"
+          >
+            Save
+          </button>
         </div>
         <div
+          data-testid="translate-bar"
           v-if="!editing && (translating || translateError || bookmark.translated_content_md)"
           class="translate-bar"
         >
@@ -405,16 +425,26 @@ watch(
           }}</span>
           <template v-else>
             <span class="translate-status">{{ showOriginal ? "Original" : "Translated" }}</span>
-            <button class="translate-toggle" type="button" @click="onToggleOriginal">
+            <button
+              data-testid="translate-toggle"
+              class="translate-toggle"
+              type="button"
+              @click="onToggleOriginal"
+            >
               {{ showOriginal ? "Show translation" : "Show original" }}
             </button>
           </template>
         </div>
-        <div v-if="!editing && canTogglePdfView" class="pdf-view-bar">
+        <div data-testid="pdf-view-bar" v-if="!editing && canTogglePdfView" class="pdf-view-bar">
           <span class="pdf-view-status">{{
             pdfEffectiveViewMode === "original" ? "Original PDF" : "Markdown"
           }}</span>
-          <button class="pdf-view-toggle" type="button" @click="onTogglePdfView">
+          <button
+            data-testid="pdf-view-toggle"
+            class="pdf-view-toggle"
+            type="button"
+            @click="onTogglePdfView"
+          >
             {{ pdfEffectiveViewMode === "original" ? "Show markdown" : "Show original PDF" }}
           </button>
         </div>
@@ -430,16 +460,20 @@ watch(
           @update:model-value="draftContent = $event"
         />
       </template>
-      <div v-else-if="bookmark.status === 'failed'" class="status-placeholder">
+      <div
+        data-testid="status-placeholder"
+        v-else-if="bookmark.status === 'failed'"
+        class="status-placeholder"
+      >
         <IconAlertTriangle :size="28" class="status-icon status-icon-failed" />
         <p class="status-text">Couldn't process this article.</p>
         <p v-if="bookmark.error_message" class="status-detail">{{ bookmark.error_message }}</p>
-        <button class="retry-btn" type="button" @click="onRetry">
+        <button data-testid="retry-btn" class="retry-btn" type="button" @click="onRetry">
           <IconRefresh :size="16" />
           Try again
         </button>
       </div>
-      <div v-else class="status-placeholder">
+      <div data-testid="status-placeholder" v-else class="status-placeholder">
         <IconLoader2 :size="28" class="status-icon icon-spin" />
         <p class="status-text">Processing…</p>
       </div>

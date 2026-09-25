@@ -10,7 +10,7 @@ const widthPercent = computed(() => `${Math.min(100, Math.max(0, props.progress 
 
 <template>
   <div class="track">
-    <div class="fill" :style="{ width: widthPercent }" />
+    <div data-testid="fill" class="fill" :style="{ width: widthPercent }" />
   </div>
 </template>
 

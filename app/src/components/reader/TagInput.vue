@@ -24,9 +24,16 @@ function onSubmit() {
 
 <template>
   <div class="tag-input">
-    <span v-for="tag in tags" :key="tag.id" class="tag-chip" :style="{ '--tag-color': tag.color }">
+    <span
+      data-testid="tag-chip"
+      v-for="tag in tags"
+      :key="tag.id"
+      class="tag-chip"
+      :style="{ '--tag-color': tag.color }"
+    >
       {{ tag.name }}
       <button
+        data-testid="remove-btn"
         class="remove-btn"
         type="button"
         :aria-label="`Remove ${tag.name}`"
@@ -36,6 +43,7 @@ function onSubmit() {
       </button>
     </span>
     <input
+      data-testid="tag-draft-input"
       v-model="draft"
       class="tag-draft-input"
       type="text"

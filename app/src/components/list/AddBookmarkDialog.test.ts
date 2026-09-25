@@ -46,13 +46,13 @@ describe("AddBookmarkDialog", () => {
 
     const wrapper = mount(AddBookmarkDialog);
 
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
     expect(wrapper.find("dialog").exists()).toBe(false);
 
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
@@ -65,7 +65,7 @@ describe("AddBookmarkDialog", () => {
     const wrapper = mount(AddBookmarkDialog);
     expect(wrapper.find("dialog").exists()).toBe(false);
 
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     expect(wrapper.find("dialog").exists()).toBe(true);
   });
 
@@ -74,7 +74,7 @@ describe("AddBookmarkDialog", () => {
     store.add = vi.fn().mockResolvedValue({ error: null });
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
     await wrapper.vm.$nextTick();
@@ -88,7 +88,7 @@ describe("AddBookmarkDialog", () => {
     store.add = vi.fn().mockResolvedValue({ error: "Enter a valid URL." });
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("not a url");
     await wrapper.get("form").trigger("submit");
     await wrapper.vm.$nextTick();
@@ -102,8 +102,8 @@ describe("AddBookmarkDialog", () => {
     store.add = vi.fn();
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.cancel-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="cancel-btn"]').trigger("click");
 
     expect(wrapper.find("dialog").exists()).toBe(false);
     expect(store.add).not.toHaveBeenCalled();
@@ -114,7 +114,7 @@ describe("AddBookmarkDialog", () => {
     store.add = vi.fn().mockResolvedValue(DUPLICATE);
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
     await wrapper.vm.$nextTick();
@@ -130,12 +130,12 @@ describe("AddBookmarkDialog", () => {
     store.refresh = vi.fn().mockResolvedValue(undefined);
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
     await flushPromises();
 
-    await wrapper.get("button.confirm-btn").trigger("click");
+    await wrapper.get('button[data-testid="confirm-btn"]').trigger("click");
     await flushPromises();
 
     expect(store.refresh).toHaveBeenCalledWith("existing-1");
@@ -149,20 +149,20 @@ describe("AddBookmarkDialog", () => {
     store.add = vi.fn().mockReturnValue(pending.promise);
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
 
     // Close via the backdrop while the save is in flight, then reopen.
-    await wrapper.get(".backdrop").trigger("click");
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('[data-testid="backdrop"]').trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
 
     pending.resolve(DUPLICATE);
     await flushPromises();
 
     expect(wrapper.text()).not.toContain("already saved");
     expect((wrapper.get("input[type=url]").element as HTMLInputElement).value).toBe("");
-    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeUndefined();
   });
 
   test("a success arriving after reopening does not close the new dialog", async () => {
@@ -171,11 +171,11 @@ describe("AddBookmarkDialog", () => {
     store.add = vi.fn().mockReturnValue(pending.promise);
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
-    await wrapper.get(".backdrop").trigger("click");
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('[data-testid="backdrop"]').trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
 
     pending.resolve({ error: null });
     await flushPromises();
@@ -185,7 +185,7 @@ describe("AddBookmarkDialog", () => {
 
   test("defaults to URL mode, showing the URL input and not the snippet textarea", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
 
     expect(wrapper.find("input[type=url]").exists()).toBe(true);
     expect(wrapper.find("textarea").exists()).toBe(false);
@@ -193,8 +193,8 @@ describe("AddBookmarkDialog", () => {
 
   test("switching to Snippet mode swaps the input area", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-snippet").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-snippet"]').trigger("click");
 
     expect(wrapper.find("textarea").exists()).toBe(true);
     expect(wrapper.find("input[type=url]").exists()).toBe(false);
@@ -205,29 +205,29 @@ describe("AddBookmarkDialog", () => {
     store.add = vi.fn().mockResolvedValue({ error: "Enter a valid URL." });
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("not a url");
     await wrapper.get("form").trigger("submit");
     await wrapper.vm.$nextTick();
     expect(wrapper.text()).toContain("Enter a valid URL.");
 
-    await wrapper.get("button.mode-snippet").trigger("click");
+    await wrapper.get('button[data-testid="mode-snippet"]').trigger("click");
 
     expect(wrapper.text()).not.toContain("Enter a valid URL.");
   });
 
   test("the submit button is disabled until the snippet textarea has non-whitespace content", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-snippet").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-snippet"]').trigger("click");
 
-    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+    expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeDefined();
 
     await wrapper.get("textarea").setValue("   ");
-    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+    expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeDefined();
 
     await wrapper.get("textarea").setValue("real content");
-    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeUndefined();
   });
 
   test("pasting rich HTML into the snippet textarea calls addSnippet with both formats on submit", async () => {
@@ -235,8 +235,8 @@ describe("AddBookmarkDialog", () => {
     store.addSnippet = vi.fn().mockResolvedValue({ error: null });
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-snippet").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-snippet"]').trigger("click");
 
     const textarea = wrapper.get("textarea");
     await textarea.trigger("paste", {
@@ -262,8 +262,8 @@ describe("AddBookmarkDialog", () => {
       store.addNote = vi.fn().mockResolvedValue({ error: null });
       store.addSnippet = vi.fn().mockResolvedValue({ error: null });
       const wrapper = mount(AddBookmarkDialog);
-      await wrapper.get("button.add-btn").trigger("click");
-      await wrapper.get("button.mode-snippet").trigger("click");
+      await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+      await wrapper.get('button[data-testid="mode-snippet"]').trigger("click");
       return { store, wrapper, textarea: wrapper.get("textarea") };
     }
 
@@ -313,8 +313,8 @@ describe("AddBookmarkDialog", () => {
     store.addSnippet = vi.fn();
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-snippet").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-snippet"]').trigger("click");
     await wrapper.get("textarea").setValue("just typed text");
     await wrapper.get("form").trigger("submit");
     await wrapper.vm.$nextTick();
@@ -330,8 +330,8 @@ describe("AddBookmarkDialog", () => {
     store.addSnippet = vi.fn();
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-snippet").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-snippet"]').trigger("click");
 
     const textarea = wrapper.get("textarea");
     await textarea.trigger("paste", {
@@ -350,8 +350,8 @@ describe("AddBookmarkDialog", () => {
     store.addSnippet = vi.fn().mockResolvedValue({ error: "snippet is empty" });
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-snippet").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-snippet"]').trigger("click");
 
     const textarea = wrapper.get("textarea");
     await textarea.trigger("paste", {
@@ -367,8 +367,8 @@ describe("AddBookmarkDialog", () => {
 
   test("switching to File mode swaps the input area", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
     expect(wrapper.find("input[type=file]").exists()).toBe(true);
     expect(wrapper.find("input[type=url]").exists()).toBe(false);
@@ -383,26 +383,26 @@ describe("AddBookmarkDialog", () => {
 
   test("selecting an unsupported file type shows an error and keeps submit disabled", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
     await selectFile(wrapper, new File(["x"], "legacy.doc"));
 
     expect(wrapper.text()).toContain("Unsupported file type");
-    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+    expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeDefined();
   });
 
   test("selecting an oversized markdown file shows a size error and keeps submit disabled", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
     const big = new Blob([new Uint8Array(500 * 1024 + 1)]);
     const file = new File([big], "big.md");
     await selectFile(wrapper, file);
 
     expect(wrapper.text()).toContain("500KB");
-    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+    expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeDefined();
   });
 
   test("selecting a valid markdown file and submitting calls addFile and closes the dialog", async () => {
@@ -410,12 +410,12 @@ describe("AddBookmarkDialog", () => {
     store.addFile = vi.fn().mockResolvedValue({ error: null });
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
     const file = new File(["# hi"], "notes.md", { type: "text/markdown" });
     await selectFile(wrapper, file);
-    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeUndefined();
 
     await wrapper.get("form").trigger("submit");
     await wrapper.vm.$nextTick();
@@ -430,8 +430,8 @@ describe("AddBookmarkDialog", () => {
     store.addFile = vi.fn();
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
     const file = new File(["%PDF-1.4"], "report.pdf", { type: "application/pdf" });
     await selectFile(wrapper, file);
@@ -448,8 +448,8 @@ describe("AddBookmarkDialog", () => {
     store.addFile = vi.fn().mockResolvedValue({ error: "file is empty" });
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
     await selectFile(wrapper, new File(["# hi"], "notes.md"));
     await wrapper.get("form").trigger("submit");
@@ -461,58 +461,58 @@ describe("AddBookmarkDialog", () => {
 
   test("clicking the dropzone opens the native file picker", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
     const input = wrapper.get("input[type=file]").element as HTMLInputElement;
     const click = vi.spyOn(input, "click");
-    await wrapper.get(".dropzone").trigger("click");
+    await wrapper.get('[data-testid="dropzone"]').trigger("click");
 
     expect(click).toHaveBeenCalledTimes(1);
   });
 
   test("dragging a file over the dropzone highlights it, and leaving clears the highlight", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
-    const dropzone = wrapper.get(".dropzone");
-    expect(dropzone.classes()).not.toContain("dragging");
+    const dropzone = wrapper.get('[data-testid="dropzone"]');
+    expect(dropzone.attributes("data-dragging")).toBeUndefined();
 
     await dropzone.trigger("dragenter");
-    expect(dropzone.classes()).toContain("dragging");
+    expect(dropzone.attributes("data-dragging")).toBe("true");
 
     await dropzone.trigger("dragleave");
-    expect(dropzone.classes()).not.toContain("dragging");
+    expect(dropzone.attributes("data-dragging")).toBeUndefined();
   });
 
   test("dropping a valid file selects it, clears the drag highlight, and enables submit", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
-    const dropzone = wrapper.get(".dropzone");
+    const dropzone = wrapper.get('[data-testid="dropzone"]');
     await dropzone.trigger("dragenter");
 
     const file = new File(["# hi"], "notes.md", { type: "text/markdown" });
     await dropzone.trigger("drop", { dataTransfer: { files: [file] } });
 
-    expect(dropzone.classes()).not.toContain("dragging");
+    expect(dropzone.attributes("data-dragging")).toBeUndefined();
     expect(wrapper.text()).toContain("notes.md");
-    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeUndefined();
+    expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeUndefined();
   });
 
   test("dropping an unsupported file shows an error and does not select it", async () => {
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
-    const dropzone = wrapper.get(".dropzone");
+    const dropzone = wrapper.get('[data-testid="dropzone"]');
     const file = new File(["x"], "legacy.doc");
     await dropzone.trigger("drop", { dataTransfer: { files: [file] } });
 
     expect(wrapper.text()).toContain("Unsupported file type");
-    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeDefined();
+    expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeDefined();
   });
 
   test("a dropped file submits through the same path as a picked file", async () => {
@@ -520,11 +520,13 @@ describe("AddBookmarkDialog", () => {
     store.addFile = vi.fn().mockResolvedValue({ error: null });
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
-    await wrapper.get("button.mode-file").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
 
     const file = new File(["# hi"], "notes.md", { type: "text/markdown" });
-    await wrapper.get(".dropzone").trigger("drop", { dataTransfer: { files: [file] } });
+    await wrapper
+      .get('[data-testid="dropzone"]')
+      .trigger("drop", { dataTransfer: { files: [file] } });
     await wrapper.get("form").trigger("submit");
     await wrapper.vm.$nextTick();
 
@@ -537,12 +539,12 @@ describe("AddBookmarkDialog", () => {
     store.add = vi.fn().mockResolvedValue(DUPLICATE);
 
     const wrapper = mount(AddBookmarkDialog);
-    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
     await wrapper.vm.$nextTick();
 
-    await wrapper.get("button.cancel-btn").trigger("click");
+    await wrapper.get('button[data-testid="cancel-btn"]').trigger("click");
     await wrapper.vm.$nextTick();
 
     expect(wrapper.find("dialog").exists()).toBe(true);

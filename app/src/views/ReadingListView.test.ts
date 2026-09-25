@@ -54,7 +54,7 @@ describe("ReadingListView", () => {
     const wrapper = mount(ReadingListView);
     await flushPromises();
     expect(wrapper.text()).toContain("Read Later");
-    expect(wrapper.find("input.search-input").exists()).toBe(true);
+    expect(wrapper.find('input[data-testid="search-input"]').exists()).toBe(true);
   });
 
   test("saves scroll position on window scroll and restores it on remount", async () => {
@@ -83,7 +83,7 @@ describe("ReadingListView", () => {
     vi.spyOn(window, "scrollY", "get").mockReturnValue(350);
     window.dispatchEvent(new Event("scroll"));
 
-    const searchInput = wrapper.get("input.search-input");
+    const searchInput = wrapper.get('input[data-testid="search-input"]');
     await searchInput.setValue("test");
 
     expect(scrollToSpy).toHaveBeenCalledWith(0, 0);
@@ -95,10 +95,10 @@ describe("ReadingListView", () => {
     const store = useBookmarksStore();
     const fetchSpy = vi.spyOn(store, "fetch").mockResolvedValue(undefined);
 
-    await wrapper.get("input.search-input").setValue("readability");
+    await wrapper.get('input[data-testid="search-input"]').setValue("readability");
     expect(fetchSpy).not.toHaveBeenCalled();
 
-    await wrapper.get("form.search-form").trigger("submit");
+    await wrapper.get('form[data-testid="search-form"]').trigger("submit");
     expect(store.searchQuery).toBe("readability");
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
@@ -109,11 +109,11 @@ describe("ReadingListView", () => {
     const store = useBookmarksStore();
     const fetchSpy = vi.spyOn(store, "fetch").mockResolvedValue(undefined);
 
-    await wrapper.get("input.search-input").setValue("readability");
-    await wrapper.get("form.search-form").trigger("submit");
+    await wrapper.get('input[data-testid="search-input"]').setValue("readability");
+    await wrapper.get('form[data-testid="search-form"]').trigger("submit");
     fetchSpy.mockClear();
 
-    await wrapper.get("input.search-input").setValue("");
+    await wrapper.get('input[data-testid="search-input"]').setValue("");
     expect(store.searchQuery).toBe("");
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });

@@ -16,12 +16,14 @@ function isActive(tagId: string): boolean {
 </script>
 
 <template>
-  <div v-if="tags.length > 0" class="tag-filter-bar">
+  <div data-testid="tag-filter-bar" v-if="tags.length > 0" class="tag-filter-bar">
     <button
+      data-testid="tag-chip"
       v-for="tag in tags"
       :key="tag.id"
       class="tag-chip"
       :class="{ 'tag-chip-active': isActive(tag.id) }"
+      :aria-pressed="isActive(tag.id)"
       type="button"
       :style="{ '--tag-color': tag.color }"
       @click="emit('toggle', tag.id)"

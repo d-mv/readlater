@@ -46,14 +46,14 @@ describe("ShareDialog", () => {
         origin: "https://readlater.mlnkv.net",
       },
     });
-    expect(wrapper.find(".link-field").exists()).toBe(false);
+    expect(wrapper.find('[data-testid="link-field"]').exists()).toBe(false);
   });
 
   test("shows the share link built from the bookmark id when public", () => {
     const wrapper = mount(ShareDialog, {
       props: { bookmark: makeBookmark({ is_public: true }), origin: "https://readlater.mlnkv.net" },
     });
-    const field = wrapper.find(".link-field");
+    const field = wrapper.find('[data-testid="link-field"]');
     expect((field.element as HTMLInputElement).value).toBe("https://readlater.mlnkv.net/s/abc-123");
   });
 
@@ -61,7 +61,7 @@ describe("ShareDialog", () => {
     const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark({ is_public: false }) } });
 
-    await wrapper.find(".toggle-input").setValue(true);
+    await wrapper.find('[data-testid="toggle-input"]').setValue(true);
 
     expect(confirmSpy).toHaveBeenCalled();
     expect(wrapper.emitted("togglePublic")).toEqual([[true]]);
@@ -71,7 +71,7 @@ describe("ShareDialog", () => {
     vi.spyOn(window, "confirm").mockReturnValue(false);
     const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark({ is_public: false }) } });
 
-    await wrapper.find(".toggle-input").setValue(true);
+    await wrapper.find('[data-testid="toggle-input"]').setValue(true);
 
     expect(wrapper.emitted("togglePublic")).toBeUndefined();
   });
@@ -80,7 +80,7 @@ describe("ShareDialog", () => {
     const confirmSpy = vi.spyOn(window, "confirm");
     const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark({ is_public: true }) } });
 
-    await wrapper.find(".toggle-input").setValue(false);
+    await wrapper.find('[data-testid="toggle-input"]').setValue(false);
 
     expect(confirmSpy).not.toHaveBeenCalled();
     expect(wrapper.emitted("togglePublic")).toEqual([[false]]);
@@ -88,7 +88,7 @@ describe("ShareDialog", () => {
 
   test("emits close when clicking the close button", async () => {
     const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark() } });
-    await wrapper.find(".close-btn").trigger("click");
+    await wrapper.find('[data-testid="close-btn"]').trigger("click");
     expect(wrapper.emitted("close")).toHaveLength(1);
   });
 
@@ -99,7 +99,7 @@ describe("ShareDialog", () => {
       props: { bookmark: makeBookmark({ is_public: true }), origin: "https://readlater.mlnkv.net" },
     });
 
-    await wrapper.find(".copy-btn").trigger("click");
+    await wrapper.find('[data-testid="copy-btn"]').trigger("click");
 
     expect(writeText).toHaveBeenCalledWith("https://readlater.mlnkv.net/s/abc-123");
   });

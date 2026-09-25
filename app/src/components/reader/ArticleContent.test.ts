@@ -59,7 +59,7 @@ describe("ArticleContent", () => {
 
   test("renders nothing when content is null", () => {
     const wrapper = mount(ArticleContent, { props: { contentMd: null } });
-    expect(wrapper.find(".article").html()).toContain('class="article"');
+    expect(wrapper.find('[data-testid="article"]').html()).toContain('class="article"');
   });
 
   test("links open in a new tab with rel=noopener noreferrer", () => {
@@ -138,7 +138,7 @@ describe("ArticleContent", () => {
     test("shows a click-to-play thumbnail and does not mount an iframe until tapped", () => {
       const wrapper = mount(ArticleContent, { props: youtubeProps });
       expect(wrapper.find("iframe").exists()).toBe(false);
-      const playButton = wrapper.find("button.youtube-play");
+      const playButton = wrapper.find('button[data-testid="youtube-play"]');
       expect(playButton.exists()).toBe(true);
       expect(playButton.find("img").attributes("src")).toBe("https://thumb.example/abc123.jpg");
       // The thumbnail baked into content_md is redundant with the click-to-play
@@ -152,16 +152,16 @@ describe("ArticleContent", () => {
 
     test("tapping the thumbnail mounts a youtube-nocookie iframe pointed at the video id", async () => {
       const wrapper = mount(ArticleContent, { props: youtubeProps });
-      await wrapper.find("button.youtube-play").trigger("click");
+      await wrapper.find('button[data-testid="youtube-play"]').trigger("click");
       const iframe = wrapper.find("iframe");
       expect(iframe.exists()).toBe(true);
       expect(iframe.attributes("src")).toBe("https://www.youtube-nocookie.com/embed/abc123");
-      expect(wrapper.find("button.youtube-play").exists()).toBe(false);
+      expect(wrapper.find('button[data-testid="youtube-play"]').exists()).toBe(false);
     });
 
     test("non-youtube content renders without any click-to-play affordance", () => {
       const wrapper = mount(ArticleContent, { props: { contentMd: "# Hello" } });
-      expect(wrapper.find("button.youtube-play").exists()).toBe(false);
+      expect(wrapper.find('button[data-testid="youtube-play"]').exists()).toBe(false);
       expect(wrapper.find("iframe").exists()).toBe(false);
     });
 
@@ -173,7 +173,7 @@ describe("ArticleContent", () => {
           youtubeVideoId: null,
         },
       });
-      expect(wrapper.find("button.youtube-play").exists()).toBe(false);
+      expect(wrapper.find('button[data-testid="youtube-play"]').exists()).toBe(false);
       expect(wrapper.find("img").attributes("src")).toBe("https://thumb.example/x.jpg");
     });
   });
@@ -191,7 +191,7 @@ describe("ArticleContent", () => {
       const iframe = wrapper.find("iframe");
       expect(iframe.exists()).toBe(true);
       expect(iframe.attributes("src")).toBe("https://storage.example/signed-url");
-      expect(wrapper.find(".article > div").exists()).toBe(false);
+      expect(wrapper.find('[data-testid="article"] > div').exists()).toBe(false);
     });
 
     test("shows a loading placeholder while the signed url hasn't resolved yet", () => {
@@ -255,7 +255,7 @@ describe("ArticleContent", () => {
         },
       });
       await flushPromises();
-      expect(wrapper.find("button.youtube-play").exists()).toBe(false);
+      expect(wrapper.find('button[data-testid="youtube-play"]').exists()).toBe(false);
       expect(wrapper.find("iframe").exists()).toBe(false);
     });
 

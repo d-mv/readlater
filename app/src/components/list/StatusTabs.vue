@@ -14,17 +14,21 @@ const emit = defineEmits<{
 <template>
   <div class="tabs">
     <button
+      data-testid="tab"
       class="tab"
       type="button"
       :class="{ 'tab-active': activeFilter === 'all' }"
+      :aria-pressed="activeFilter === 'all'"
       @click="emit('change', 'all')"
     >
       All
     </button>
     <button
+      data-testid="tab"
       class="tab"
       type="button"
       :class="{ 'tab-active': activeFilter === 'archived' }"
+      :aria-pressed="activeFilter === 'archived'"
       @click="emit('change', 'archived')"
     >
       Archived

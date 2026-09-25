@@ -18,7 +18,9 @@ const emit = defineEmits<{
 
 <template>
   <div class="list">
-    <p v-if="bookmarks.length === 0" class="empty-state">Nothing here yet.</p>
+    <p data-testid="empty-state" v-if="bookmarks.length === 0" class="empty-state">
+      Nothing here yet.
+    </p>
     <BookmarkRow
       v-for="bookmark in bookmarks"
       :key="bookmark.id"

@@ -198,17 +198,25 @@ async function confirmDuplicate() {
 </script>
 
 <template>
-  <button class="btn btn-primary add-btn" type="button" @click="open">Add</button>
+  <button data-testid="add-btn" class="btn btn-primary add-btn" type="button" @click="open">
+    Add
+  </button>
 
-  <div v-if="isOpen" class="backdrop" @click.self="close">
+  <div data-testid="backdrop" v-if="isOpen" class="backdrop" @click.self="close">
     <dialog open class="dialog">
       <div v-if="phase.kind === 'confirmDuplicate'" class="duplicate-confirm">
         <p class="confirm-message">This URL is already saved. Add it again?</p>
         <div class="dialog-actions">
-          <button class="btn btn-secondary cancel-btn" type="button" @click="cancelDuplicate">
+          <button
+            data-testid="cancel-btn"
+            class="btn btn-secondary cancel-btn"
+            type="button"
+            @click="cancelDuplicate"
+          >
             Cancel
           </button>
           <button
+            data-testid="confirm-btn"
             class="btn btn-primary confirm-btn"
             type="button"
             :disabled="submitting"
@@ -229,6 +237,7 @@ async function confirmDuplicate() {
             URL
           </button>
           <button
+            data-testid="mode-snippet"
             type="button"
             class="mode-btn mode-snippet"
             :class="{ active: mode === 'snippet' }"
@@ -237,6 +246,7 @@ async function confirmDuplicate() {
             Snippet
           </button>
           <button
+            data-testid="mode-file"
             type="button"
             class="mode-btn mode-file"
             :class="{ active: mode === 'file' }"
@@ -272,8 +282,10 @@ async function confirmDuplicate() {
         <template v-else>
           <label class="field-label" for="bookmark-file">File</label>
           <div
+            data-testid="dropzone"
             class="dropzone"
             :class="{ dragging: isDragging, filled: selectedFile }"
+            :data-dragging="isDragging || undefined"
             tabindex="0"
             role="button"
             aria-label="Choose a file or drop it here"
@@ -322,10 +334,18 @@ async function confirmDuplicate() {
           </div>
         </template>
 
-        <p v-if="error" class="error">{{ error }}</p>
+        <p data-testid="error" v-if="error" class="error">{{ error }}</p>
         <div class="dialog-actions">
-          <button class="btn btn-secondary cancel-btn" type="button" @click="close">Cancel</button>
           <button
+            data-testid="cancel-btn"
+            class="btn btn-secondary cancel-btn"
+            type="button"
+            @click="close"
+          >
+            Cancel
+          </button>
+          <button
+            data-testid="submit-btn"
             class="btn btn-primary submit-btn"
             type="submit"
             :disabled="

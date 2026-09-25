@@ -60,7 +60,12 @@ function nativeShare() {
     <div class="dialog" role="dialog" aria-modal="true" aria-label="Share bookmark">
       <div class="dialog-header">
         <h2 class="dialog-title">Share</h2>
-        <button class="icon-btn close-btn" type="button" @click="emit('close')">
+        <button
+          data-testid="close-btn"
+          class="icon-btn close-btn"
+          type="button"
+          @click="emit('close')"
+        >
           <IconX :size="18" />
         </button>
       </div>
@@ -68,6 +73,7 @@ function nativeShare() {
       <label class="toggle-row">
         <span>Public link</span>
         <input
+          data-testid="toggle-input"
           type="checkbox"
           class="toggle-input"
           :checked="bookmark.is_public"
@@ -78,13 +84,14 @@ function nativeShare() {
       <template v-if="bookmark.is_public">
         <div class="link-row">
           <input
+            data-testid="link-field"
             class="link-field"
             type="text"
             readonly
             :value="shareUrl"
             @focus="($event.target as HTMLInputElement).select()"
           />
-          <button class="icon-btn copy-btn" type="button" @click="copyLink">
+          <button data-testid="copy-btn" class="icon-btn copy-btn" type="button" @click="copyLink">
             <IconCopyCheck v-if="copied" :size="18" />
             <IconCopy v-else :size="18" />
           </button>

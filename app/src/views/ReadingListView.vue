@@ -129,8 +129,9 @@ function onToggleTag(tagId: string) {
         <ThemeToggle />
       </div>
     </div>
-    <form class="search-form" @submit.prevent="onSearchSubmit">
+    <form data-testid="search-form" class="search-form" @submit.prevent="onSearchSubmit">
       <input
+        data-testid="search-input"
         v-model="searchInput"
         class="search-input"
         type="search"

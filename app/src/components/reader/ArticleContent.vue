@@ -156,7 +156,7 @@ const safeHtml = computed(() =>
 </script>
 
 <template>
-  <div class="article">
+  <div data-testid="article" class="article">
     <div v-if="isYoutube" class="youtube-embed">
       <iframe
         v-if="playing"
@@ -168,6 +168,7 @@ const safeHtml = computed(() =>
         referrerpolicy="strict-origin-when-cross-origin"
       ></iframe>
       <button
+        data-testid="youtube-play"
         v-else
         class="youtube-play"
         type="button"
