@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
+import type { Bookmark } from "../lib/supabase";
 
 const { from } = vi.hoisted(() => ({ from: vi.fn() }));
 vi.mock("../lib/supabase", () => ({ supabase: { from } }));
@@ -16,6 +17,7 @@ vi.mock("vue-router", () => ({
 }));
 
 const { default: ShareTargetView } = await import("./ShareTargetView.vue");
+const { useBookmarksStore } = await import("../stores/bookmarks");
 
 describe("ShareTargetView", () => {
   beforeEach(() => {
@@ -93,6 +95,28 @@ describe("ShareTargetView", () => {
     const wrapper = mount(ShareTargetView);
     await flushPromises();
 
+    expect(replace).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("Already saved");
+  });
+
+  test("shows the duplicate prompt instead of routing away when the URL is already in the loaded list", async () => {
+    query.url = "https://arc90.com/x";
+    useBookmarksStore().bookmarks = [
+      {
+        id: "existing-1",
+        url: "https://arc90.com/x",
+        type: "article",
+        status: "ready",
+        title: "Loaded already",
+        created_at: "2026-01-01T00:00:00Z",
+        tags: [],
+      } as unknown as Bookmark,
+    ];
+
+    const wrapper = mount(ShareTargetView);
+    await flushPromises();
+
+    expect(from).not.toHaveBeenCalled();
     expect(replace).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("Already saved");
   });

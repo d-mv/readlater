@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
+import type { Bookmark } from "../lib/supabase";
 
 const { from } = vi.hoisted(() => ({ from: vi.fn() }));
 vi.mock("../lib/supabase", () => ({ supabase: { from } }));
@@ -10,6 +11,7 @@ const { query } = vi.hoisted(() => ({ query: {} as Record<string, string> }));
 vi.mock("vue-router", () => ({ useRoute: () => ({ query }) }));
 
 const { default: CaptureView } = await import("./CaptureView.vue");
+const { useBookmarksStore } = await import("../stores/bookmarks");
 
 describe("CaptureView", () => {
   beforeEach(() => {
@@ -90,6 +92,30 @@ describe("CaptureView", () => {
 
     await vi.advanceTimersByTimeAsync(800);
     expect(window.close).toHaveBeenCalled();
+  });
+
+  test("shows the duplicate prompt, not Saved, when the URL is already in the loaded list", async () => {
+    query.url = "https://arc90.com/x";
+    useBookmarksStore().bookmarks = [
+      {
+        id: "existing-1",
+        url: "https://arc90.com/x",
+        type: "article",
+        status: "ready",
+        title: "Loaded already",
+        created_at: "2026-01-01T00:00:00Z",
+        tags: [],
+      } as unknown as Bookmark,
+    ];
+
+    const wrapper = mount(CaptureView);
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(from).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("Already saved");
+    expect(wrapper.text()).not.toContain("Saved");
+    expect(window.close).not.toHaveBeenCalled();
   });
 
   test("shows an error state when there's no url param", async () => {

@@ -53,6 +53,13 @@ export interface DuplicateBookmark {
   existingSavedAt: string;
 }
 
+// Result of saving a URL: an error, a duplicate (always carrying the existing
+// row, whether it was found locally or via the unique index), or success.
+export type AddBookmarkResult =
+  | { error: string; duplicate?: undefined }
+  | ({ error: null; duplicate: true } & DuplicateBookmark)
+  | { error: null; duplicate?: undefined };
+
 // The public-safe subset returned by the get_public_bookmark RPC — no owner
 // id, storage path, url, status, or other internal columns.
 export interface PublicBookmark {

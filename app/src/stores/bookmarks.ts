@@ -1,7 +1,7 @@
 import { acceptHMRUpdate, defineStore } from "pinia";
 import { computed, ref, shallowRef } from "vue";
 import type { RealtimeChannel, RealtimePostgresChangesPayload } from "@supabase/supabase-js";
-import { supabase, type Bookmark, type DuplicateBookmark } from "../lib/supabase";
+import { supabase, type AddBookmarkResult, type Bookmark } from "../lib/supabase";
 import { detectBookmarkType } from "../utils/bookmarkType";
 import { truncateTitle } from "../utils/captureText";
 import { arrayBufferToBase64 } from "../utils/base64";
@@ -249,7 +249,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   async function add(
     url: string,
     options?: { force?: boolean; title?: string },
-  ): Promise<{ error: string | null; duplicate?: boolean } & Partial<DuplicateBookmark>> {
+  ): Promise<AddBookmarkResult> {
     let type: Bookmark["type"];
     try {
       type = detectBookmarkType(url);
@@ -262,8 +262,15 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const userId = useAuthStore().userId;
     if (!userId) return { error: "You must be signed in." };
 
-    if (!options?.force && bookmarks.value.some((b) => b.url === url)) {
-      return { error: null, duplicate: true };
+    const loaded = options?.force ? undefined : bookmarks.value.find((b) => b.url === url);
+    if (loaded) {
+      return {
+        error: null,
+        duplicate: true,
+        existingId: loaded.id,
+        existingTitle: loaded.title,
+        existingSavedAt: loaded.created_at,
+      };
     }
 
     const { data, error } = await supabase

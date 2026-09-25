@@ -2,24 +2,21 @@
 import { onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useBookmarksStore } from "../stores/bookmarks";
-import { isBareUrl } from "../utils/captureText";
+import { isBareUrl, toCaptureOutcome, type CaptureOutcome } from "../utils/captureText";
 
 const route = useRoute();
 const router = useRouter();
 const store = useBookmarksStore();
 
-type Status = "working" | "duplicate" | "error";
-const status = ref<Status>("working");
-const errorMessage = ref("");
-const duplicateId = ref<string | null>(null);
-const duplicateSavedAt = ref<string | null>(null);
+// "saved" never renders here — a successful save routes straight to the list.
+const outcome = ref<CaptureOutcome>({ kind: "working" });
 
 function finish() {
   router.replace({ name: "list" });
 }
 
 async function onContinueRefresh() {
-  if (duplicateId.value) await store.refresh(duplicateId.value);
+  if (outcome.value.kind === "duplicate") await store.refresh(outcome.value.id);
   finish();
 }
 
@@ -29,48 +26,35 @@ onMounted(async () => {
   const targetUrl = url || (text && isBareUrl(text) ? text : "");
 
   if (targetUrl) {
-    const result = await store.add(targetUrl);
-    if (result.error) {
-      status.value = "error";
-      errorMessage.value = result.error;
-    } else if (result.duplicate && result.existingId && result.existingSavedAt) {
-      status.value = "duplicate";
-      duplicateId.value = result.existingId;
-      duplicateSavedAt.value = result.existingSavedAt;
-    } else {
-      finish();
-    }
+    const next = toCaptureOutcome(await store.add(targetUrl));
+    if (next.kind === "saved") finish();
+    else outcome.value = next;
     return;
   }
 
   if (text) {
     const result = await store.addNote(text);
-    if (result.error) {
-      status.value = "error";
-      errorMessage.value = result.error;
-    } else {
-      finish();
-    }
+    if (result.error) outcome.value = { kind: "error", message: result.error };
+    else finish();
     return;
   }
 
-  status.value = "error";
-  errorMessage.value = "Nothing to save.";
+  outcome.value = { kind: "error", message: "Nothing to save." };
 });
 </script>
 
 <template>
   <main class="share-target">
-    <div v-if="status === 'working'" class="status-placeholder">
+    <div v-if="outcome.kind === 'working'" class="status-placeholder">
       <p class="status-text">Saving…</p>
     </div>
-    <div v-else-if="status === 'error'" class="status-placeholder">
-      <p class="status-text">{{ errorMessage }}</p>
+    <div v-else-if="outcome.kind === 'error'" class="status-placeholder">
+      <p class="status-text">{{ outcome.message }}</p>
       <button class="btn btn-secondary" type="button" @click="finish">Back to list</button>
     </div>
-    <div v-else-if="status === 'duplicate'" class="status-placeholder">
+    <div v-else-if="outcome.kind === 'duplicate'" class="status-placeholder">
       <p class="status-text">
-        Already saved on {{ new Date(duplicateSavedAt!).toLocaleDateString() }}
+        Already saved on {{ new Date(outcome.savedAt).toLocaleDateString() }}
       </p>
       <div class="duplicate-actions">
         <button class="btn btn-secondary" type="button" @click="finish">Cancel</button>

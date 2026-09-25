@@ -2,15 +2,12 @@
 import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { useBookmarksStore } from "../stores/bookmarks";
+import { toCaptureOutcome, type CaptureOutcome } from "../utils/captureText";
 
 const route = useRoute();
 const store = useBookmarksStore();
 
-type Status = "working" | "saved" | "duplicate" | "error";
-const status = ref<Status>("working");
-const errorMessage = ref("");
-const duplicateId = ref<string | null>(null);
-const duplicateSavedAt = ref<string | null>(null);
+const outcome = ref<CaptureOutcome>({ kind: "working" });
 
 // Opened as a popup by the bookmarklet, so closing the tab is the natural
 // "done" action — but window.close() silently no-ops on a tab the browser
@@ -21,12 +18,12 @@ function close() {
 }
 
 function finish() {
-  status.value = "saved";
+  outcome.value = { kind: "saved" };
   setTimeout(close, 800);
 }
 
 async function onContinueRefresh() {
-  if (duplicateId.value) await store.refresh(duplicateId.value);
+  if (outcome.value.kind === "duplicate") await store.refresh(outcome.value.id);
   finish();
 }
 
@@ -35,41 +32,32 @@ onMounted(async () => {
   const title = typeof route.query.title === "string" ? route.query.title.trim() : undefined;
 
   if (!url) {
-    status.value = "error";
-    errorMessage.value = "Nothing to save.";
+    outcome.value = { kind: "error", message: "Nothing to save." };
     return;
   }
 
-  const result = await store.add(url, { title });
-  if (result.error) {
-    status.value = "error";
-    errorMessage.value = result.error;
-  } else if (result.duplicate && result.existingId && result.existingSavedAt) {
-    status.value = "duplicate";
-    duplicateId.value = result.existingId;
-    duplicateSavedAt.value = result.existingSavedAt;
-  } else {
-    finish();
-  }
+  const next = toCaptureOutcome(await store.add(url, { title }));
+  if (next.kind === "saved") finish();
+  else outcome.value = next;
 });
 </script>
 
 <template>
   <main class="capture">
-    <div v-if="status === 'working'" class="status-placeholder">
+    <div v-if="outcome.kind === 'working'" class="status-placeholder">
       <p class="status-text">Saving…</p>
     </div>
-    <div v-else-if="status === 'saved'" class="status-placeholder">
+    <div v-else-if="outcome.kind === 'saved'" class="status-placeholder">
       <p class="status-text">Saved</p>
       <button class="btn btn-secondary" type="button" @click="close">Close</button>
     </div>
-    <div v-else-if="status === 'error'" class="status-placeholder">
-      <p class="status-text">{{ errorMessage }}</p>
+    <div v-else-if="outcome.kind === 'error'" class="status-placeholder">
+      <p class="status-text">{{ outcome.message }}</p>
       <button class="btn btn-secondary" type="button" @click="close">Close</button>
     </div>
-    <div v-else-if="status === 'duplicate'" class="status-placeholder">
+    <div v-else-if="outcome.kind === 'duplicate'" class="status-placeholder">
       <p class="status-text">
-        Already saved on {{ new Date(duplicateSavedAt!).toLocaleDateString() }}
+        Already saved on {{ new Date(outcome.savedAt).toLocaleDateString() }}
       </p>
       <div class="duplicate-actions">
         <button class="btn btn-secondary" type="button" @click="close">Cancel</button>

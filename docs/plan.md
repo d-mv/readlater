@@ -86,6 +86,8 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.2 Capture shows "Saved" when nothing was saved
 
+**Status:** done (app 0.0.2). `add()` returns `AddBookmarkResult`; the views use `toCaptureOutcome()`.
+
 - **Where:** `app/src/stores/bookmarks.ts:265-267`; `CaptureView.vue:43-53`,
   `ShareTargetView.vue:32-42`.
 - **Problem:** the local duplicate check returns `{ error: null, duplicate: true }`

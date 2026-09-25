@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { isBareUrl, truncateTitle } from "./captureText";
+import { isBareUrl, toCaptureOutcome, truncateTitle } from "./captureText";
 
 describe("isBareUrl", () => {
   test("accepts a bare http(s) URL", () => {
@@ -28,5 +28,30 @@ describe("truncateTitle", () => {
   test("truncates long text with an ellipsis", () => {
     const text = "word ".repeat(30).trim();
     expect(truncateTitle(text).endsWith("…")).toBe(true);
+  });
+});
+
+describe("toCaptureOutcome", () => {
+  test("maps an error result to an error outcome", () => {
+    expect(toCaptureOutcome({ error: "Enter a valid URL." })).toEqual({
+      kind: "error",
+      message: "Enter a valid URL.",
+    });
+  });
+
+  test("maps a duplicate result to a duplicate outcome carrying the existing row", () => {
+    expect(
+      toCaptureOutcome({
+        error: null,
+        duplicate: true,
+        existingId: "b1",
+        existingTitle: "Old",
+        existingSavedAt: "2026-01-01T00:00:00Z",
+      }),
+    ).toEqual({ kind: "duplicate", id: "b1", savedAt: "2026-01-01T00:00:00Z" });
+  });
+
+  test("maps a successful insert to saved", () => {
+    expect(toCaptureOutcome({ error: null })).toEqual({ kind: "saved" });
   });
 });

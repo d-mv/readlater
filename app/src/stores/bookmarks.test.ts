@@ -424,8 +424,15 @@ describe("useBookmarksStore", () => {
     expect(from).not.toHaveBeenCalled();
   });
 
-  test("add reports a duplicate and skips inserting when the URL is already saved", async () => {
-    const rows = [makeBookmark({ id: "1", url: "https://arc90.com/x" })];
+  test("add reports a duplicate with the existing row and skips inserting when the URL is already loaded", async () => {
+    const rows = [
+      makeBookmark({
+        id: "1",
+        url: "https://arc90.com/x",
+        title: "Already here",
+        created_at: "2026-02-03T00:00:00Z",
+      }),
+    ];
     from.mockReturnValue({
       select: () => listQuery(rows),
     });
@@ -436,7 +443,13 @@ describe("useBookmarksStore", () => {
 
     const result = await store.add("https://arc90.com/x");
 
-    expect(result).toEqual({ error: null, duplicate: true });
+    expect(result).toEqual({
+      error: null,
+      duplicate: true,
+      existingId: "1",
+      existingTitle: "Already here",
+      existingSavedAt: "2026-02-03T00:00:00Z",
+    });
     expect(from).not.toHaveBeenCalled();
   });
 
