@@ -138,6 +138,39 @@
   }
 }
 
+/* Rendered article markdown (v-html in ArticleContent.vue) can't carry
+   utility classes, so its typography lives here. Sized by the reader's
+   font-size setting (px, from stores/fontSize.ts). */
+@layer components {
+  .prose {
+    font-family: var(--font-serif);
+    font-size: var(--rl-article-font-size, 16px);
+    line-height: 1.7;
+    color: var(--color-ink);
+  }
+
+  .prose p {
+    margin: 0 0 16px;
+  }
+
+  .prose h1,
+  .prose h2,
+  .prose h3 {
+    font-family: var(--font-sans);
+    font-weight: 500;
+    color: var(--color-ink);
+  }
+
+  .prose img {
+    max-width: 100%;
+    border-radius: var(--radius-md);
+  }
+
+  .prose a {
+    color: var(--color-accent);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * {
     transition-duration: 0.01ms !important;

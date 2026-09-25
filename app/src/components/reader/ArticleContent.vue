@@ -156,11 +156,14 @@ const safeHtml = computed(() =>
 </script>
 
 <template>
-  <div data-testid="article" class="article">
-    <div v-if="isYoutube" class="youtube-embed">
+  <div data-testid="article" class="prose">
+    <div
+      v-if="isYoutube"
+      class="relative mb-16 aspect-video w-full overflow-hidden rounded-md bg-black"
+    >
       <iframe
         v-if="playing"
-        class="youtube-iframe"
+        class="size-full border-0"
         :src="embedUrl"
         title="YouTube video player"
         allow="autoplay; encrypted-media; picture-in-picture"
@@ -170,13 +173,16 @@ const safeHtml = computed(() =>
       <button
         data-testid="youtube-play"
         v-else
-        class="youtube-play"
+        class="relative block size-full cursor-pointer border-0 p-0"
         type="button"
         aria-label="Play video"
         @click="playing = true"
       >
-        <img :src="thumbnailUrl ?? undefined" alt="" />
-        <IconPlayerPlayFilled :size="48" class="youtube-play-icon" />
+        <img :src="thumbnailUrl ?? undefined" alt="" class="block size-full object-cover" />
+        <IconPlayerPlayFilled
+          :size="48"
+          class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white drop-shadow-[0_2px_6px_rgba(0,0,0,0.5)]"
+        />
       </button>
     </div>
     <MdEditor
@@ -195,96 +201,15 @@ const safeHtml = computed(() =>
       placeholder="Write in markdown…"
     />
     <template v-else-if="showPdfOriginal">
-      <iframe v-if="pdfUrl" class="pdf-frame" :src="pdfUrl" title="PDF document"></iframe>
-      <p v-else class="pdf-loading">Loading PDF…</p>
+      <iframe
+        v-if="pdfUrl"
+        class="h-[80vh] w-full rounded-md border-0 bg-white"
+        :src="pdfUrl"
+        title="PDF document"
+      ></iframe>
+      <p v-else class="font-sans text-base text-ink-faint">Loading PDF…</p>
     </template>
     <!-- eslint-disable-next-line vue/no-v-html -->
     <div v-else v-html="safeHtml"></div>
   </div>
 </template>
-
-<style scoped>
-.article {
-  font-family: var(--rl-font-serif);
-  font-size: var(--rl-article-font-size, 16px);
-  line-height: 1.7;
-  color: var(--rl-text-primary);
-}
-
-.article :deep(p) {
-  margin: 0 0 16px;
-}
-
-.article :deep(h1),
-.article :deep(h2),
-.article :deep(h3) {
-  font-family: var(--rl-font-ui);
-  font-weight: 500;
-  color: var(--rl-text-primary);
-}
-
-.article :deep(img) {
-  max-width: 100%;
-  border-radius: var(--rl-radius);
-}
-
-.article :deep(a) {
-  color: var(--rl-accent);
-}
-
-.pdf-frame {
-  width: 100%;
-  height: 80vh;
-  border: none;
-  border-radius: var(--rl-radius);
-  background: white;
-}
-
-.pdf-loading {
-  font-family: var(--rl-font-ui);
-  font-size: 14px;
-  color: var(--rl-text-muted);
-}
-
-.youtube-embed {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 16 / 9;
-  margin: 0 0 16px;
-  border-radius: var(--rl-radius);
-  overflow: hidden;
-  background: black;
-}
-
-.youtube-iframe {
-  width: 100%;
-  height: 100%;
-  border: none;
-}
-
-.youtube-play {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  padding: 0;
-  border: none;
-  cursor: pointer;
-  display: block;
-}
-
-.youtube-play img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
-
-.youtube-play-icon {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: white;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.5));
-}
-</style>

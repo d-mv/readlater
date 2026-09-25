@@ -59,7 +59,7 @@ describe("ArticleContent", () => {
 
   test("renders nothing when content is null", () => {
     const wrapper = mount(ArticleContent, { props: { contentMd: null } });
-    expect(wrapper.find('[data-testid="article"]').html()).toContain('class="article"');
+    expect(wrapper.find('[data-testid="article"]').text()).toBe("");
   });
 
   test("links open in a new tab with rel=noopener noreferrer", () => {
