@@ -429,6 +429,11 @@ more than it saves. Check that Tailwind's preflight doesn't break
 - Preflight is imported only after every component is migrated, so the
   intermediate steps are visually neutral.
 - Fonts stay self-hosted via `@fontsource`; kairos loads them from Google Fonts.
+- `~/.agents/contracts/component_standards.md` says "never use Tailwind". The
+  user's explicit request for this migration overrides that for styling
+  only; its typed-contract and no-fallthrough rules still apply.
+- Tailwind's default `--text-*` scale is reset (`--text-*: initial`), so
+  text utilities change only the font size, not the line-height.
 
 0. ✅ *(done, app 0.2.1: `data-testid` hooks, `aria-pressed`/`data-*` for state; e2e derive the Supabase host from `app/.env` and run on port 5183)* **Tests first.** 108 `find('.class')` selectors (38 distinct classes) in
    the Vitest suites, plus Playwright specs, will break once class names
@@ -437,7 +442,7 @@ more than it saves. Check that Tailwind's preflight doesn't break
 1. ✅ *(done, app 0.2.2; theme and utilities layers only, preflight deferred to step 5; `--spacing: 0.1rem`, so 1 unit = 1px; login screenshots byte-identical before and after)* Setup and tokens (7.1–7.2), with temporary `--rl-*` → new-token aliases
    so unmigrated components keep rendering.
 2. Tri-state theme (7.3) — independent of styling, can land first.
-3. `shared/clsx.ts` and the `shared/ui` primitives, each with tests
+3. ✅ *(done, app 0.2.3: Button, IconButton, Dialog, Input, Tabs, Pill, Message and Empty. `Menu` was skipped because only `ReaderMenu` would use it. Every component takes explicit `testId`/`class` props with `inheritAttrs: false`)* `shared/clsx.ts` and the `shared/ui` primitives, each with tests
    (red → green).
 4. Migrate components feature by feature: auth → list → reader → views.
    Delete each `<style scoped>` block as its component is converted.

@@ -41,6 +41,9 @@
   /* Root font-size is 62.5% (1rem = 10px), as in kairos. Spacing is one
      unit per pixel (p-8 = 8px) so the scoped CSS converts one-to-one. */
   --spacing: 0.1rem;
+  /* Replace Tailwind's scale entirely: its sizes carry line-heights the app
+     never set, so text-* only changes font-size here. */
+  --text-*: initial;
   --text-2xs: 1.1rem;
   --text-xs: 1.2rem;
   --text-sm: 1.3rem;
