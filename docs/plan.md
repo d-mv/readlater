@@ -14,7 +14,8 @@ Each item: **where** (file:line at `e18a989`), **problem**, **fix**, effort
 2. [2.1](#21-reading-position-lost-when-opening-from-the-list) and [2.2](#22-capture-shows-saved-when-nothing-was-saved) — small, user-visible bugs.
 3. [2.3](#23-list-session-races-in-the-bookmarks-store) — the core store fix; also stops search results overwriting the offline list.
 4. [2.4](#24-import-rows-are-cast-not-validated), [2.8](#28-shared-note-row-builder-for-edge-functions) — small and independent.
-5. Everything else by appetite.
+5. [7](#7-frontend-migrate-styling-to-tailwind-v4) — Tailwind v4 migration, after the 2.x fixes that touch the same components (2.5, 2.7).
+6. Everything else by appetite.
 
 **Cross-cutting pattern.** 2.1, 2.3, 2.5, 2.6, 2.7 and 2.9 are the same bug
 shape: an async result is applied without checking it still belongs to the
@@ -255,3 +256,155 @@ editor with `content_edited` guard on both refresh paths). Remaining:
   is both the processing lease timestamp and the completion time.
 - **Single-user assumptions** to revisit if that ever changes: global
   `bookmarks_url_normalized_uniq` and global `tags.name` uniqueness.
+
+---
+
+## 7. Frontend: migrate styling to Tailwind v4+
+
+**Reference implementation:** `~/code/kairos-v2/apps/client` — follow its
+setup, theme structure and shared-component conventions. Shared components
+live in `app/src/shared/ui/`.
+
+**Why.** Styling today is hand-written scoped CSS (~1,300 lines across 21
+SFCs) over `--rl-*` custom properties in `app/src/assets/tokens.css`. The
+same button styles (`.btn`, `.btn-primary`, `.btn-secondary`) are redefined
+in six components (`AddBookmarkDialog`, `ShareDialog`, `SettingsView`,
+`ShareTargetView`, `ReaderView`, `CaptureView`), and two dialogs
+reimplement the same backdrop/dialog shell.
+
+### 7.1 Setup (mirror kairos)
+
+- Deps (latest): `tailwindcss`, `@tailwindcss/vite`, `tailwind-merge`.
+  Register `tailwindcss()` first in `app/vite.config.ts` plugins, before `vue()`.
+- One entry stylesheet (`app/src/main.css`, replacing
+  `assets/main.css` + `assets/tokens.css`):
+  - `@import "tailwindcss";`
+  - `@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));`
+    — keeps the existing `data-theme` attribute (theme store changes are in 7.3).
+  - `@theme { … }` with light values, and a `[data-theme="dark"] { … }`
+    override block. Base `html, body` rules follow.
+- `app/src/shared/clsx.ts` — `clsx()` + `cn()` (tailwind-merge), copied from
+  kairos with its test.
+- Keep self-hosted `@fontsource` fonts. Kairos loads Google Fonts from a CDN;
+  read-later is an offline-first PWA and must not.
+
+### 7.2 Theme tokens
+
+Adopt kairos's **semantic token names**, mapped from the current `--rl-*`
+values:
+
+| kairos token | read-later today |
+|---|---|
+| `--color-canvas` | `--rl-bg` |
+| `--color-raised` | `--rl-surface` |
+| `--color-recessed` | — (new: slightly darker than canvas) |
+| `--color-line` / `--color-line-strong` | `--rl-border` / — |
+| `--color-ink` / `-ink-muted` / `-ink-faint` / `-ink-inverse` | `--rl-text-primary` / `-secondary` / `-muted` / — |
+| `--color-accent` / `-accent-hover` / `-accent-wash` / `-accent-ink` | `--rl-accent` / — / `--rl-accent-tint` / `--rl-on-accent` |
+| `--color-danger` | `--rl-danger` (not in kairos, keep) |
+| `--color-scrim`, `--color-focus` | — (new) |
+| `--font-sans` / `--font-mono` + `--font-serif` | `--rl-font-ui` / `--rl-font-mono` / `--rl-font-serif` |
+
+Keep `--rl-article-font-size` as a plain custom property; `stores/fontSize.ts`
+writes it at runtime.
+
+**Decided (2026-09-25):**
+- **Palette and fonts — keep read-later's.** Current `--rl-*` colour values,
+  Inter / Source Serif 4 / JetBrains Mono, all under kairos token names. Only
+  the structure and naming follow kairos, not its look.
+- **Root `font-size: 62.5%` — adopt** (1rem = 10px), together with a
+  kairos-style `--text-*` scale derived from the current sizes. Every
+  existing rem value has to be re-derived. Check article sizing separately:
+  `stores/fontSize.ts` works in px (14–24) and sets
+  `--rl-article-font-size`, so it isn't affected by the root size.
+  Re-verify that the reader's line lengths and spacing still match.
+- **Icons — keep `@tabler/icons-vue`** (kairos uses Lucide; not switching).
+- **Theme — add "system"**, see 7.3.
+
+### 7.3 Theme: light / dark / system
+
+Follow kairos `src/shared/theme.ts`: the stored preference is a tri-state,
+and the applied theme is resolved from it.
+
+- `stores/theme.ts`:
+  - `preference: "light" | "dark" | "system"`, persisted in `localStorage`
+    under the existing `"theme"` key; a missing key means `system`.
+  - `resolved: "light" | "dark"`, a computed (`system` resolves via
+    `matchMedia("(prefers-color-scheme: dark)")`), written to
+    `document.documentElement.dataset.theme`.
+  - A `change` listener on the media query re-applies while the preference
+    is `system`.
+  - Replace `toggle()` with `setPreference(p)`.
+- Pre-paint script in `app/index.html`: already treats a missing key as the
+  system preference. Also treat an explicit `"system"` value that way, so
+  there's no flash of the wrong theme.
+- Consumers that need a concrete theme read `resolved`, not the preference:
+  `md-editor-v3`'s `theme` prop in `ArticleContent.vue` takes
+  `"light" | "dark"`.
+- `ThemeToggle.vue` becomes a three-way control: cycle light → dark → system
+  with distinct icon and label, or a small `Tabs`/segmented control on
+  `SettingsView`.
+- Tests:
+  - store: stored value → resolved, a system change while on `system`, and
+    no reaction to OS changes after an explicit choice;
+  - pre-paint behaviour;
+  - toggle labels.
+- Update `architecture.md` §6 "Theme switching" when it ships.
+
+### 7.4 Shared components — `app/src/shared/ui/`
+
+Kairos conventions: typed `export interface XProps` / `XEmits` with
+`withDefaults(defineProps<…>())`; a `class?: string` prop merged via
+`cn()`; variant and size maps as `Record<Variant, string>`; a `.test.ts`
+next to each. Don't copy the few kairos components that use untyped runtime
+`defineProps({...})` (`Dialog`, `Pill`); follow
+`~/.agents/contracts/component_standards.md`.
+
+| Component | Replaces (read-later) |
+|---|---|
+| `Button.vue` (variants: primary, secondary/outlined, ghost, danger) | `.btn*` in 6 SFCs, `.retry-btn`, `.remove-btn`, `.cancel-btn` |
+| `IconButton.vue` (required `title` → `aria-label`) | `.icon-btn`, theme toggle, reader header actions |
+| `Dialog.vue` (scrim, header with close, slot) | shells in `AddBookmarkDialog`, `ShareDialog` |
+| `Input.vue` (`area` for textarea, v-model, enter/escape emits) | URL/snippet inputs, `TagInput`, `LoginForm`, search box |
+| `Tabs.vue` (segmented) | `StatusTabs`, Add-dialog mode switch |
+| `Pill.vue` | tag chips (`TagFilterBar`, `TagInput`), type/"Translated" badges |
+| `Message.vue`, `Empty.vue` | error / status / empty-list text across views |
+| `Menu.vue` (kairos `ContextMenu` pattern) | `ReaderMenu` overflow menu |
+
+Feature components stay under `components/list`, `components/reader` and
+`components/auth`, and consume `shared/ui`.
+
+### 7.5 Article typography
+
+The rendered markdown (`ArticleContent.vue`, `v-html`, `:deep` rules) can't
+carry utility classes. Keep one hand-written `.prose` block in `main.css`
+under `@layer components`, using theme variables (`var(--color-ink)`,
+`var(--font-serif)`, `--rl-article-font-size`). Alternatively use
+`@tailwindcss/typography`, but restyling it to match the current reader costs
+more than it saves. Check that Tailwind's preflight doesn't break
+`md-editor-v3`'s own CSS (lists, headings in the preview pane).
+
+### 7.6 Steps
+
+0. **Tests first.** 108 `find('.class')` selectors (38 distinct classes) in
+   the Vitest suites, plus Playwright specs, will break once class names
+   disappear. Move them to roles, labels or `data-testid` while the old CSS
+   is still in place, and keep the suite green.
+1. Setup and tokens (7.1–7.2), with temporary `--rl-*` → new-token aliases
+   so unmigrated components keep rendering.
+2. Tri-state theme (7.3) — independent of styling, can land first.
+3. `shared/clsx.ts` and the `shared/ui` primitives, each with tests
+   (red → green).
+4. Migrate components feature by feature: auth → list → reader → views.
+   Delete each `<style scoped>` block as its component is converted.
+   Bug-fix items 2.5 (`AddBookmarkDialog`) and 2.7 (`ReaderView`) touch the
+   same files: land them before this step, or combine them.
+5. Remove the aliases, `tokens.css` and old `main.css`. Grep that no `--rl-*`
+   is left except `--rl-article-font-size`.
+6. Verify:
+   - `vue-tsc -b`, Vitest, Playwright and `vite build` all pass;
+   - PWA precache and CSS size before vs. after;
+   - a manual pass in both themes at phone width (list, reader, editor,
+     dialogs, public view).
+
+Effort L. Minor version bump for `app`.
