@@ -229,6 +229,7 @@ link-local rejection. Resolve the host and reject private ranges before
 fetching; block redirects into them. Effort S–M.
 
 ### 3.3 Object-URL leak in offline hydration
+**Status:** done (app 0.0.10).
 `app/src/lib/offlineDb.ts:84` creates `blob:` URLs for cached images and never
 revokes them. Revoke on reader unmount / article change. Effort S.
 

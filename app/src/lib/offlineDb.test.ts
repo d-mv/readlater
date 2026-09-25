@@ -121,4 +121,58 @@ describe("offlineDb", () => {
       "![a](blob:a) and ![b](blob:b)",
     );
   });
+
+  describe("object URLs for cached images", () => {
+    const article = (id = "1") => ({
+      id,
+      content_md: "![a](https://cdn/a.png) and ![b](https://cdn/b.png)",
+      images: [
+        { url: "https://cdn/a.png", blob: new Blob(["a"]) },
+        { url: "https://cdn/b.png", blob: new Blob(["b"]) },
+      ],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+    const originalRevoke = URL.revokeObjectURL;
+    let revoked: string[];
+
+    beforeEach(() => {
+      revoked = [];
+      URL.revokeObjectURL = (url: string) => revoked.push(url);
+    });
+
+    afterEach(() => {
+      URL.revokeObjectURL = originalRevoke;
+    });
+
+    test("hydrating the same article again reuses its object URLs instead of minting new ones", () => {
+      let minted = 0;
+      const createObjectUrl = () => `blob:${++minted}`;
+      const cached = article();
+
+      const first = offlineDb.hydrateArticleContent(cached, createObjectUrl);
+      const second = offlineDb.hydrateArticleContent(cached, createObjectUrl);
+
+      expect(minted).toBe(2);
+      expect(second).toBe(first);
+    });
+
+    test("deleting a cached article revokes its object URLs", async () => {
+      await offlineDb.putArticle(article());
+      let minted = 0;
+      offlineDb.hydrateArticleContent(article(), () => `blob:${++minted}`);
+
+      await offlineDb.deleteArticle("1");
+
+      expect(revoked.sort()).toEqual(["blob:1", "blob:2"]);
+    });
+
+    test("re-caching an article revokes the object URLs of its previous copy", async () => {
+      let minted = 0;
+      offlineDb.hydrateArticleContent(article(), () => `blob:${++minted}`);
+
+      await offlineDb.putArticle(article());
+
+      expect(revoked.sort()).toEqual(["blob:1", "blob:2"]);
+    });
+  });
 });

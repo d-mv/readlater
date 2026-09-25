@@ -41,9 +41,23 @@ function getDb() {
   return dbPromise;
 }
 
+// Object URLs handed out for each cached article's images, keyed by article
+// id then image URL. Offline list loads hydrate every cached article, so
+// without reuse each load minted (and leaked) a new blob: URL per image;
+// they are revoked when the article is re-cached or evicted.
+const objectUrls = new Map<string, Map<string, string>>();
+
+function revokeObjectUrls(id: string) {
+  const urls = objectUrls.get(id);
+  if (!urls) return;
+  for (const url of urls.values()) URL.revokeObjectURL(url);
+  objectUrls.delete(id);
+}
+
 export async function putArticle(article: CachedArticle): Promise<void> {
   const db = await getDb();
   await db.put("articles", article);
+  revokeObjectUrls(article.id);
 }
 
 export async function getArticle(id: string): Promise<CachedArticle | undefined> {
@@ -54,6 +68,7 @@ export async function getArticle(id: string): Promise<CachedArticle | undefined>
 export async function deleteArticle(id: string): Promise<void> {
   const db = await getDb();
   await db.delete("articles", id);
+  revokeObjectUrls(id);
 }
 
 export async function listCachedArticleIds(): Promise<string[]> {
@@ -80,17 +95,28 @@ export async function deleteBookmarkMeta(id: string): Promise<void> {
 }
 
 export function hydrateArticleContent(
-  article: Pick<CachedArticle, "content_md" | "images">,
+  article: Pick<CachedArticle, "id" | "content_md" | "images">,
   createObjectUrl: (blob: Blob) => string = (blob) => URL.createObjectURL(blob),
 ): string {
+  let urls = objectUrls.get(article.id);
+  if (!urls) {
+    urls = new Map();
+    objectUrls.set(article.id, urls);
+  }
   let content = article.content_md;
   for (const image of article.images) {
-    content = content.split(image.url).join(createObjectUrl(image.blob));
+    let objectUrl = urls.get(image.url);
+    if (!objectUrl) {
+      objectUrl = createObjectUrl(image.blob);
+      urls.set(image.url, objectUrl);
+    }
+    content = content.split(image.url).join(objectUrl);
   }
   return content;
 }
 
 export async function _resetForTests(): Promise<void> {
+  objectUrls.clear();
   if (dbPromise) {
     const db = await dbPromise;
     db.close();

@@ -581,7 +581,9 @@ DB):
   blob}[], cachedAt }`. Every image referenced in the markdown (plus the
   thumbnail) is fetched and stored as a blob — mostly hot-linked source
   images, so CORS failures are skipped silently — and swapped to `blob:` URLs
-  at render time when offline. An already-cached id is not re-cached. The
+  at render time when offline (one object URL per cached image, reused
+  across offline loads and revoked when the article is re-cached or
+  evicted). An already-cached id is not re-cached. The
   `offlineCache` store tracks each id as `saving` or `saved`: a second save
   reuses the one in flight, and a remove (archive, delete, or untoggle)
   cancels a pending save, or deletes the row if the write already landed.
