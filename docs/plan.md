@@ -29,6 +29,13 @@ matches.
 
 ### 1.1 Flatten migrations
 
+**Status:** repo side done (2026-09-25). Verified with a local `db reset`:
+`pg_dump` of `public`, the publication column list, the replica identity,
+the storage policies and the buckets are identical before and after.
+**Remaining:** steps 2–3 below on the live project. They need
+`bunx supabase login` first, and must happen before the next `db push`, or
+the CLI will refuse because of the unknown remote versions.
+
 `supabase/migrations/` has the flattened `20260825000001_initial_schema.sql`
 plus three follow-ups from the DB-traffic work:
 

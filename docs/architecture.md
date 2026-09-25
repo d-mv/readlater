@@ -189,11 +189,9 @@ Notes on the shape:
   explicit `grant` in addition to RLS policies, or they're invisible to the
   Data API regardless of policy.
 
-Migrations: `20260825000001_initial_schema.sql` (flattened initial schema),
-then `20260826120000_realtime_bookmarks_publication.sql`,
-`20260826120001_public_bookmark_projection.sql`,
-`20260827000000_fix_bookmarks_replica_identity.sql`. Flattening the three
-follow-ups into the initial schema is planned — see [`plan.md`](plan.md) §1.1.
+Migrations: `20260825000001_initial_schema.sql` — a single flattened schema
+(tables, indexes, replica identity, RLS, `get_public_bookmark`, storage
+buckets/policies, Realtime publication). New changes go in new migration files.
 
 ## 3. Capture paths
 
