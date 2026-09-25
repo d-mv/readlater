@@ -84,6 +84,81 @@ describe("parseExportPayload", () => {
     const payload = { version: 999, exported_at: "now", bookmarks: [] };
     expect(() => parseExportPayload(JSON.stringify(payload))).toThrow(ImportPayloadError);
   });
+
+  describe("per-row validation", () => {
+    const validRow = () =>
+      toExportBookmark(makeBookmark({ id: "1" })) as unknown as Record<string, unknown>;
+    const parseRows = (rows: unknown[]) =>
+      parseExportPayload(
+        JSON.stringify({ version: EXPORT_VERSION, exported_at: "now", bookmarks: rows }),
+      );
+
+    test("defaults a missing tags list to empty instead of failing later", () => {
+      const row = validRow();
+      delete row.tags;
+
+      const { bookmarks, invalid } = parseRows([row]);
+
+      expect(invalid).toEqual([]);
+      expect(bookmarks[0].tags).toEqual([]);
+    });
+
+    test("drops keys that aren't part of the export shape (e.g. id, url_normalized)", () => {
+      const row = { ...validRow(), id: "old-id", url_normalized: "x", user_id: "someone" };
+
+      const { bookmarks } = parseRows([row]);
+
+      expect(bookmarks[0]).not.toHaveProperty("id");
+      expect(bookmarks[0]).not.toHaveProperty("url_normalized");
+      expect(bookmarks[0]).not.toHaveProperty("user_id");
+      expect(bookmarks[0].url).toBe("https://arc90.com/x");
+    });
+
+    test("reports malformed rows as invalid and keeps the well-formed ones", () => {
+      const good = validRow();
+      const badUrl = { ...validRow(), url: 42, title: "Bad url" };
+      const badArchived = { ...validRow(), archived: "yes", title: "Bad archived" };
+      const badType = { ...validRow(), type: "podcast", title: "Bad type" };
+      const articleWithoutUrl = { ...validRow(), url: null, title: "No url" };
+
+      const { bookmarks, invalid } = parseRows([
+        good,
+        badUrl,
+        badArchived,
+        badType,
+        articleWithoutUrl,
+        "not an object",
+      ]);
+
+      expect(bookmarks).toHaveLength(1);
+      expect(invalid.map((row) => row.title)).toEqual([
+        "Bad url",
+        "Bad archived",
+        "Bad type",
+        "No url",
+        null,
+      ]);
+      for (const row of invalid) expect(row.reason).toMatch(/^invalid row/);
+    });
+
+    test("fills defaults for missing optional fields", () => {
+      const { bookmarks, invalid } = parseRows([
+        { url: null, type: "note", status: "ready", content_md: "just a note" },
+      ]);
+
+      expect(invalid).toEqual([]);
+      expect(bookmarks[0]).toMatchObject({
+        title: null,
+        archived: false,
+        is_public: false,
+        content_edited: false,
+        pdf_parsed: false,
+        view_mode: null,
+        progress: 0,
+        tags: [],
+      });
+    });
+  });
 });
 
 describe("partitionForImport", () => {

@@ -182,6 +182,42 @@ describe("useDataTransferStore", () => {
       });
     });
 
+    test("imports the well-formed rows of a mixed file and reports the malformed ones", async () => {
+      const good = {
+        url: "https://new.example/y",
+        type: "article",
+        status: "ready",
+        title: "Good",
+        content_md: "body",
+        created_at: "2026-01-01T00:00:00Z",
+        id: "stale-id-from-another-db",
+      };
+      const noTags = { url: null, type: "note", status: "ready", title: "Note", content_md: "n" };
+      const malformed = { url: 7, type: "article", status: "ready", title: "Broken" };
+
+      const existingSelect = vi.fn().mockResolvedValue({ data: [], error: null });
+      const insertSelect = vi
+        .fn()
+        .mockResolvedValue({ data: [{ id: "new-1" }, { id: "new-2" }], error: null });
+      const insert = vi.fn((_rows: unknown[]) => ({ select: insertSelect }));
+      from.mockImplementation((table: string) => {
+        if (table === "bookmarks") return { select: () => existingSelect(), insert };
+        throw new Error(`unexpected table ${table}`);
+      });
+
+      const store = useDataTransferStore();
+      const result = await store.importBookmarks(validPayload([good, noTags, malformed]));
+
+      expect(result.error).toBeNull();
+      expect(result.imported).toBe(2);
+      expect(result.skipped).toEqual([
+        { url: null, title: "Broken", reason: expect.stringMatching(/^invalid row/) },
+      ]);
+      const inserted = insert.mock.calls[0][0] as Record<string, unknown>[];
+      expect(inserted).toHaveLength(2);
+      expect(inserted[0]).not.toHaveProperty("id");
+    });
+
     test("reports an insert failure as a skipped row instead of throwing", async () => {
       const bookmark = {
         url: "https://new.example/y",

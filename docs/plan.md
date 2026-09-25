@@ -117,6 +117,8 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.4 Import rows are cast, not validated
 
+**Status:** done (app 0.0.4).
+
 - **Where:** `app/src/utils/dataTransfer.ts:106-114`; `app/src/stores/dataTransfer.ts:61,81`.
 - **Problem:** only `version` and `Array.isArray(bookmarks)` are checked. A row
   without `tags` throws *after* the bulk insert committed (tags lost, Import

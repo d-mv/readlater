@@ -6,6 +6,7 @@ import {
   parseExportPayload,
   partitionForImport,
   type ExportPayload,
+  type ParsedImport,
   type SkippedRow,
 } from "../utils/dataTransfer";
 
@@ -33,7 +34,7 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
   }
 
   async function importBookmarks(jsonText: string): Promise<ImportResult> {
-    let payload: ExportPayload;
+    let payload: ParsedImport;
     try {
       payload = parseExportPayload(jsonText);
     } catch (err) {
@@ -53,7 +54,11 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
         .filter((value: string | null): value is string => value !== null),
     );
 
-    const { toImport, skipped } = partitionForImport(payload.bookmarks, existingNormalizedUrls);
+    const { toImport, skipped: duplicates } = partitionForImport(
+      payload.bookmarks,
+      existingNormalizedUrls,
+    );
+    const skipped = [...payload.invalid, ...duplicates];
     if (toImport.length === 0) return { imported: 0, skipped, error: null };
 
     // 1. One bulk insert. `.select("id")` returns the new ids in insertion

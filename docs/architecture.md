@@ -485,7 +485,9 @@ Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
   currently open Google Translate on the source page instead (see
   [`plan.md`](plan.md) §3.1).
 - **Settings** (`SettingsView.vue`, `/settings`) — JSON export/import of the
-  library (`utils/dataTransfer.ts`, `stores/dataTransfer.ts`). Import dedupes
+  library (`utils/dataTransfer.ts`, `stores/dataTransfer.ts`). Import rebuilds
+  each row from the export's field list (unknown keys dropped, defaults for
+  missing optional fields, malformed rows reported as skipped), dedupes
   against existing normalized URLs and is batched: one existing-URL select,
   one bulk bookmark insert, one bulk tag upsert, one bulk `bookmark_tags`
   upsert.
