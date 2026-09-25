@@ -35,3 +35,10 @@ describe("Dialog", () => {
     ).toBe("share");
   });
 });
+
+describe("Dialog labelling", () => {
+  test("ariaLabel names the dialog for assistive tech", () => {
+    const dialog = mount(Dialog, { props: { ariaLabel: "Share bookmark" } }).get("dialog");
+    expect(dialog.attributes("aria-label")).toBe("Share bookmark");
+  });
+});

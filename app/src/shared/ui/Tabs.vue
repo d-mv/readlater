@@ -36,7 +36,7 @@ const optionClasses: Record<TabsVariant, { base: string; active: string }> = {
     active: "font-medium text-ink border-b-accent",
   },
   segmented: {
-    base: "flex-1 h-28 border-0 rounded-sm bg-transparent text-sm text-ink-muted cursor-pointer",
+    base: "flex-1 h-28 border-0 rounded-sm bg-transparent text-sm leading-[normal] text-ink-muted cursor-pointer",
     active: "bg-accent text-accent-ink font-medium",
   },
 };

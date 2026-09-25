@@ -2,6 +2,9 @@
 import { computed, ref } from "vue";
 import { IconCopy, IconCopyCheck, IconShare2, IconX } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
+import Button from "../../shared/ui/Button.vue";
+import Dialog from "../../shared/ui/Dialog.vue";
+import IconButton from "../../shared/ui/IconButton.vue";
 
 const props = defineProps<{
   bookmark: Bookmark;
@@ -56,146 +59,43 @@ function nativeShare() {
 </script>
 
 <template>
-  <div class="overlay" @click.self="emit('close')">
-    <div class="dialog" role="dialog" aria-modal="true" aria-label="Share bookmark">
-      <div class="dialog-header">
-        <h2 class="dialog-title">Share</h2>
-        <button
-          data-testid="close-btn"
-          class="icon-btn close-btn"
-          type="button"
-          @click="emit('close')"
-        >
-          <IconX :size="18" />
-        </button>
-      </div>
-
-      <label class="toggle-row">
-        <span>Public link</span>
-        <input
-          data-testid="toggle-input"
-          type="checkbox"
-          class="toggle-input"
-          :checked="bookmark.is_public"
-          @change="onToggle"
-        />
-      </label>
-
-      <template v-if="bookmark.is_public">
-        <div class="link-row">
-          <input
-            data-testid="link-field"
-            class="link-field"
-            type="text"
-            readonly
-            :value="shareUrl"
-            @focus="($event.target as HTMLInputElement).select()"
-          />
-          <button data-testid="copy-btn" class="icon-btn copy-btn" type="button" @click="copyLink">
-            <IconCopyCheck v-if="copied" :size="18" />
-            <IconCopy v-else :size="18" />
-          </button>
-        </div>
-        <button
-          v-if="canNativeShare"
-          class="btn btn-primary share-native-btn"
-          type="button"
-          @click="nativeShare"
-        >
-          <IconShare2 :size="16" />
-          Share…
-        </button>
-      </template>
+  <Dialog placement="sheet" aria-label="Share bookmark" @close="emit('close')">
+    <div class="flex items-center justify-between">
+      <h2 class="m-0 text-md font-medium text-ink">Share</h2>
+      <IconButton title="Close" test-id="close-btn" @click="emit('close')">
+        <IconX :size="18" />
+      </IconButton>
     </div>
-  </div>
+
+    <label class="flex items-center justify-between text-base text-ink">
+      <span>Public link</span>
+      <input
+        data-testid="toggle-input"
+        type="checkbox"
+        :checked="bookmark.is_public"
+        @change="onToggle"
+      />
+    </label>
+
+    <template v-if="bookmark.is_public">
+      <div class="flex items-center gap-8">
+        <input
+          data-testid="link-field"
+          class="min-w-0 flex-1 rounded-md border-[0.5px] border-line bg-transparent px-10 py-8 font-mono text-xs leading-[normal] text-ink"
+          type="text"
+          readonly
+          :value="shareUrl"
+          @focus="($event.target as HTMLInputElement).select()"
+        />
+        <IconButton title="Copy link" test-id="copy-btn" @click="copyLink">
+          <IconCopyCheck v-if="copied" :size="18" />
+          <IconCopy v-else :size="18" />
+        </IconButton>
+      </div>
+      <Button v-if="canNativeShare" class="gap-8" @click="nativeShare">
+        <IconShare2 :size="16" />
+        Share…
+      </Button>
+    </template>
+  </Dialog>
 </template>
-
-<style scoped>
-.overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.4);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  z-index: 100;
-}
-
-.dialog {
-  width: 100%;
-  max-width: 480px;
-  background: var(--rl-surface);
-  border-radius: var(--rl-radius) var(--rl-radius) 0 0;
-  padding: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.dialog-title {
-  font-size: 16px;
-  font-weight: 500;
-  margin: 0;
-  color: var(--rl-text-primary);
-}
-
-.icon-btn {
-  display: inline-flex;
-  border: none;
-  background: transparent;
-  color: var(--rl-text-secondary);
-  cursor: pointer;
-  padding: 0;
-}
-
-.toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 14px;
-  color: var(--rl-text-primary);
-}
-
-.link-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-.link-field {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--rl-font-mono);
-  font-size: 12px;
-  padding: 8px 10px;
-  border-radius: var(--rl-radius);
-  border: 0.5px solid var(--rl-border);
-  background: transparent;
-  color: var(--rl-text-primary);
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  height: 34px;
-  padding: 0 14px;
-  border-radius: var(--rl-radius);
-  font-size: 13px;
-  cursor: pointer;
-  border: none;
-}
-
-.btn-primary {
-  background: var(--rl-accent);
-  color: var(--rl-on-accent);
-  font-weight: 500;
-}
-</style>

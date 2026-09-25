@@ -30,7 +30,7 @@ const props = withDefaults(defineProps<ButtonProps>(), {
 const emit = defineEmits<ButtonEmits>();
 
 const base =
-  "inline-flex items-center justify-center gap-6 rounded-md px-14 text-sm cursor-pointer border-0 disabled:opacity-60 disabled:cursor-default";
+  "inline-flex items-center justify-center gap-6 rounded-md px-14 text-sm leading-[normal] cursor-pointer border-0 disabled:opacity-60 disabled:cursor-default";
 
 const variantClasses: Record<ButtonVariant, string> = {
   primary: "bg-accent text-accent-ink font-medium",

@@ -13,6 +13,10 @@ import {
 } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
 import FontSizeControl from "./FontSizeControl.vue";
+import { cn } from "../../shared/clsx";
+
+const ITEM =
+  "flex items-center gap-10 rounded-sm border-0 bg-transparent px-10 py-8 text-left font-sans text-sm text-ink no-underline cursor-pointer hover:bg-canvas";
 
 const props = defineProps<{
   bookmark: Bookmark;
@@ -109,10 +113,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div ref="menuRef" class="reader-menu">
+  <div ref="menuRef" class="relative">
     <button
       data-testid="menu-trigger"
-      class="icon-btn menu-trigger"
+      class="inline-flex cursor-pointer border-0 bg-transparent p-0 text-ink-muted"
       type="button"
       aria-haspopup="true"
       :aria-expanded="open"
@@ -121,15 +125,20 @@ onUnmounted(() => {
     >
       <IconDotsVertical :size="20" />
     </button>
-    <div data-testid="menu-panel" v-if="open" class="menu-panel" role="menu">
-      <div class="menu-row font-size-row">
-        <span class="menu-label">Font size</span>
+    <div
+      v-if="open"
+      data-testid="menu-panel"
+      class="absolute top-[calc(100%+8px)] right-0 z-50 flex min-w-200 flex-col rounded-md border-[0.5px] border-line bg-raised p-6 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+      role="menu"
+    >
+      <div class="flex items-center justify-between px-10 py-8">
+        <span class="font-sans text-sm text-ink-muted">Font size</span>
         <FontSizeControl />
       </div>
       <a
         data-testid="open-original"
         v-if="bookmark.url"
-        class="menu-item open-original"
+        :class="ITEM"
         :href="bookmark.url"
         target="_blank"
         rel="noopener"
@@ -142,7 +151,7 @@ onUnmounted(() => {
       <button
         data-testid="open-original"
         v-else-if="canOpenOriginalPdf"
-        class="menu-item open-original"
+        :class="ITEM"
         type="button"
         role="menuitem"
         @click="select(() => emit('openOriginalPdf'))"
@@ -153,7 +162,7 @@ onUnmounted(() => {
       <button
         data-testid="translate-item"
         v-if="canTranslateInline"
-        class="menu-item translate-item"
+        :class="ITEM"
         type="button"
         role="menuitem"
         @click="select(() => emit('translate'))"
@@ -164,7 +173,7 @@ onUnmounted(() => {
       <a
         data-testid="translate-page-item"
         v-if="translatePageUrl"
-        class="menu-item translate-page-item"
+        :class="ITEM"
         :href="translatePageUrl"
         target="_blank"
         rel="noopener"
@@ -176,7 +185,7 @@ onUnmounted(() => {
       </a>
       <button
         data-testid="edit-item"
-        class="menu-item edit-item"
+        :class="ITEM"
         type="button"
         role="menuitem"
         @click="select(() => emit('edit'))"
@@ -187,7 +196,7 @@ onUnmounted(() => {
       <button
         data-testid="mark-read"
         v-if="canMarkRead"
-        class="menu-item mark-read"
+        :class="ITEM"
         type="button"
         role="menuitem"
         @click="select(() => emit('markRead'))"
@@ -198,7 +207,7 @@ onUnmounted(() => {
       <button
         data-testid="mark-unread"
         v-if="canMarkUnread"
-        class="menu-item mark-unread"
+        :class="ITEM"
         type="button"
         role="menuitem"
         @click="select(() => emit('markUnread'))"
@@ -208,8 +217,7 @@ onUnmounted(() => {
       </button>
       <button
         data-testid="share-item"
-        class="menu-item share-item"
-        :class="{ 'share-item-active': bookmark.is_public }"
+        :class="cn(ITEM, bookmark.is_public && 'text-accent')"
         :data-public="bookmark.is_public || undefined"
         type="button"
         role="menuitem"
@@ -221,7 +229,7 @@ onUnmounted(() => {
       <button
         data-testid="trash-pdf-item"
         v-if="canTrashOriginalPdf"
-        class="menu-item trash-pdf-item menu-item-danger"
+        :class="cn(ITEM, 'text-danger')"
         type="button"
         role="menuitem"
         @click="onTrashOriginalPdf"
@@ -231,7 +239,7 @@ onUnmounted(() => {
       </button>
       <button
         data-testid="archive-item"
-        class="menu-item archive-item"
+        :class="ITEM"
         type="button"
         role="menuitem"
         @click="select(() => emit('archive'))"
@@ -241,7 +249,7 @@ onUnmounted(() => {
       </button>
       <button
         data-testid="delete-item"
-        class="menu-item delete-item menu-item-danger"
+        :class="cn(ITEM, 'text-danger')"
         type="button"
         role="menuitem"
         @click="onDelete"
@@ -252,74 +260,3 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.reader-menu {
-  position: relative;
-}
-
-.icon-btn {
-  display: inline-flex;
-  border: none;
-  background: transparent;
-  color: var(--rl-text-secondary);
-  cursor: pointer;
-  padding: 0;
-}
-
-.menu-panel {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  min-width: 200px;
-  padding: 6px;
-  background: var(--rl-surface);
-  border: 0.5px solid var(--rl-border);
-  border-radius: var(--rl-radius);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
-}
-
-.menu-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 10px;
-}
-
-.menu-label {
-  font-family: var(--rl-font-ui);
-  font-size: 13px;
-  color: var(--rl-text-secondary);
-}
-
-.menu-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border: none;
-  background: transparent;
-  border-radius: calc(var(--rl-radius) - 2px);
-  padding: 8px 10px;
-  font-family: var(--rl-font-ui);
-  font-size: 13px;
-  color: var(--rl-text-primary);
-  text-decoration: none;
-  cursor: pointer;
-  text-align: left;
-}
-
-.menu-item:hover {
-  background: var(--rl-bg);
-}
-
-.share-item-active {
-  color: var(--rl-accent);
-}
-
-.menu-item-danger {
-  color: var(--rl-danger);
-}
-</style>

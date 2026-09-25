@@ -6,6 +6,7 @@ export type DialogPlacement = "center" | "sheet";
 export interface DialogProps {
   // center: a card in the middle of the screen; sheet: anchored to the bottom.
   placement?: DialogPlacement;
+  ariaLabel?: string;
   testId?: string;
   class?: string;
 }
@@ -19,6 +20,7 @@ defineOptions({ inheritAttrs: false });
 
 const props = withDefaults(defineProps<DialogProps>(), {
   placement: "center",
+  ariaLabel: undefined,
   testId: undefined,
   class: undefined,
 });
@@ -43,6 +45,7 @@ const panelClasses: Record<DialogPlacement, string> = {
   >
     <dialog
       open
+      :aria-label="props.ariaLabel"
       :data-testid="props.testId"
       :class="cn('border-0 bg-raised text-ink', panelClasses[props.placement], props.class)"
     >

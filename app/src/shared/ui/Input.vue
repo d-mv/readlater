@@ -40,7 +40,7 @@ const props = withDefaults(defineProps<InputProps>(), {
 const emit = defineEmits<InputEmits>();
 
 const base =
-  "w-full h-40 rounded-md border-[0.5px] border-line bg-canvas px-12 py-0 text-base text-ink box-border";
+  "w-full h-40 rounded-md border-[0.5px] border-line bg-canvas px-12 py-0 text-base leading-[normal] text-ink box-border";
 
 function onInput(event: Event) {
   emit("update:modelValue", (event.target as HTMLInputElement | HTMLTextAreaElement).value);

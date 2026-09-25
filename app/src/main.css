@@ -105,33 +105,37 @@
   --rl-font-mono: var(--font-mono);
 }
 
-* {
-  box-sizing: border-box;
-}
+/* Base element rules live in the base layer: unlayered rules would beat
+   every utility (e.g. a font-family here overriding font-mono). */
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
 
-html {
-  font-size: 62.5%;
-}
+  html {
+    font-size: 62.5%;
+  }
 
-html,
-body,
-#app {
-  height: 100%;
-}
+  html,
+  body,
+  #app {
+    height: 100%;
+  }
 
-body {
-  margin: 0;
-  background: var(--color-canvas);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  /* Body copy defaults back to 16px under the 62.5% root. */
-  font-size: 1.6rem;
-  -webkit-font-smoothing: antialiased;
-}
+  body {
+    margin: 0;
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    /* Body copy defaults back to 16px under the 62.5% root. */
+    font-size: 1.6rem;
+    -webkit-font-smoothing: antialiased;
+  }
 
-button,
-input {
-  font-family: inherit;
+  button,
+  input {
+    font-family: inherit;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

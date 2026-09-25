@@ -434,6 +434,12 @@ more than it saves. Check that Tailwind's preflight doesn't break
   only; its typed-contract and no-fallthrough rules still apply.
 - Tailwind's default `--text-*` scale is reset (`--text-*: initial`), so
   text utilities change only the font size, not the line-height.
+- Base element rules in `main.css` belong in `@layer base`. Unlayered rules
+  beat every utility (an unlayered `button, input { font-family: inherit }`
+  silently overrode `font-mono`).
+- Form controls need an explicit `leading-[normal]`, not `leading-normal`,
+  which is 1.5. The reset text scale lets line-height inherit, but inputs and
+  buttons had the UA's `line-height: normal`.
 - Don't put `color-mix(…var(--color-*)…)` in arbitrary values. Tailwind's
   CSS compiler folds it into a static light-theme colour. Derived colours
   get their own themed token instead (e.g. `--color-drop-target`).
