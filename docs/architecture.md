@@ -577,7 +577,10 @@ DB):
   blob}[], cachedAt }`. Every image referenced in the markdown (plus the
   thumbnail) is fetched and stored as a blob — mostly hot-linked source
   images, so CORS failures are skipped silently — and swapped to `blob:` URLs
-  at render time when offline. An already-cached id is not re-cached.
+  at render time when offline. An already-cached id is not re-cached. The
+  `offlineCache` store tracks each id as `saving` or `saved`: a second save
+  reuses the one in flight, and a remove (archive, delete, or untoggle)
+  cancels a pending save, or deletes the row if the write already landed.
 - `bookmarksList` store — keyed by bookmark id → lightweight metadata
   (everything but `content_md`), replaced after every successful load/page
   of the *unfiltered* list and on Realtime events while showing it — never

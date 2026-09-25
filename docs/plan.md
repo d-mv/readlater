@@ -146,6 +146,8 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.6 Offline cache has no in-flight state
 
+**Status:** done (app 0.0.9).
+
 - **Where:** `app/src/stores/offlineCache.ts:18-69`; `bookmarks.ts:546-552`.
 - **Problem:** archive right after open → delete runs before the pending put,
   offline copy resurrected. Double-tap "Save offline" downloads every image

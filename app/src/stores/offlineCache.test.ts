@@ -135,4 +135,87 @@ describe("useOfflineCacheStore", () => {
     expect(deleteArticle).toHaveBeenCalledWith("1");
     expect(store.isCached("1")).toBe(false);
   });
+
+  describe("saves in flight", () => {
+    /** fetch() that holds every image download until release() is called. */
+    function heldFetch() {
+      let release!: () => void;
+      const gate = new Promise<void>((r) => (release = r));
+      const fetchMock = vi.fn(async () => {
+        await gate;
+        return { blob: () => Promise.resolve(new Blob(["x"])) };
+      });
+      vi.stubGlobal("fetch", fetchMock);
+      return { fetchMock, release };
+    }
+
+    test("removing an article while it is being saved leaves no offline copy", async () => {
+      const { release } = heldFetch();
+      const store = useOfflineCacheStore();
+
+      const saving = store.cacheBookmark(makeBookmark());
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+      await store.removeCachedBookmark("1");
+      release();
+      await saving;
+
+      expect(putArticle).not.toHaveBeenCalled();
+      expect(store.isCached("1")).toBe(false);
+    });
+
+    test("a remove that lands while the article is being written deletes it afterwards", async () => {
+      let finishPut!: () => void;
+      putArticle.mockReturnValue(new Promise<void>((r) => (finishPut = r)));
+      const store = useOfflineCacheStore();
+
+      const saving = store.cacheBookmark(makeBookmark());
+      await vi.waitFor(() => expect(putArticle).toHaveBeenCalled());
+      await store.removeCachedBookmark("1");
+      deleteArticle.mockClear();
+      finishPut();
+      await saving;
+
+      expect(deleteArticle).toHaveBeenCalledWith("1");
+      expect(store.isCached("1")).toBe(false);
+    });
+
+    test("a second save of the same article reuses the one in flight", async () => {
+      const { fetchMock, release } = heldFetch();
+      const store = useOfflineCacheStore();
+
+      const first = store.cacheBookmark(makeBookmark());
+      const second = store.cacheBookmark(makeBookmark());
+      release();
+      await Promise.all([first, second]);
+
+      // Two images (inline + thumbnail), downloaded once.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(putArticle).toHaveBeenCalledTimes(1);
+      expect(store.isCached("1")).toBe(true);
+    });
+
+    test("init while a save is in flight doesn't lose the article once it finishes", async () => {
+      const { release } = heldFetch();
+      listCachedArticleIds.mockResolvedValue([]);
+      const store = useOfflineCacheStore();
+
+      const saving = store.cacheBookmark(makeBookmark());
+      await store.init();
+      release();
+      await saving;
+
+      expect(store.isCached("1")).toBe(true);
+    });
+
+    test("a failed write clears the saving state so the article can be saved again", async () => {
+      putArticle.mockRejectedValueOnce(new Error("QuotaExceededError"));
+      const store = useOfflineCacheStore();
+
+      await expect(store.cacheBookmark(makeBookmark())).rejects.toThrow("QuotaExceededError");
+      expect(store.isCached("1")).toBe(false);
+
+      await store.cacheBookmark(makeBookmark());
+      expect(store.isCached("1")).toBe(true);
+    });
+  });
 });
