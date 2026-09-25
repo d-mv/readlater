@@ -302,13 +302,14 @@ describe("ArticleContent", () => {
       expect(editor.props("noEcharts")).toBe(true);
     });
 
-    test("binds the editor's theme to the app's theme store", async () => {
-      document.documentElement.dataset.theme = "dark";
+    test("binds the editor's theme to the app's resolved theme", async () => {
+      localStorage.setItem("theme", "dark");
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
       });
       await flushPromises();
       expect(wrapper.findComponent(MdEditor).props("theme")).toBe("dark");
+      localStorage.removeItem("theme");
     });
 
     test("starts single-pane (no split preview) on a narrow viewport, and includes a preview toggle", async () => {

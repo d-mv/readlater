@@ -577,10 +577,13 @@ keeps the light palette's character instead of reading as generic
 OLED-dark. The accent lightens from the 400 to the 200 stop of the same
 coral family in dark mode — the saturated version would glare on dark.
 
-**Theme switching** (`stores/theme.ts`) — defaults to system preference on
-first load, then remembers an explicit override in `localStorage`; applied
-by setting `document.documentElement.dataset.theme` before the Vue bundle
-mounts, so there's no flash-of-wrong-theme.
+**Theme switching** (`stores/theme.ts`) — a `light` / `dark` / `system`
+preference (stored under `localStorage.theme`; nothing stored means `system`),
+resolved to a concrete `theme` that is written to
+`document.documentElement.dataset.theme`. While on `system` it follows OS
+changes live via `matchMedia('(prefers-color-scheme: dark)')`. `ThemeToggle`
+cycles light → dark → system. An inline script in `index.html` applies the
+same resolution before the Vue bundle mounts, so there's no flash-of-wrong-theme.
 
 ### Offline / PWA
 

@@ -357,6 +357,8 @@ writes it at runtime.
 
 ### 7.3 Theme: light / dark / system
 
+**Status:** done (app 0.2.0).
+
 Follow kairos `src/shared/theme.ts`: the stored preference is a tri-state,
 and the applied theme is resolved from it.
 

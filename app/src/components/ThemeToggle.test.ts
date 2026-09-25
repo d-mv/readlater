@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { mount } from "@vue/test-utils";
 import ThemeToggle from "./ThemeToggle.vue";
@@ -7,18 +7,34 @@ describe("ThemeToggle", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     localStorage.clear();
-    document.documentElement.dataset.theme = "light";
+    vi.stubGlobal("matchMedia", () => ({
+      matches: false,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
   });
 
-  test("renders a button labeled for the current theme", () => {
-    const wrapper = mount(ThemeToggle);
-    expect(wrapper.get("button").attributes("aria-label")).toBe("Switch to dark theme");
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  test("toggles the theme when clicked", async () => {
+  test("labels the current preference and the next one", () => {
+    localStorage.setItem("theme", "light");
     const wrapper = mount(ThemeToggle);
-    await wrapper.get("button").trigger("click");
-    expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(wrapper.get("button").attributes("aria-label")).toBe("Switch to light theme");
+    expect(wrapper.get("button").attributes("aria-label")).toBe("Theme: light. Switch to dark");
+  });
+
+  test("each click moves to the next preference: light → dark → system", async () => {
+    localStorage.setItem("theme", "light");
+    const wrapper = mount(ThemeToggle);
+    const button = wrapper.get("button");
+
+    await button.trigger("click");
+    expect(localStorage.getItem("theme")).toBe("dark");
+    expect(button.attributes("aria-label")).toBe("Theme: dark. Switch to system");
+
+    await button.trigger("click");
+    expect(localStorage.getItem("theme")).toBe("system");
+    expect(button.attributes("aria-label")).toBe("Theme: system. Switch to light");
   });
 });

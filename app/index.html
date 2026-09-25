@@ -13,8 +13,15 @@
     <title>Read Later</title>
     <script>
       (function () {
+        // "light"/"dark" are explicit choices; anything else ("system" or
+        // nothing stored) follows the OS — mirrors stores/theme.ts.
         var stored = localStorage.getItem("theme");
-        var theme = stored ?? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+        var theme =
+          stored === "light" || stored === "dark"
+            ? stored
+            : matchMedia("(prefers-color-scheme: dark)").matches
+              ? "dark"
+              : "light";
         document.documentElement.dataset.theme = theme;
       })();
     </script>

@@ -1,6 +1,26 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { nextTick } from "vue";
 import { useThemeStore } from "./theme";
+
+/** A controllable prefers-color-scheme media query. */
+function mockSystemTheme(dark: boolean) {
+  const listeners = new Set<(event: { matches: boolean }) => void>();
+  const query = {
+    matches: dark,
+    addEventListener: (_type: string, fn: (event: { matches: boolean }) => void) =>
+      listeners.add(fn),
+    removeEventListener: (_type: string, fn: (event: { matches: boolean }) => void) =>
+      listeners.delete(fn),
+  };
+  vi.stubGlobal("matchMedia", () => query);
+  return {
+    set(next: boolean) {
+      query.matches = next;
+      for (const fn of listeners) fn({ matches: next });
+    },
+  };
+}
 
 describe("useThemeStore", () => {
   beforeEach(() => {
@@ -9,32 +29,85 @@ describe("useThemeStore", () => {
     document.documentElement.dataset.theme = "";
   });
 
-  test("initializes from the theme already set on <html> by the anti-FOUC inline script", () => {
-    document.documentElement.dataset.theme = "dark";
-    const store = useThemeStore();
-    expect(store.theme).toBe("dark");
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  test("falls back to light when nothing is set on <html>", () => {
+  test("with nothing stored, follows the system theme", async () => {
+    mockSystemTheme(true);
     const store = useThemeStore();
+    await nextTick();
+
+    expect(store.preference).toBe("system");
+    expect(store.theme).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+  });
+
+  test("an explicit stored choice wins over the system theme", () => {
+    mockSystemTheme(true);
+    localStorage.setItem("theme", "light");
+    const store = useThemeStore();
+
+    expect(store.preference).toBe("light");
     expect(store.theme).toBe("light");
   });
 
-  test("toggle flips the theme, updates <html> dataset, and persists to localStorage", () => {
-    document.documentElement.dataset.theme = "light";
+  test("while on system, an OS theme change is applied immediately", async () => {
+    const system = mockSystemTheme(false);
     const store = useThemeStore();
 
-    store.toggle();
+    system.set(true);
+    await nextTick();
 
     expect(store.theme).toBe("dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
-    expect(localStorage.getItem("theme")).toBe("dark");
   });
 
-  test("toggling twice returns to the original theme", () => {
+  test("after an explicit choice, OS theme changes are ignored", async () => {
+    const system = mockSystemTheme(false);
     const store = useThemeStore();
-    store.toggle();
-    store.toggle();
+    store.setPreference("light");
+
+    system.set(true);
+    await nextTick();
+
+    expect(store.theme).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
+  test("setPreference persists the choice and applies it to <html>", async () => {
+    mockSystemTheme(false);
+    const store = useThemeStore();
+
+    store.setPreference("dark");
+    await nextTick();
+
+    expect(localStorage.getItem("theme")).toBe("dark");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+
+    store.setPreference("system");
+    await nextTick();
+
+    expect(localStorage.getItem("theme")).toBe("system");
+    expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
+  test("cycle goes light → dark → system → light", () => {
+    mockSystemTheme(false);
+    localStorage.setItem("theme", "light");
+    const store = useThemeStore();
+
+    store.cycle();
+    expect(store.preference).toBe("dark");
+    store.cycle();
+    expect(store.preference).toBe("system");
+    store.cycle();
+    expect(store.preference).toBe("light");
+  });
+
+  test("works without matchMedia (treats the system theme as light)", () => {
+    vi.stubGlobal("matchMedia", undefined);
+    const store = useThemeStore();
     expect(store.theme).toBe("light");
   });
 });

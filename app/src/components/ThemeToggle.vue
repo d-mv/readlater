@@ -1,18 +1,24 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { IconMoon, IconSun } from "@tabler/icons-vue";
+import { IconDeviceDesktop, IconMoon, IconSun } from "@tabler/icons-vue";
 import { useThemeStore } from "../stores/theme";
 
 const store = useThemeStore();
 
-const isDark = computed(() => store.theme === "dark");
-const label = computed(() => `Switch to ${isDark.value ? "light" : "dark"} theme`);
+const label = computed(() => `Theme: ${store.preference}. Switch to ${store.next}`);
 </script>
 
 <template>
-  <button class="icon-btn theme-toggle" type="button" :aria-label="label" @click="store.toggle()">
-    <IconMoon v-if="!isDark" :size="18" />
-    <IconSun v-else :size="18" />
+  <button
+    class="icon-btn theme-toggle"
+    type="button"
+    :aria-label="label"
+    :title="label"
+    @click="store.cycle()"
+  >
+    <IconSun v-if="store.preference === 'light'" :size="18" />
+    <IconMoon v-else-if="store.preference === 'dark'" :size="18" />
+    <IconDeviceDesktop v-else :size="18" />
   </button>
 </template>
 
