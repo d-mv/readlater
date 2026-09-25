@@ -250,6 +250,63 @@ describe("AddBookmarkDialog", () => {
     expect(wrapper.find("dialog").exists()).toBe(false);
   });
 
+  describe("pasted HTML only counts while the text is exactly what was pasted", () => {
+    const richPaste = {
+      clipboardData: {
+        getData: (type: string) => (type === "text/html" ? "<b>old</b> quote" : "old quote"),
+      },
+    };
+
+    async function openSnippetMode() {
+      const store = useBookmarksStore();
+      store.addNote = vi.fn().mockResolvedValue({ error: null });
+      store.addSnippet = vi.fn().mockResolvedValue({ error: null });
+      const wrapper = mount(AddBookmarkDialog);
+      await wrapper.get("button.add-btn").trigger("click");
+      await wrapper.get("button.mode-snippet").trigger("click");
+      return { store, wrapper, textarea: wrapper.get("textarea") };
+    }
+
+    test("clearing the pasted text and typing a new note saves the typed note", async () => {
+      const { store, wrapper, textarea } = await openSnippetMode();
+      await textarea.trigger("paste", richPaste);
+      await textarea.setValue("old quote");
+      await textarea.setValue("");
+      await textarea.setValue("a fresh thought");
+      await wrapper.get("form").trigger("submit");
+      await flushPromises();
+
+      expect(store.addSnippet).not.toHaveBeenCalled();
+      expect(store.addNote).toHaveBeenCalledWith("a fresh thought");
+    });
+
+    test("editing the pasted text saves what the textarea shows", async () => {
+      const { store, wrapper, textarea } = await openSnippetMode();
+      await textarea.trigger("paste", richPaste);
+      await textarea.setValue("old quote");
+      await textarea.setValue("old quote, with my comment");
+      await wrapper.get("form").trigger("submit");
+      await flushPromises();
+
+      expect(store.addSnippet).not.toHaveBeenCalled();
+      expect(store.addNote).toHaveBeenCalledWith("old quote, with my comment");
+    });
+
+    test("HTML pasted into existing text is not used for the whole note", async () => {
+      const { store, wrapper, textarea } = await openSnippetMode();
+      await textarea.setValue("my intro: ");
+      const el = textarea.element as HTMLTextAreaElement;
+      el.setSelectionRange(el.value.length, el.value.length);
+      await textarea.trigger("paste", richPaste);
+      await textarea.setValue("my intro: old quote");
+      await wrapper.get("form").trigger("submit");
+      await flushPromises();
+
+      expect(store.addSnippet).not.toHaveBeenCalled();
+      expect(store.addNote).toHaveBeenCalledWith("my intro: old quote");
+    });
+  });
+
   test("typing plain text with no paste falls back to addNote on submit", async () => {
     const store = useBookmarksStore();
     store.addNote = vi.fn().mockResolvedValue({ error: null });

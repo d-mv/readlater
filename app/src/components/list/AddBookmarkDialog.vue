@@ -28,7 +28,11 @@ let epoch = 0;
 const mode = shallowRef<Mode>("url");
 const url = shallowRef("");
 const snippetText = shallowRef("");
-const snippetHtml = shallowRef<string | null>(null);
+// The clipboard's rich-text version of a paste, paired with the exact text
+// the paste left in the textarea. The HTML is only sent while the textarea
+// still holds that text: after any edit (or a paste into existing text,
+// where the HTML covers just a fragment) the plain text is what gets saved.
+const pastedRichText = shallowRef<{ html: string; text: string } | null>(null);
 const selectedFile = shallowRef<File | null>(null);
 const fileInput = shallowRef<HTMLInputElement | null>(null);
 const isDragging = shallowRef(false);
@@ -51,7 +55,7 @@ function open() {
   mode.value = "url";
   url.value = "";
   snippetText.value = "";
-  snippetHtml.value = null;
+  pastedRichText.value = null;
   selectedFile.value = null;
   showError(null);
 }
@@ -69,7 +73,17 @@ function setMode(next: Mode) {
 // A textarea only ever holds plain text — the clipboard's HTML flavor has to
 // be captured here instead, since it's discarded by native paste.
 function onSnippetPaste(event: ClipboardEvent) {
-  snippetHtml.value = event.clipboardData?.getData("text/html") || null;
+  const html = event.clipboardData?.getData("text/html") ?? "";
+  const plain = (event.clipboardData?.getData("text/plain") ?? "").replace(/\r\n?/g, "\n");
+  const el = event.target as HTMLTextAreaElement;
+  const replacesEverything =
+    (el.selectionStart ?? 0) === 0 && (el.selectionEnd ?? el.value.length) === el.value.length;
+  pastedRichText.value = html && replacesEverything ? { html, text: plain } : null;
+}
+
+function currentSnippetHtml(): string | null {
+  const pasted = pastedRichText.value;
+  return pasted && pasted.text === snippetText.value ? pasted.html : null;
 }
 
 function onFileChange(event: Event) {
@@ -129,10 +143,9 @@ function onDrop(event: DragEvent) {
 
 async function onSubmit() {
   if (mode.value === "snippet") {
+    const html = currentSnippetHtml();
     await runSubmit(() =>
-      snippetHtml.value
-        ? store.addSnippet(snippetHtml.value, snippetText.value)
-        : store.addNote(snippetText.value),
+      html ? store.addSnippet(html, snippetText.value) : store.addNote(snippetText.value),
     );
   } else if (mode.value === "file") {
     const file = selectedFile.value;

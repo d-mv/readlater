@@ -192,6 +192,10 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.10 Stale pasted HTML in snippet mode
 
+**Status:** done (app 0.0.7). Decision: the HTML is used only while the
+textarea holds exactly the pasted text. Any edit, a clear, or a paste into
+existing text falls back to plain text.
+
 - **Where:** `AddBookmarkDialog.vue:15-16`, `:47-49`, `:139-141`.
 - **Problem:** `snippetHtml` survives clearing the textarea — a typed note is
   saved as the old pasted snippet.

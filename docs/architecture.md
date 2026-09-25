@@ -250,8 +250,12 @@ const converted = typeof html === "string" ? new TurndownService().turndown(html
 const content = converted || (typeof text === "string" ? text.trim() : "");
 // insert: { url: null, type: "note", status: "ready", content_md: content, title: truncateTitle(content) }
 ```
-If no HTML was captured (plain typing, or a source with no `text/html`), it
-falls back to the existing client-side `store.addNote()` — no round trip.
+The HTML is paired with the exact text the paste left in the textarea and
+only sent while the textarea still holds that text, so edits after pasting
+(or a paste into existing text, where the HTML covers only a fragment) save
+what the user sees. Otherwise — plain typing, an edited paste, or a source
+with no `text/html` — it falls back to the client-side `store.addNote()`, no
+round trip.
 
 **Notes in general** (`type = 'note'`) have `content_md`, `word_count` and
 `reading_time` written directly at insert time and never touch the worker or
