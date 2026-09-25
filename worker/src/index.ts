@@ -37,10 +37,39 @@ export const supabaseCircuitBreaker = new CircuitBreaker({
   },
 });
 
+// Rows the worker can process. A pending row of any other type (the schema
+// also allows note/pdf, which are inserted ready and have nothing to fetch)
+// is failed explicitly rather than handed to a parser.
+const PROCESSABLE_TYPES = ["article", "youtube"] as const;
+
 export interface Bookmark {
   id: string;
   url: string;
-  type: "article" | "youtube";
+  type: (typeof PROCESSABLE_TYPES)[number];
+}
+
+type BookmarkStatus = "pending" | "processing" | "ready" | "failed";
+
+// Compare-and-set on the row's status: the write only applies while the row
+// is still in `from`, so the status itself is the ownership token. A refresh
+// that re-queues a row mid-parse, a second worker during a deploy, or the
+// stale-processing sweep all make a later write here match nothing instead
+// of clobbering the newer state.
+export async function transition(
+  client: SupabaseClient,
+  id: string,
+  from: BookmarkStatus,
+  to: BookmarkStatus,
+  fields: Record<string, unknown> = {},
+): Promise<{ moved: boolean; error: string | null }> {
+  const { data, error } = await client
+    .from("bookmarks")
+    .update({ ...fields, status: to })
+    .eq("id", id)
+    .eq("status", from)
+    .select("id");
+  if (error) return { moved: false, error: error.message };
+  return { moved: (data?.length ?? 0) > 0, error: null };
 }
 
 let isPolling = false;
@@ -118,16 +147,25 @@ export async function processBookmark(
   const thumbFn = runners.uploadThumbnailFn ?? uploadThumbnail;
   const renderFn = runners.renderHtmlFn ?? renderWithBrowser;
 
-  const { error: markProcessingError } = await client
-    .from("bookmarks")
-    .update({ status: "processing", processed_at: new Date().toISOString() })
-    .eq("id", bookmark.id);
+  if (!(PROCESSABLE_TYPES as readonly string[]).includes(bookmark.type)) {
+    await transition(client, bookmark.id, "pending", "failed", {
+      error_message: `Unsupported bookmark type: ${String(bookmark.type)}`,
+      processed_at: new Date().toISOString(),
+    });
+    return;
+  }
 
-  if (markProcessingError) {
-    console.error(
-      `Failed to mark bookmark ${bookmark.id} as processing:`,
-      markProcessingError.message,
-    );
+  const claim = await transition(client, bookmark.id, "pending", "processing", {
+    processed_at: new Date().toISOString(),
+  });
+  if (claim.error) {
+    // Still pending — the next cycle retries it.
+    console.error(`Failed to claim bookmark ${bookmark.id}:`, claim.error);
+    return;
+  }
+  if (!claim.moved) {
+    console.warn(`Bookmark ${bookmark.id} is no longer pending; skipping.`);
+    return;
   }
 
   try {
@@ -142,32 +180,23 @@ export async function processBookmark(
       `Processing timed out after ${BOOKMARK_TIMEOUT_MS / 1000}s`,
     );
 
-    const { error: updateReadyError } = await client
-      .from("bookmarks")
-      .update({
-        ...sanitizeFields(result as unknown as Record<string, unknown>),
-        status: "ready",
-        error_message: null,
-        processed_at: new Date().toISOString(),
-      })
-      .eq("id", bookmark.id);
-
-    if (updateReadyError) {
-      throw new Error(`Database update failed: ${updateReadyError.message}`);
+    const done = await transition(client, bookmark.id, "processing", "ready", {
+      ...sanitizeFields(result as unknown as Record<string, unknown>),
+      error_message: null,
+      processed_at: new Date().toISOString(),
+    });
+    if (done.error) throw new Error(`Database update failed: ${done.error}`);
+    if (!done.moved) {
+      console.warn(`Bookmark ${bookmark.id} changed while processing; dropping the result.`);
     }
   } catch (err) {
     console.error(`Error processing bookmark ${bookmark.id} (${bookmark.url}):`, err);
-    const { error: updateFailedError } = await client
-      .from("bookmarks")
-      .update({
-        status: "failed",
-        error_message: formatErrorMessage(err),
-        processed_at: new Date().toISOString(),
-      })
-      .eq("id", bookmark.id);
-
-    if (updateFailedError) {
-      console.error(`Failed to mark bookmark ${bookmark.id} as failed:`, updateFailedError.message);
+    const failed = await transition(client, bookmark.id, "processing", "failed", {
+      error_message: formatErrorMessage(err),
+      processed_at: new Date().toISOString(),
+    });
+    if (failed.error) {
+      console.error(`Failed to mark bookmark ${bookmark.id} as failed:`, failed.error);
     }
   }
 }

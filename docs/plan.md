@@ -186,6 +186,8 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.9 Worker status transitions are unguarded
 
+**Status:** done (worker 0.0.1). Needs a worker redeploy.
+
 - **Where:** `worker/src/index.ts:121-167`, `:199-212`.
 - **Problem:** claim and finish write by `id` only. Refresh while processing →
   the old parse overwrites the re-queue; a failed claim is logged and parsing

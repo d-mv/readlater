@@ -71,178 +71,188 @@ describe("recoverStaleProcessing", () => {
   });
 });
 
-describe("processBookmark", () => {
-  test("marks bookmark as ready when parsing succeeds", async () => {
-    const updates: Record<string, unknown>[] = [];
+type Update = { payload: Record<string, unknown>; filters: Record<string, unknown> };
 
-    const mockClient = {
-      from: (table: string) => {
-        expect(table).toBe("bookmarks");
-        return {
-          update: (payload: Record<string, unknown>) => {
-            updates.push(payload);
-            return {
-              eq: (_col: string, _val: unknown) => Promise.resolve({ error: null }),
-            };
-          },
+/**
+ * Fake Supabase client for the bookmarks table. Records every update with its
+ * .eq() filters; a guarded update (…).eq("status", x).select("id") "moves" a
+ * row unless `moves` says otherwise, and can be made to fail via `errorFor`.
+ */
+function fakeClient(
+  opts: {
+    pending?: Bookmark[];
+    moves?: (u: Update) => boolean;
+    errorFor?: (u: Update) => string | null;
+  } = {},
+) {
+  const updates: Update[] = [];
+  const client = {
+    from: (_table: string) => ({
+      update: (payload: Record<string, unknown>) => {
+        const update: Update = { payload, filters: {} };
+        updates.push(update);
+        const result = () => {
+          const message = opts.errorFor?.(update) ?? null;
+          if (message) return { data: null, error: { message } };
+          const moved = opts.moves ? opts.moves(update) : true;
+          return { data: moved ? [{ id: update.filters.id }] : [], error: null };
         };
+        const chain = {
+          eq: (col: string, val: unknown) => {
+            update.filters[col] = val;
+            return chain;
+          },
+          or: (_filter: string) => Promise.resolve({ error: null }),
+          select: (_cols: string) => Promise.resolve(result()),
+        };
+        return chain;
       },
-      // deno-lint-ignore no-explicit-any
-    } as any;
-
-    const bookmark: Bookmark = {
-      id: "bm-1",
-      url: "https://example.com/article",
-      type: "article",
-    };
-
-    await processBookmark(bookmark, mockClient, {
-      parseArticleFn: async () => ({
-        title: "Test Title",
-        author: "Author",
-        excerpt: "Excerpt",
-        content_md: "# Test",
-        word_count: 10,
-        reading_time: 1,
+      select: () => ({
+        eq: () => ({
+          limit: () => Promise.resolve({ data: opts.pending ?? [], error: null }),
+        }),
       }),
-    });
+    }),
+  };
+  // deno-lint-ignore no-explicit-any
+  return { client: client as any, updates };
+}
+
+const parsed = async () => ({
+  title: "Test Title",
+  author: "Author",
+  excerpt: "Excerpt",
+  content_md: "# Test",
+  word_count: 10,
+  reading_time: 1,
+});
+
+describe("processBookmark", () => {
+  const article: Bookmark = { id: "bm-1", url: "https://example.com/article", type: "article" };
+
+  test("claims pending → processing, then finishes processing → ready", async () => {
+    const { client, updates } = fakeClient();
+
+    await processBookmark(article, client, { parseArticleFn: parsed });
 
     expect(updates).toHaveLength(2);
-    expect(updates[0]).toMatchObject({ status: "processing" });
-    expect(updates[1]).toMatchObject({
+    expect(updates[0]?.payload).toMatchObject({ status: "processing" });
+    expect(updates[0]?.filters).toEqual({ id: "bm-1", status: "pending" });
+    expect(updates[1]?.payload).toMatchObject({
       status: "ready",
       title: "Test Title",
       content_md: "# Test",
     });
+    expect(updates[1]?.filters).toEqual({ id: "bm-1", status: "processing" });
   });
 
-  test("marks bookmark as failed when parsing throws", async () => {
-    const updates: Record<string, unknown>[] = [];
+  test("marks bookmark as failed (only while still processing) when parsing throws", async () => {
+    const { client, updates } = fakeClient();
 
-    const mockClient = {
-      from: (_table: string) => ({
-        update: (payload: Record<string, unknown>) => {
-          updates.push(payload);
-          return {
-            eq: (_col: string, _val: unknown) => Promise.resolve({ error: null }),
-          };
-        },
-      }),
-      // deno-lint-ignore no-explicit-any
-    } as any;
-
-    const bookmark: Bookmark = {
-      id: "bm-2",
-      url: "https://example.com/fail",
-      type: "article",
-    };
-
-    await processBookmark(bookmark, mockClient, {
+    await processBookmark(article, client, {
       parseArticleFn: async () => {
         throw new Error("HTTP 404 Not Found");
       },
     });
 
     expect(updates).toHaveLength(2);
-    expect(updates[0]).toMatchObject({ status: "processing" });
-    expect(updates[1]).toMatchObject({
+    expect(updates[1]?.payload).toMatchObject({
       status: "failed",
       error_message: "HTTP 404 Not Found",
     });
+    expect(updates[1]?.filters).toEqual({ id: "bm-1", status: "processing" });
   });
 
   test("marks bookmark as failed when ready database update returns an error", async () => {
-    const updates: Record<string, unknown>[] = [];
-
-    const mockClient = {
-      from: (_table: string) => ({
-        update: (payload: Record<string, unknown>) => {
-          updates.push(payload);
-          if (payload.status === "ready") {
-            return {
-              eq: () => Promise.resolve({ error: { message: "violates check constraint" } }),
-            };
-          }
-          return {
-            eq: () => Promise.resolve({ error: null }),
-          };
-        },
-      }),
-      // deno-lint-ignore no-explicit-any
-    } as any;
-
-    const bookmark: Bookmark = {
-      id: "bm-3",
-      url: "https://example.com/constraint-fail",
-      type: "article",
-    };
-
-    await processBookmark(bookmark, mockClient, {
-      parseArticleFn: async () => ({
-        title: "Test Title",
-        author: "Author",
-        excerpt: "Excerpt",
-        content_md: "# Test",
-        word_count: 10,
-        reading_time: 1,
-      }),
+    const { client, updates } = fakeClient({
+      errorFor: (u) => (u.payload.status === "ready" ? "violates check constraint" : null),
     });
+
+    await processBookmark(article, client, { parseArticleFn: parsed });
 
     // 1st: processing, 2nd: ready (which failed), 3rd: failed with DB error message
     expect(updates).toHaveLength(3);
-    expect(updates[0]).toMatchObject({ status: "processing" });
-    expect(updates[1]).toMatchObject({ status: "ready" });
-    expect(updates[2]).toMatchObject({
+    expect(updates[2]?.payload).toMatchObject({
       status: "failed",
       error_message: "Database update failed: violates check constraint",
     });
+  });
+
+  test("skips a bookmark another worker (or a refresh) already took", async () => {
+    let parseCalls = 0;
+    const { client, updates } = fakeClient({ moves: (u) => u.payload.status !== "processing" });
+
+    await processBookmark(article, client, {
+      parseArticleFn: async () => {
+        parseCalls += 1;
+        return parsed();
+      },
+    });
+
+    expect(parseCalls).toBe(0);
+    expect(updates).toHaveLength(1);
+  });
+
+  test("skips parsing when the claim itself fails", async () => {
+    let parseCalls = 0;
+    const { client, updates } = fakeClient({
+      errorFor: (u) => (u.payload.status === "processing" ? "connection reset" : null),
+    });
+
+    await processBookmark(article, client, {
+      parseArticleFn: async () => {
+        parseCalls += 1;
+        return parsed();
+      },
+    });
+
+    expect(parseCalls).toBe(0);
+    expect(updates).toHaveLength(1);
+  });
+
+  test("drops the result when the row was re-queued while processing", async () => {
+    // A refresh reset the row to pending mid-parse: the finish matches no row.
+    const { client, updates } = fakeClient({ moves: (u) => u.payload.status !== "ready" });
+
+    await processBookmark(article, client, { parseArticleFn: parsed });
+
+    expect(updates.map((u) => u.payload.status)).toEqual(["processing", "ready"]);
+  });
+
+  test("fails a pending row of a type the worker can't process instead of parsing it", async () => {
+    let parseCalls = 0;
+    const { client, updates } = fakeClient();
+    const note = { id: "n-1", url: null, type: "note" } as unknown as Bookmark;
+
+    await processBookmark(note, client, {
+      parseArticleFn: async () => {
+        parseCalls += 1;
+        return parsed();
+      },
+    });
+
+    expect(parseCalls).toBe(0);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.payload).toMatchObject({ status: "failed" });
+    expect(updates[0]?.filters).toEqual({ id: "n-1", status: "pending" });
   });
 });
 
 describe("pollOnce", () => {
   test("continues processing other bookmarks if one bookmark fails", async () => {
     const processedIds: string[] = [];
+    const { client } = fakeClient({
+      pending: [
+        { id: "bm-1", url: "https://example.com/1", type: "article" },
+        { id: "bm-2", url: "https://example.com/2", type: "article" },
+      ],
+    });
 
-    const mockClient = {
-      from: (table: string) => {
-        if (table === "bookmarks") {
-          return {
-            update: (_payload: Record<string, unknown>) => ({
-              eq: (_col: string, _val: unknown) => ({
-                or: (_filterStr: string) => Promise.resolve({ error: null }),
-              }),
-            }),
-            select: () => ({
-              eq: () => ({
-                limit: () =>
-                  Promise.resolve({
-                    data: [
-                      { id: "bm-1", url: "https://example.com/1", type: "article" },
-                      { id: "bm-2", url: "https://example.com/2", type: "article" },
-                    ],
-                    error: null,
-                  }),
-              }),
-            }),
-          };
-        }
-        return {};
-      },
-      // deno-lint-ignore no-explicit-any
-    } as any;
-
-    await pollOnce(mockClient, {
+    await pollOnce(client, {
       parseArticleFn: async (url) => {
         processedIds.push(url);
         if (url.includes("1")) throw new Error("Item 1 failed");
-        return {
-          title: "Title 2",
-          author: "Author 2",
-          excerpt: "Excerpt 2",
-          content_md: "Content 2",
-          word_count: 5,
-          reading_time: 1,
-        };
+        return parsed();
       },
     });
 
@@ -250,35 +260,14 @@ describe("pollOnce", () => {
   });
 
   test("returns the number of pending bookmarks it picked up", async () => {
-    const mockClient = {
-      from: () => ({
-        update: () => ({ eq: () => ({ or: () => Promise.resolve({ error: null }) }) }),
-        select: () => ({
-          eq: () => ({
-            limit: () =>
-              Promise.resolve({
-                data: [
-                  { id: "bm-1", url: "https://example.com/1", type: "article" },
-                  { id: "bm-2", url: "https://example.com/2", type: "article" },
-                ],
-                error: null,
-              }),
-          }),
-        }),
-      }),
-      // deno-lint-ignore no-explicit-any
-    } as any;
-
-    const count = await pollOnce(mockClient, {
-      parseArticleFn: async () => ({
-        title: "t",
-        author: "a",
-        excerpt: "e",
-        content_md: "c",
-        word_count: 1,
-        reading_time: 1,
-      }),
+    const { client } = fakeClient({
+      pending: [
+        { id: "bm-1", url: "https://example.com/1", type: "article" },
+        { id: "bm-2", url: "https://example.com/2", type: "article" },
+      ],
     });
+
+    const count = await pollOnce(client, { parseArticleFn: parsed });
 
     expect(count).toBe(2);
   });

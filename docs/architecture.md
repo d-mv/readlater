@@ -368,7 +368,11 @@ avoids holding a websocket open just for this.
 // 15s when there's work → doubles toward a 60s ceiling on empty cycles.
 // Stale-'processing' recovery runs once every 4 cycles, not every one.
 
-// per pending row: status → 'processing', parse, status → 'ready' | 'failed'
+// per pending row: pending → processing, parse, processing → ready | failed.
+// Every status write is compare-and-set (transition(): .eq("status", from)),
+// so a row re-queued by a refresh mid-parse, or taken by a second worker,
+// makes the later write match nothing instead of overwriting it. Pending
+// rows of a type the worker can't parse (note/pdf) are failed explicitly.
 ```
 
 **Article pipeline** (`worker/src/parseArticle.ts`) — fetch → Readability →
