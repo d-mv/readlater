@@ -4,28 +4,35 @@ Personal read-it-later app, single owner, self-hosted. Capture a link (or a
 snippet, or a raw note) via bookmarklet / PWA share-target / in-app dialog,
 parse it into clean markdown on a VPS worker, read it later in a Vue 3 PWA.
 
-This is the current-state reference — kept in sync with the code. For the
-reasoning behind individual decisions (trade-offs considered, alternatives
-rejected), see [Design history](#design-history) at the bottom.
+This is the current-state reference — kept in sync with the code, including
+the reasoning behind decisions where it matters. Open work lives in
+[`plan.md`](plan.md).
 
 ## 1. System overview
 
 ```mermaid
 flowchart TD
-    A[Bookmarklet] -->|POST url + title, CAPTURE_KEY| Cap[Capture edge function]
-    ST[Share target /share-target] -->|GET url/text/title| Cap
-    Dlg["Add dialog (URL mode)"] -->|store.add| Cap
+    BM["Bookmarklet popup (/capture)"] -->|store.add, session| Client[PWA client insert]
+    ST["Share target (/share-target)"] -->|store.add / store.addNote, session| Client
+    Dlg["Add dialog (URL mode)"] -->|store.add, session| Client
+    Short[iOS Shortcut] -->|POST url/text, CAPTURE_KEY| Cap[capture edge function]
     Snip["Add dialog (Snippet mode)"] -->|HTML/text, JWT| Snippet[snippet edge function]
-    Cap -->|url, or text that is a bare http/https URL| Pending[(status=pending)]
-    Cap -->|free-form text| Ready[(status=ready, type=note)]
+    File["Add dialog (File mode)"] -->|base64, JWT| FileFn[file-import / pdf-import edge functions]
+    Client -->|url| Pending[(status=pending)]
+    Client -->|free-form text| Ready[(status=ready, type=note / pdf)]
+    Cap -->|url, or text that is a bare http/https URL| Pending
+    Cap -->|free-form text| Ready
     Snippet -->|Turndown HTML→MD| Ready
+    FileFn -->|MD / docx→MD / PDF text| Ready
     Pending --> Worker[VPS worker — Docker, polls 15s→60s backoff]
     Worker -->|fetch, retry via headless browser if too little extracted| Parse[Readability + Turndown / YouTube oEmbed]
     Worker -->|write markdown, status=ready| DB[(Postgres: bookmarks, tags, bookmark_tags)]
     Ready --> DB
-    Worker -->|upload YouTube thumbnails, random UUID paths| Storage[(Supabase Storage, public-read)]
+    Worker -->|upload YouTube thumbnails, random UUID paths| Storage[(Supabase Storage)]
     PWA[Vue 3 PWA] -->|first-page query + Realtime subscription| DB
-    PWA -->|tag / search / share / mark-read writes| DB
+    PWA -->|tag / search / share / mark-read / edit / progress writes| DB
+    PWA -->|translate, JWT| Translate[translate edge function → DeepL]
+    Translate --> DB
     PWA -->|cache opened articles + images| IDB[(IndexedDB, offline)]
     Public["Public view (/s/:id)"] -->|rpc get_public_bookmark, anon key| DB
     PWA --> Storage
@@ -37,10 +44,12 @@ Independently replaceable pieces:
 | Component | Role | Stack |
 |---|---|---|
 | Bookmarklet | Popup-opener, no logic of its own | `javascript:` URL, built by `bookmarklet/build.ts` |
-| `capture` edge function | Auth + insert/dedupe for url/text captures | Deno (Supabase Edge Functions) |
-| `snippet` edge function | JWT-authed HTML→Markdown insert for pasted snippets | Deno (Supabase Edge Functions) |
-| VPS worker | Poll `pending`, parse, write back | Node/TS + Bun, Docker, Playwright for JS-rendered pages |
-| Vue 3 PWA | Reading list, reader, tags, search, sharing, offline cache | Vue 3, Pinia, vanilla CSS, `vite-plugin-pwa` |
+| `capture` edge function | `CAPTURE_KEY`-authed insert/dedupe for url/text captures from non-browser callers (iOS Shortcut); `POST /capture/:id/refresh` | Deno (Supabase Edge Functions) |
+| `snippet` edge function | JWT-authed HTML→Markdown insert for pasted snippets | Deno |
+| `file-import` / `pdf-import` edge functions | JWT-authed Markdown/Word → note, PDF → stored original + extracted text | Deno (`npm:mammoth`, `npm:unpdf`) |
+| `translate` edge function | JWT-authed DeepL translation, cached on the row | Deno |
+| VPS worker | Poll `pending`, parse, write back | Bun + TypeScript, Docker, Playwright for JS-rendered pages |
+| Vue 3 PWA | Reading list, reader, editing, tags, search, sharing, offline cache, export/import | Vue 3, Pinia, vanilla CSS, `vite-plugin-pwa` |
 
 ## 2. Data model
 
@@ -57,13 +66,18 @@ create table bookmarks (
   author          text,
   excerpt         text,
   content_md      text,
+  translated_content_md text,          -- cached DeepL translation of content_md
+  translated_lang text,
   thumbnail_url   text,
+  youtube_video_id text,               -- youtube only: drives the click-to-play embed
+  content_edited  boolean not null default false, -- hand-edited in the reader; refresh must confirm before overwriting
   word_count      int,
   reading_time    int,
   is_public       boolean not null default false,
   pdf_path        text,                -- pdf only: object path in the bookmark-pdfs bucket
   pdf_parsed      boolean not null default false, -- pdf only: did text extraction produce usable content_md
   view_mode       text check (view_mode in ('markdown', 'original')), -- pdf only: persisted reader toggle
+  progress        double precision default 0, -- reading position, 0..1 of scrollable height
   search_vector   tsvector generated always as (
                     setweight(to_tsvector('english', coalesce(title, '')), 'A') ||
                     setweight(to_tsvector('english', coalesce(content_md, '')), 'B')
@@ -132,9 +146,14 @@ as $$ select id, type, title, author, excerpt, content_md, thumbnail_url,
 grant execute on function get_public_bookmark(uuid) to anon, authenticated;
 
 -- The bookmarks table is in the supabase_realtime publication with an explicit
--- column list (no content_md / translated_content_md / search_vector) and
--- REPLICA IDENTITY FULL, so the PWA gets live row changes over one websocket
--- instead of polling — see the 20260826120000 migration.
+-- column list (no content_md / translated_content_md / search_vector), so the
+-- PWA gets live row changes over one websocket instead of polling.
+-- Replica identity is a covering unique index, not FULL: DELETE events must
+-- carry user_id for Realtime to evaluate RLS, but FULL requires the
+-- publication's column list to cover every column, so every DELETE failed
+-- with 42P10.
+create unique index bookmarks_replica_identity_idx on bookmarks (id, user_id);
+alter table bookmarks replica identity using index bookmarks_replica_identity_idx;
 ```
 
 Notes on the shape:
@@ -170,16 +189,21 @@ Notes on the shape:
   explicit `grant` in addition to RLS policies, or they're invisible to the
   Data API regardless of policy.
 
-Migrations: `20260825000001_initial_schema.sql` (flattened initial schema).
+Migrations: `20260825000001_initial_schema.sql` (flattened initial schema),
+then `20260826120000_realtime_bookmarks_publication.sql`,
+`20260826120001_public_bookmark_projection.sql`,
+`20260827000000_fix_bookmarks_replica_identity.sql`. Flattening the three
+follow-ups into the initial schema is planned — see [`plan.md`](plan.md) §1.1.
 
 ## 3. Capture paths
 
-Six ways in, all funneling into the same `bookmarks` table:
+Seven ways in, all funneling into the same `bookmarks` table:
 
 | Path | Entry point | Auth | Result |
 |---|---|---|---|
 | Bookmarklet | `bookmarklet/source.js` → `/capture` popup route | Existing PWA Supabase session | `store.add()`, same path as the in-app dialog |
-| PWA share-target (Chrome/Android only) | `/share-target` (manifest `share_target`) → `capture` edge fn | `CAPTURE_KEY` bearer | url → `pending`; free text → `note`, `ready` |
+| PWA share-target (Chrome/Android only) | `/share-target` (manifest `share_target`) → `store.add()` / `store.addNote()` | Existing PWA Supabase session | url (or text that is a bare URL) → `pending`; free text → `note`, `ready` |
+| iOS Shortcut | `POST` to the `capture` edge fn | `CAPTURE_KEY` bearer | url → `pending`; free text → `note`, `ready` |
 | Add dialog — URL mode | `AddBookmarkDialog.vue` | Supabase session (client insert) | `pending` |
 | Add dialog — Snippet mode | `AddBookmarkDialog.vue` → `snippet` edge fn | JWT (session) | `note`, `ready` |
 | Add dialog — File mode (.md/.markdown/.docx) | `AddBookmarkDialog.vue` → `file-import` edge fn | JWT (session) | `note`, `ready` |
@@ -209,9 +233,12 @@ visible popup rather than an inline toast.
 **Share-target.** Chrome-on-Android registers the PWA as an OS share target
 (`app/vite.config.ts` → `VitePWA({ manifest: { share_target } })`); WebKit/
 Safari has never implemented it, so iOS has no equivalent — the bookmarklet,
-or a one-tap iOS Shortcut POSTing to `capture` with the same `CAPTURE_KEY`,
+or a one-tap iOS Shortcut POSTing to `capture` with the `CAPTURE_KEY` bearer,
 covers that case instead. `ShareTargetView.vue` reads `url`/`text`/`title`
-from the query string and posts to the `capture` edge function.
+from the query string and saves through the store under the PWA's own
+session: a `url` (or `text` that `isBareUrl()` accepts) goes to `store.add()`,
+anything else to `store.addNote()`. The `capture` edge function is now only
+reached by non-browser callers (the iOS Shortcut).
 
 **Snippet paste.** `AddBookmarkDialog.vue` has a URL/Snippet mode switch.
 Snippet mode is a single textarea; on paste it reads both
@@ -284,14 +311,28 @@ since only the Markdown remains.
 ### Duplicate handling
 
 Applies to `url`-type captures only — notes have no dedup key and always
-insert fresh. `capture`'s insert relies on the `bookmarks_url_normalized_uniq`
+insert fresh. Both insert paths rely on the `bookmarks_url_normalized_uniq`
 index rather than a check-then-insert race: a `23505` violation on insert is
-caught, the existing row is looked up by normalized URL, and the response
-reports `{ status: 'duplicate', existingId, existingTitle, existingSavedAt }`
-for the client to show a "continue anyway" dialog. Continuing calls
-`POST /capture/:id/refresh`, which resets that row to `status=pending` so the
-worker re-fetches — id, tags, and `is_public` are preserved, so an existing
-share link keeps working.
+caught and the existing row is looked up by normalized URL.
+
+- **Client path** (`store.add()` — bookmarklet popup, share target, Add
+  dialog): a cheap local check against already-loaded rows runs first; the
+  unique index is the source of truth for anything not loaded. The result
+  carries `{ duplicate: true, existingId, existingTitle, existingSavedAt }`.
+  `CaptureView`/`ShareTargetView` offer "save again", which calls
+  `store.refresh(id)` — resets the row to `status=pending` so the worker
+  re-fetches; id, tags and `is_public` are preserved, so a share link keeps
+  working. The Add dialog's "Add anyway" instead calls
+  `store.add(url, { force: true })`, which only skips the local check and so
+  still hits the unique index — currently a silent no-op (see
+  [`plan.md`](plan.md) §2.5).
+- **Edge path** (`capture`, iOS Shortcut): responds
+  `{ status: 'duplicate', existingId, existingTitle, existingSavedAt }`;
+  continuing calls `POST /capture/:id/refresh`.
+
+Both refresh paths respect `content_edited`: a hand-edited row needs explicit
+confirmation (`window.confirm` client-side; `409 confirm_required` unless
+`{ force: true }` on the edge) before the worker may overwrite it.
 
 ### Capture-path auth model
 
@@ -299,8 +340,8 @@ Three trust levels, kept distinct on purpose:
 
 | Actor | Mechanism | Why |
 |---|---|---|
-| Bookmarklet / share-target / iOS Shortcut | `capture` edge fn, static `CAPTURE_KEY` bearer | No browser session to lean on for share-target/Shortcut; intentionally weak — personal, single-user, low-value target |
-| Add dialog (URL, Snippet, File modes) | PWA's own Supabase session (JWT) | Browser-facing, already logged in — snippet/file-import/pdf-import inserts all run under the user's own RLS rather than the shared capture key |
+| iOS Shortcut | `capture` edge fn, static `CAPTURE_KEY` bearer | No browser session to lean on; intentionally weak — personal, single-user, low-value target |
+| Bookmarklet popup, share target, Add dialog (all modes), reader actions (edit, translate) | PWA's own Supabase session (JWT) | Browser-facing, already logged in — client inserts and the snippet/file-import/pdf-import/translate functions all run under the user's own RLS rather than the shared capture key |
 | VPS worker | Supabase `service_role` (`SUPABASE_SECRET_KEY`) | Needs unconditional read/write on every row; bypasses RLS by design, never reaches a browser |
 | Public view (`/s/:id`) | Supabase anon key + `get_public_bookmark` RPC | No session at all; scoped to a single exact-id match, not a table policy |
 
@@ -369,7 +410,12 @@ endpoint that doesn't hit the same wall.)
 
 **Retry UI**: the reader's failed-article view has a "Try again" button
 (`ReaderView.vue`) that resets the bookmark to `pending` so the worker
-reprocesses it — same underlying mechanism as the duplicate-refresh path.
+reprocesses it — same `store.refresh()` as the duplicate-refresh path,
+including the `content_edited` confirm step.
+
+**YouTube video id**: `youtubeMeta.ts` derives `youtube_video_id` from the
+URL (`extractVideoId`) alongside the oEmbed metadata; the reader uses it for
+the click-to-play embed.
 
 ## 5. Storage
 
@@ -401,7 +447,8 @@ Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
   download/cached icon for offline pre-caching. The list query
   (`LIST_SELECT` in `stores/bookmarks.ts`) is a named-column projection with
   no `content_md` / `translated_content_md` / `search_vector` — the reader
-  pulls the body via `fetchOne()` (`DETAIL_SELECT = "*"`) on open. Tag
+  pulls the body via `fetchOne()` (`DETAIL_SELECT = "*, tags(id, name, color)"`)
+  on open, and again on the Realtime pending→ready transition. Tag
   filtering and the tag bar are derived client-side from the loaded rows
   (match-all); no query on toggle.
 - **Live updates** — `store.subscribeToChanges()` opens one Realtime
@@ -418,6 +465,32 @@ Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
   `ShareDialog.vue`. Tagging is
   `TagInput.vue`, create-on-type against the `tags` table via upsert.
   `ReaderProgressBar.vue` tracks scroll position.
+- **Reading progress** — scroll position is persisted to `bookmarks.progress`
+  (0..1) and restored on open. Writes are coalesced: 2s debounce, only when
+  the position moved ≥2%, flushed on `pagehide`/unmount.
+- **Font size** (`FontSizeControl.vue`, `stores/fontSize.ts`) — 14–24px in
+  2px steps, persisted in `localStorage`, applied via `--rl-article-font-size`.
+- **YouTube** — `ArticleContent.vue` shows the thumbnail with a play
+  affordance; tapping mounts a `youtube-nocookie.com/embed/<youtube_video_id>`
+  iframe (not in the DOM before the tap). Online-only by nature.
+- **Editing** — "Edit" in `ReaderMenu.vue` swaps the rendered view for
+  `md-editor-v3` (lazy-loaded via `defineAsyncComponent` to keep it out of the
+  base bundle), plus a plain title input. Toolbar trimmed to basic formatting;
+  preview sanitized through the app's `DOMPurify` (the library does not escape
+  raw HTML by default); theme bound to the theme store; single-pane
+  edit/preview toggle below 640px. Save recomputes `word_count`/`reading_time`
+  client-side and sets `content_edited = true`.
+- **Translation** — for notes, "Translate" calls `store.translateBookmark()` →
+  `translate` edge function (DeepL, `DEEPL_API_KEY`), which stores
+  `translated_content_md`/`translated_lang` on the row. A cached translation is
+  shown by default with a translated/original toggle. Bookmarks with a `url`
+  currently open Google Translate on the source page instead (see
+  [`plan.md`](plan.md) §3.1).
+- **Settings** (`SettingsView.vue`, `/settings`) — JSON export/import of the
+  library (`utils/dataTransfer.ts`, `stores/dataTransfer.ts`). Import dedupes
+  against existing normalized URLs and is batched: one existing-URL select,
+  one bulk bookmark insert, one bulk tag upsert, one bulk `bookmark_tags`
+  upsert.
 - **Sharing** (`ShareDialog.vue`) — toggle bound to `bookmark.is_public`
   (`store.setPublic()`), a read-only `/s/:id` link with copy button and
   `navigator.share()` where available. First-time enabling a share gets a
@@ -489,18 +562,22 @@ caching can't safely distinguish them. Caching is app-level instead, via
 IndexedDB (`idb` package, `app/src/lib/offlineDb.ts`, `read-later-offline`
 DB):
 - `articles` store — keyed by bookmark id → `{ content_md, images: {url,
-  blob}[], cachedAt }`. Images referenced in the markdown are fetched from
-  Supabase Storage and stored as blobs, swapped to `blob:` URLs at render
-  time when offline.
+  blob}[], cachedAt }`. Every image referenced in the markdown (plus the
+  thumbnail) is fetched and stored as a blob — mostly hot-linked source
+  images, so CORS failures are skipped silently — and swapped to `blob:` URLs
+  at render time when offline. An already-cached id is not re-cached.
 - `bookmarksList` store — keyed by bookmark id → lightweight metadata
-  (everything but `content_md`), written after every successful list
-  `fetch()`, read as a fallback when `fetch()` fails offline.
+  (everything but `content_md`), replaced after every successful list
+  load/page and Realtime event, read as a fallback when `fetch()` fails
+  offline.
 
 `cacheBookmark(id)` (wrapped by the `offlineCache` Pinia store) has two
 triggers: automatically after `ReaderView` successfully loads an article, or
 manually via a download icon on unread rows in `BookmarkRow.vue` (tapping
 again evicts it). `archive(id)` and `remove(id)` both evict the `articles`
-cache entry for that id. Manifest: `display: standalone`, icons in
+cache entry for that id. A `vite:preloadError` listener (`main.ts`) reloads
+the page when a lazy chunk from a previous deploy is gone. Manifest:
+`display: standalone`, icons in
 `public/icons/`, `apple-touch-icon` + `apple-mobile-web-app-capable` meta
 tags for iOS "Add to Home Screen".
 
@@ -528,59 +605,29 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
   the bookmarks bar. No secret inside it, nothing to rotate when the PWA
   changes.
 
-## 9. Deferred / open
+## 9. Known trade-offs
 
-- Twitter/X capture — needs Playwright-driven scraping, separate scoping
-  pass given how fragile it'll be.
-- PDF OCR for scanned/image-only PDFs — `unpdf`'s extraction only reads an
-  existing text layer; a scanned PDF with none falls back to
-  `pdf_parsed: false` (original-only view) rather than attempting OCR.
-- URL normalization ignores tracking params (`utm_*`, `fbclid`, …) — add a
-  strip-list if near-duplicate saves show up in practice.
-- `bookmarks.fetch()` loads the first page (50 rows, newest first); an
-  IntersectionObserver sentinel drives `store.loadMore()`, which pages older
-  rows with a `created_at < cursor` keyset. A search loads its whole (bounded)
-  result set unpaged. Trade-off: the unread badge and tag filter bar derive
-  from the loaded set, so they reflect only the pages loaded so far until the
-  user scrolls further. True `updated_at`-delta sync (so a session reloads
-  only what changed) is the next step if the full first-page fetch per session
-  becomes visible.
-- Note editing — notes have no source to re-fetch, so an edit is just a
-  direct `content_md`/`title` update; no inline editor yet.
-- SSRF hardening on the worker's fetch (reject loopback/private/link-local
-  resolution) — the worker already fetches arbitrary user-submitted URLs via
-  the bookmarklet today, so this is pre-existing exposure, not something any
-  single feature introduced; worth doing, not urgent for a personal single-
-  user app.
-- Open Graph tags for `/s/:id` link previews need SSR/prerendering (this is
-  a client-rendered SPA) — a tiny edge function serving prerendered OG tags
-  to known crawler UAs, falling back to the SPA otherwise, would cover it.
+- **Paging vs. derived state.** `bookmarks.fetch()` loads the first page (50
+  rows, newest first); an IntersectionObserver sentinel drives
+  `store.loadMore()`, which pages older rows with a `created_at < cursor`
+  keyset. A search loads its whole (bounded) result set unpaged. The unread
+  badge, tag bar and tag filter derive from the loaded set, so they reflect
+  only the pages loaded so far. The load-more sentinel is `v-if`'d on
+  `visibleBookmarks.length > 0` so an empty Archived tab doesn't auto-page the
+  whole library.
+- **Realtime INSERTs are dropped while a search is active** — a new row may
+  not match; re-running the search shows it. UPDATE/DELETE still apply.
+- **Import bulk-insert failure** reports every row as skipped rather than
+  falling back to per-row inserts (client-side dedup already removes the
+  common unique-URL collisions).
+
+Open work — bugs, hardening, follow-ups and deferred features — lives in
+[`plan.md`](plan.md).
 
 ## Design history
 
-The docs above describe the system as built. For the reasoning behind
-specific decisions — trade-offs weighed, alternatives rejected, security
-analysis at the time — see the original design docs:
-
-- [`docs/plans/read-later-new-capabilities.md`](plans/read-later-new-capabilities.md)
-  — search, tags, public sharing, share-target capture, duplicate handling.
-  Almost everything here shipped; §2's `is_public` enumeration analysis and
-  §5's race-condition/unique-index reasoning are the parts worth reading in
-  full rather than just the summary above.
-- [`docs/plans/2026-07-25-pwa-design.md`](plans/2026-07-25-pwa-design.md) —
-  installability, offline article caching, why app-level IndexedDB instead
-  of Workbox runtime caching.
-- [`docs/plans/2026-07-26-snippet-capture-design.md`](plans/2026-07-26-snippet-capture-design.md)
-  — the Add-dialog snippet mode, HTML→Markdown conversion, why it's a
-  separate JWT-authed edge function rather than an extension of `capture`.
-- [`docs/plans/2026-08-04-file-pdf-import-design.md`](plans/2026-08-04-file-pdf-import-design.md)
-  — the Add-dialog File mode (Markdown/Word/PDF), why PDF got its own
-  `bookmarks.type` and a private Storage bucket while Markdown/Word fold
-  into `note` and keep no original, and the PDF reader's dual-view/
-  trash-original design.
-
-Six early HTML visual explorations (color system, theme comparisons, login/
-list/reader mockups) also live in `docs/*.html` — static, unmaintained since
-the initial pass, superseded by the tokens in §6 above and the actual
-implementation. Kept for reference on the original visual direction, not as
-living documentation.
+The per-feature design docs (new capabilities, PWA/offline, snippet capture,
+file/PDF import, YouTube embed & editing), the 2026-08-25 audit and the early
+HTML mockups were retired once shipped. The decisions they justified are
+summarized in the sections above; open leftovers are in [`plan.md`](plan.md).
+The originals are in git history — last present at `e18a989` under `docs/`.

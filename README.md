@@ -11,9 +11,8 @@ per bookmark.
 - [`docs/architecture.md`](docs/architecture.md) — current system reference:
   data model, capture paths, worker pipeline, frontend, auth, deployment.
   Start here.
-- [`docs/plans/`](docs/plans) — original design docs for individual features
-  (new capabilities, PWA/offline, snippet capture), kept for the trade-off
-  reasoning behind decisions already reflected in `architecture.md`.
+- [`docs/plan.md`](docs/plan.md) — open work: known bugs, hardening,
+  follow-ups and deferred features, in recommended order.
 
 ## Bookmarklet
 
