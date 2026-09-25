@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { parseArticle } from "../src/parseArticle";
+import { createFetchHtml, parseArticle } from "../src/parseArticle";
+import { BlockedUrlError } from "../src/urlGuard";
 
 const FIXTURE_HTML = `
 <!doctype html>
@@ -133,5 +134,83 @@ describe("parseArticle", () => {
 
     expect(result.author).not.toContain("\u0000");
     expect(result.content_md).not.toContain("\u0000");
+  });
+
+  test("does not fall back to the browser for a URL blocked as private", async () => {
+    let rendered = 0;
+    await expect(
+      parseArticle(
+        "http://169.254.169.254/",
+        async () => {
+          throw new BlockedUrlError("private address");
+        },
+        async () => {
+          rendered += 1;
+          return FIXTURE_HTML;
+        },
+      ),
+    ).rejects.toBeInstanceOf(BlockedUrlError);
+    expect(rendered).toBe(0);
+  });
+});
+
+describe("createFetchHtml", () => {
+  const publicDns = async () => ["93.184.216.34"];
+
+  test("follows a redirect to another public URL", async () => {
+    const requested: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      requested.push(url);
+      if (url === "https://example.com/a") {
+        return new Response(null, { status: 301, headers: { location: "/b" } });
+      }
+      return new Response("<html>ok</html>", { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const html = await createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/a");
+
+    expect(html).toBe("<html>ok</html>");
+    expect(requested).toEqual(["https://example.com/a", "https://example.com/b"]);
+  });
+
+  test("refuses to follow a redirect into a private address", async () => {
+    const requested: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      requested.push(url);
+      return new Response(null, {
+        status: 302,
+        headers: { location: "http://169.254.169.254/latest/meta-data/" },
+      });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/a"),
+    ).rejects.toBeInstanceOf(BlockedUrlError);
+    expect(requested).toEqual(["https://example.com/a"]);
+  });
+
+  test("never requests a URL whose host resolves to a private address", async () => {
+    let requests = 0;
+    const fetchImpl = (async () => {
+      requests += 1;
+      return new Response("x");
+    }) as unknown as typeof fetch;
+
+    await expect(
+      createFetchHtml({ fetchImpl, lookup: async () => ["127.0.0.1"] })("http://localhost/"),
+    ).rejects.toBeInstanceOf(BlockedUrlError);
+    expect(requests).toBe(0);
+  });
+
+  test("gives up after too many redirects", async () => {
+    const fetchImpl = (async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://example.com/loop" },
+      })) as unknown as typeof fetch;
+
+    await expect(
+      createFetchHtml({ fetchImpl, lookup: publicDns, maxRedirects: 3 })("https://example.com/"),
+    ).rejects.toThrow(/redirects/);
   });
 });

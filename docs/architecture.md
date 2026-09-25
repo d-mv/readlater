@@ -394,7 +394,18 @@ timeout: 30_000 })`) only when the plain fetch wasn't substantial enough —
 `domcontentloaded` rather than `networkidle`, because pages with persistent
 background polling/streaming never reach network-idle and would otherwise
 always time out; a navigation timeout is caught and whatever DOM loaded is
-used rather than failing the bookmark outright. A duplicate leading heading
+used rather than failing the bookmark outright.
+
+**SSRF guard** (`worker/src/urlGuard.ts`). Only http(s) URLs whose host
+resolves exclusively to public addresses are fetched: loopback, RFC 1918,
+CGNAT, link-local (incl. the `169.254.169.254` metadata service), multicast,
+reserved and IPv4-mapped/NAT64 equivalents are refused. The plain fetch
+follows redirects by hand and checks every hop; a refused URL fails the
+bookmark instead of falling back to the browser, and the headless browser
+routes every request (navigation, redirects, subresources) through the same
+check. Known gap: DNS rebinding between the check and the connection.
+
+A duplicate leading heading
 that repeats the article title is stripped from the converted markdown
 (`stripDuplicateTitleHeading`) before it's stored.
 

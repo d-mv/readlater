@@ -1,6 +1,7 @@
 import { chromium, type Browser } from "playwright";
 import { CircuitBreaker } from "./circuitBreaker";
 import type { FetchHtml } from "./parseArticle";
+import { routeIfPublic } from "./urlGuard";
 
 let browserPromise: Promise<Browser> | null = null;
 
@@ -123,6 +124,9 @@ export const renderWithBrowser: FetchHtml = async (url) => {
         }
 
         try {
+          // Every request the page makes (navigation, redirects, subresources)
+          // must target a public address.
+          await context.route("**/*", (route) => routeIfPublic(route));
           const page = await promiseWithTimeout(
             context.newPage(),
             5_000,

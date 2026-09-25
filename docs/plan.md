@@ -223,6 +223,7 @@ articles through DeepL too (cached `translated_content_md`, inline toggle).
 Consider DeepL size limits for long articles. Effort S–M.
 
 ### 3.2 Worker SSRF hardening
+**Status:** done (worker 0.0.2). Remaining gap: DNS rebinding (the check and the connection resolve separately). Needs a worker redeploy.
 `worker/src/parseArticle.ts` fetches arbitrary user-submitted URLs (and the
 Playwright fallback navigates to them) with no loopback / private /
 link-local rejection. Resolve the host and reject private ranges before

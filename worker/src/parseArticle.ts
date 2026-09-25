@@ -2,23 +2,49 @@ import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
 import { readingTimeFromWordCount, wordCount } from "./reading";
+import { assertPublicUrl, BlockedUrlError, type LookupAll } from "./urlGuard";
 
 export type FetchHtml = (url: string) => Promise<string>;
 
-const defaultFetchHtml: FetchHtml = async (url) => {
-  const res = await fetch(url, {
-    signal: AbortSignal.timeout(15_000),
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; ReadLater/1.0)",
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    },
-  });
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} ${res.statusText}`);
-  }
-  return res.text();
-};
+const MAX_REDIRECTS = 5;
+
+// Plain HTTP fetch of a page, with every hop (the URL and each redirect
+// target) checked against the SSRF guard — redirects are followed by hand so
+// a public URL can't bounce the worker into a private one.
+export function createFetchHtml(
+  deps: { fetchImpl?: typeof fetch; lookup?: LookupAll; maxRedirects?: number } = {},
+): FetchHtml {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const maxRedirects = deps.maxRedirects ?? MAX_REDIRECTS;
+
+  return async (url) => {
+    let current = url;
+    for (let hop = 0; hop <= maxRedirects; hop++) {
+      await assertPublicUrl(current, deps.lookup);
+      const res = await fetchImpl(current, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(15_000),
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; ReadLater/1.0)",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      });
+      const location = res.headers.get("location");
+      if (res.status >= 300 && res.status < 400 && location) {
+        current = new URL(location, current).toString();
+        continue;
+      }
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      }
+      return res.text();
+    }
+    throw new Error(`Too many redirects fetching ${url}`);
+  };
+}
+
+const defaultFetchHtml = createFetchHtml();
 
 export function stripDuplicateTitleHeading(markdown: string, title: string | null): string {
   if (!title) return markdown;
@@ -101,9 +127,11 @@ export async function parseArticle(
   try {
     html = await fetchHtml(url);
     article = extractArticle(html, url);
-  } catch {
-    // If plain fetch failed (e.g. 403 Forbidden or network error),
-    // try renderHtml fallback below before giving up.
+  } catch (err) {
+    // A URL refused by the SSRF guard must not get a second chance through
+    // the browser. Anything else (e.g. 403 Forbidden or a network error)
+    // falls through to the renderHtml fallback below.
+    if (err instanceof BlockedUrlError) throw err;
   }
 
   if (!article && renderHtml) {
