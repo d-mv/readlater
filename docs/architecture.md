@@ -324,10 +324,9 @@ caught and the existing row is looked up by normalized URL.
   `CaptureView`/`ShareTargetView` offer "save again", which calls
   `store.refresh(id)` — resets the row to `status=pending` so the worker
   re-fetches; id, tags and `is_public` are preserved, so a share link keeps
-  working. The Add dialog's "Add anyway" instead calls
-  `store.add(url, { force: true })`, which only skips the local check and so
-  still hits the unique index — currently a silent no-op (see
-  [`plan.md`](plan.md) §2.5).
+  working. The Add dialog's "Add anyway" does the same `store.refresh(id)`.
+  The dialog keeps its lifecycle in one `Phase` value plus an epoch, so a
+  save still in flight when the dialog is closed can't land in a reopened one.
 - **Edge path** (`capture`, iOS Shortcut): responds
   `{ status: 'duplicate', existingId, existingTitle, existingSavedAt }`;
   continuing calls `POST /capture/:id/refresh`.

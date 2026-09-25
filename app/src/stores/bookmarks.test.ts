@@ -541,28 +541,6 @@ describe("useBookmarksStore", () => {
     expect(from).not.toHaveBeenCalled();
   });
 
-  test("add with force: true skips the duplicate check and inserts anyway", async () => {
-    const rows = [makeBookmark({ id: "1", url: "https://arc90.com/x" })];
-    from.mockReturnValueOnce({
-      select: () => listQuery(rows),
-    });
-
-    const store = useBookmarksStore();
-    await store.fetch();
-
-    const inserted = makeBookmark({ id: "new", url: "https://arc90.com/x", status: "pending" });
-    const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
-    const select = vi.fn(() => ({ single }));
-    const insert = vi.fn(() => ({ select }));
-    from.mockReturnValueOnce({ insert });
-
-    const result = await store.add("https://arc90.com/x", { force: true });
-
-    expect(insert).toHaveBeenCalled();
-    expect(result.error).toBeNull();
-    expect(store.bookmarks[0]?.id).toBe("new");
-  });
-
   test("add passes an optional title through to the insert", async () => {
     const inserted = makeBookmark({ id: "new", url: "https://arc90.com/new", status: "pending" });
     const single = vi.fn().mockResolvedValue({ data: inserted, error: null });

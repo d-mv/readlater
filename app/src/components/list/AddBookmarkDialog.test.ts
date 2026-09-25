@@ -8,6 +8,23 @@ const { from } = vi.hoisted(() => ({ from: vi.fn() }));
 vi.mock("../../lib/supabase", () => ({ supabase: { from } }));
 vi.mock("../../stores/auth", () => ({ useAuthStore: () => ({ userId: "user-1" }) }));
 
+const DUPLICATE = {
+  error: null,
+  duplicate: true as const,
+  existingId: "existing-1",
+  existingTitle: "Saved before",
+  existingSavedAt: "2026-01-01T00:00:00Z",
+};
+
+/** A promise the test settles by hand, to hold a store call in flight. */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 describe("AddBookmarkDialog", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -94,7 +111,7 @@ describe("AddBookmarkDialog", () => {
 
   test("shows a confirmation and keeps the dialog open when the URL is a duplicate", async () => {
     const store = useBookmarksStore();
-    store.add = vi.fn().mockResolvedValue({ error: null, duplicate: true });
+    store.add = vi.fn().mockResolvedValue(DUPLICATE);
 
     const wrapper = mount(AddBookmarkDialog);
     await wrapper.get("button.add-btn").trigger("click");
@@ -107,22 +124,63 @@ describe("AddBookmarkDialog", () => {
     expect(store.add).toHaveBeenCalledTimes(1);
   });
 
-  test("confirming the duplicate prompt re-submits with force and closes on success", async () => {
+  test("confirming the duplicate prompt re-fetches the existing bookmark and closes", async () => {
     const store = useBookmarksStore();
-    store.add = vi.fn().mockResolvedValue({ error: null, duplicate: true });
+    store.add = vi.fn().mockResolvedValue(DUPLICATE);
+    store.refresh = vi.fn().mockResolvedValue(undefined);
 
     const wrapper = mount(AddBookmarkDialog);
     await wrapper.get("button.add-btn").trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
-    await wrapper.vm.$nextTick();
+    await flushPromises();
 
-    store.add = vi.fn().mockResolvedValue({ error: null });
     await wrapper.get("button.confirm-btn").trigger("click");
-    await wrapper.vm.$nextTick();
+    await flushPromises();
 
-    expect(store.add).toHaveBeenCalledWith("https://arc90.com/x", { force: true });
+    expect(store.refresh).toHaveBeenCalledWith("existing-1");
+    expect(store.add).toHaveBeenCalledTimes(1);
     expect(wrapper.find("dialog").exists()).toBe(false);
+  });
+
+  test("a result arriving after the dialog was closed and reopened is ignored", async () => {
+    const store = useBookmarksStore();
+    const pending = deferred<typeof DUPLICATE>();
+    store.add = vi.fn().mockReturnValue(pending.promise);
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
+    await wrapper.get("form").trigger("submit");
+
+    // Close via the backdrop while the save is in flight, then reopen.
+    await wrapper.get(".backdrop").trigger("click");
+    await wrapper.get("button.add-btn").trigger("click");
+
+    pending.resolve(DUPLICATE);
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("already saved");
+    expect((wrapper.get("input[type=url]").element as HTMLInputElement).value).toBe("");
+    expect(wrapper.get("button.submit-btn").attributes("disabled")).toBeUndefined();
+  });
+
+  test("a success arriving after reopening does not close the new dialog", async () => {
+    const store = useBookmarksStore();
+    const pending = deferred<{ error: null }>();
+    store.add = vi.fn().mockReturnValue(pending.promise);
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get("button.add-btn").trigger("click");
+    await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
+    await wrapper.get("form").trigger("submit");
+    await wrapper.get(".backdrop").trigger("click");
+    await wrapper.get("button.add-btn").trigger("click");
+
+    pending.resolve({ error: null });
+    await flushPromises();
+
+    expect(wrapper.find("dialog").exists()).toBe(true);
   });
 
   test("defaults to URL mode, showing the URL input and not the snippet textarea", async () => {
@@ -419,7 +477,7 @@ describe("AddBookmarkDialog", () => {
 
   test("cancelling the duplicate prompt returns to the form without adding", async () => {
     const store = useBookmarksStore();
-    store.add = vi.fn().mockResolvedValue({ error: null, duplicate: true });
+    store.add = vi.fn().mockResolvedValue(DUPLICATE);
 
     const wrapper = mount(AddBookmarkDialog);
     await wrapper.get("button.add-btn").trigger("click");

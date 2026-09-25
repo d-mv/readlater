@@ -128,6 +128,8 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.5 Add dialog state
 
+**Status:** done (app 0.0.6). "Add anyway" now calls `store.refresh(existingId)`; the unused `force` option is removed from `add()`.
+
 - **Where:** `app/src/components/list/AddBookmarkDialog.vue:12-38`, `:116-188`.
 - **Problem:** `isOpen` / `error` / `submitting` / `duplicate` are independent.
   Close-and-reopen during a save: `submitting` stays true, the late result lands

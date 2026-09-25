@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { shallowRef } from "vue";
+import { computed, shallowRef } from "vue";
+import type { AddBookmarkResult } from "../../lib/supabase";
 import { useBookmarksStore } from "../../stores/bookmarks";
 import { detectFileKind, maxBytesForFileKind } from "../../utils/fileKind";
 
@@ -9,37 +10,60 @@ const FILE_KIND_LIMIT_LABEL = { markdown: "500KB", docx: "5MB", pdf: "20MB" } as
 
 const store = useBookmarksStore();
 
-const isOpen = shallowRef(false);
+// The dialog's lifecycle as one value, so "closed but still submitting" or
+// "duplicate prompt with an error" can't be represented. A duplicate carries
+// the existing row, which is what "Add anyway" re-fetches.
+type Phase =
+  | { kind: "closed" }
+  | { kind: "editing"; error: string | null }
+  | { kind: "submitting" }
+  | { kind: "confirmDuplicate"; existingId: string; submitting: boolean };
+
+const phase = shallowRef<Phase>({ kind: "closed" });
+// Bumped on every open/cancel/close: a save that started under an older
+// epoch belongs to a dialog the user already dismissed, so its result is
+// dropped instead of landing in the fresh form.
+let epoch = 0;
+
 const mode = shallowRef<Mode>("url");
 const url = shallowRef("");
 const snippetText = shallowRef("");
 const snippetHtml = shallowRef<string | null>(null);
 const selectedFile = shallowRef<File | null>(null);
-const error = shallowRef<string | null>(null);
-const submitting = shallowRef(false);
-const duplicate = shallowRef(false);
 const fileInput = shallowRef<HTMLInputElement | null>(null);
 const isDragging = shallowRef(false);
 const dragDepth = shallowRef(0);
 
+const isOpen = computed(() => phase.value.kind !== "closed");
+const error = computed(() => (phase.value.kind === "editing" ? phase.value.error : null));
+const submitting = computed(
+  () =>
+    phase.value.kind === "submitting" ||
+    (phase.value.kind === "confirmDuplicate" && phase.value.submitting),
+);
+
+function showError(message: string | null) {
+  phase.value = { kind: "editing", error: message };
+}
+
 function open() {
+  epoch += 1;
   mode.value = "url";
   url.value = "";
   snippetText.value = "";
   snippetHtml.value = null;
   selectedFile.value = null;
-  error.value = null;
-  duplicate.value = false;
-  isOpen.value = true;
+  showError(null);
 }
 
-function cancel() {
-  isOpen.value = false;
+function close() {
+  epoch += 1;
+  phase.value = { kind: "closed" };
 }
 
 function setMode(next: Mode) {
   mode.value = next;
-  error.value = null;
+  if (phase.value.kind === "editing") showError(null);
 }
 
 // A textarea only ever holds plain text — the clipboard's HTML flavor has to
@@ -54,7 +78,7 @@ function onFileChange(event: Event) {
 }
 
 function handleFile(file: File | null) {
-  error.value = null;
+  showError(null);
   if (!file) {
     selectedFile.value = null;
     return;
@@ -63,12 +87,12 @@ function handleFile(file: File | null) {
   const kind = detectFileKind(file.name);
   if (!kind) {
     selectedFile.value = null;
-    error.value = "Unsupported file type. Use .md, .markdown, .docx, or .pdf.";
+    showError("Unsupported file type. Use .md, .markdown, .docx, or .pdf.");
     return;
   }
   if (file.size > maxBytesForFileKind(kind)) {
     selectedFile.value = null;
-    error.value = `File exceeds the ${FILE_KIND_LIMIT_LABEL[kind]} limit for this type.`;
+    showError(`File exceeds the ${FILE_KIND_LIMIT_LABEL[kind]} limit for this type.`);
     return;
   }
 
@@ -105,95 +129,67 @@ function onDrop(event: DragEvent) {
 
 async function onSubmit() {
   if (mode.value === "snippet") {
-    await onSubmitSnippet();
+    await runSubmit(() =>
+      snippetHtml.value
+        ? store.addSnippet(snippetHtml.value, snippetText.value)
+        : store.addNote(snippetText.value),
+    );
   } else if (mode.value === "file") {
-    await onSubmitFile();
+    const file = selectedFile.value;
+    if (!file) return;
+    await runSubmit(() =>
+      detectFileKind(file.name) === "pdf" ? store.addPdf(file) : store.addFile(file),
+    );
   } else {
-    await onSubmitUrl();
+    await runSubmit(() => store.add(url.value));
   }
 }
 
-async function onSubmitUrl() {
-  submitting.value = true;
-  error.value = null;
+// One path for every save: mark submitting, then apply the result only if the
+// dialog the user submitted from is still the one on screen.
+async function runSubmit(save: () => Promise<{ error: string | null } | AddBookmarkResult>) {
+  const startedIn = epoch;
+  phase.value = { kind: "submitting" };
+  let result: { error: string | null } | AddBookmarkResult;
   try {
-    const result = await store.add(url.value);
-    if (result.duplicate) {
-      duplicate.value = true;
-      return;
-    }
-    if (result.error) {
-      error.value = result.error;
-      return;
-    }
-    isOpen.value = false;
-  } finally {
-    submitting.value = false;
+    result = await save();
+  } catch {
+    result = { error: "Something went wrong. Try again." };
   }
-}
+  if (startedIn !== epoch) return;
 
-async function onSubmitSnippet() {
-  submitting.value = true;
-  error.value = null;
-  try {
-    const result = snippetHtml.value
-      ? await store.addSnippet(snippetHtml.value, snippetText.value)
-      : await store.addNote(snippetText.value);
-    if (result.error) {
-      error.value = result.error;
-      return;
-    }
-    isOpen.value = false;
-  } finally {
-    submitting.value = false;
-  }
-}
-
-async function onSubmitFile() {
-  const file = selectedFile.value;
-  if (!file) return;
-
-  submitting.value = true;
-  error.value = null;
-  try {
-    const result =
-      detectFileKind(file.name) === "pdf" ? await store.addPdf(file) : await store.addFile(file);
-    if (result.error) {
-      error.value = result.error;
-      return;
-    }
-    isOpen.value = false;
-  } finally {
-    submitting.value = false;
+  if ("duplicate" in result && result.duplicate) {
+    phase.value = { kind: "confirmDuplicate", existingId: result.existingId, submitting: false };
+  } else if (result.error) {
+    showError(result.error);
+  } else {
+    close();
   }
 }
 
 function cancelDuplicate() {
-  duplicate.value = false;
+  showError(null);
 }
 
+// "Add anyway" on a URL that's already saved re-queues the existing bookmark
+// (same as the capture popup's Continue) — inserting a second row would only
+// hit the unique index on the normalized URL.
 async function confirmDuplicate() {
-  submitting.value = true;
-  try {
-    const result = await store.add(url.value, { force: true });
-    if (result.error) {
-      duplicate.value = false;
-      error.value = result.error;
-      return;
-    }
-    isOpen.value = false;
-  } finally {
-    submitting.value = false;
-  }
+  const current = phase.value;
+  if (current.kind !== "confirmDuplicate" || current.submitting) return;
+  const startedIn = epoch;
+  phase.value = { ...current, submitting: true };
+  await store.refresh(current.existingId);
+  if (startedIn === epoch) close();
 }
 </script>
 
 <template>
   <button class="btn btn-primary add-btn" type="button" @click="open">Add</button>
 
-  <div v-if="isOpen" class="backdrop" @click.self="cancel">
+  <div v-if="isOpen" class="backdrop" @click.self="close">
     <dialog open class="dialog">
-      <div v-if="duplicate" class="duplicate-confirm">
+      <div v-if="phase.kind === 'confirmDuplicate'" class="duplicate-confirm">
         <p class="confirm-message">This URL is already saved. Add it again?</p>
         <div class="dialog-actions">
           <button class="btn btn-secondary cancel-btn" type="button" @click="cancelDuplicate">
@@ -315,7 +311,7 @@ async function confirmDuplicate() {
 
         <p v-if="error" class="error">{{ error }}</p>
         <div class="dialog-actions">
-          <button class="btn btn-secondary cancel-btn" type="button" @click="cancel">Cancel</button>
+          <button class="btn btn-secondary cancel-btn" type="button" @click="close">Cancel</button>
           <button
             class="btn btn-primary submit-btn"
             type="submit"

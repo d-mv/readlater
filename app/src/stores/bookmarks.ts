@@ -281,10 +281,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     channel = undefined;
   }
 
-  async function add(
-    url: string,
-    options?: { force?: boolean; title?: string },
-  ): Promise<AddBookmarkResult> {
+  async function add(url: string, options?: { title?: string }): Promise<AddBookmarkResult> {
     let type: Bookmark["type"];
     try {
       type = detectBookmarkType(url);
@@ -297,7 +294,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const userId = useAuthStore().userId;
     if (!userId) return { error: "You must be signed in." };
 
-    const loaded = options?.force ? undefined : bookmarks.value.find((b) => b.url === url);
+    const loaded = bookmarks.value.find((b) => b.url === url);
     if (loaded) {
       return {
         error: null,
