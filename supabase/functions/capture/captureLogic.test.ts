@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { hasAllowedScheme, isBareUrl, normalizeUrl, truncateTitle } from "./captureLogic.ts";
+import { hasAllowedScheme, isBareUrl, normalizeUrl } from "./captureLogic.ts";
 
 Deno.test("hasAllowedScheme: accepts https", () => {
   assertEquals(hasAllowedScheme("https://example.com/post"), true);
@@ -52,23 +52,6 @@ Deno.test("isBareUrl: rejects file: scheme", () => {
 
 Deno.test("isBareUrl: trims surrounding whitespace before checking", () => {
   assertEquals(isBareUrl("  https://example.com/post  "), true);
-});
-
-Deno.test("truncateTitle: leaves short text untouched", () => {
-  assertEquals(truncateTitle("a short note"), "a short note");
-});
-
-Deno.test("truncateTitle: cuts at the last space before the limit and adds an ellipsis", () => {
-  const text = "word ".repeat(30).trim(); // 149 chars, well past the default 100
-  const result = truncateTitle(text);
-  assertEquals(result.endsWith("…"), true);
-  assertEquals(result.length <= 102, true);
-});
-
-Deno.test("truncateTitle: hard-cuts when there's no space before the limit", () => {
-  const text = "a".repeat(150);
-  const result = truncateTitle(text, 20);
-  assertEquals(result, "a".repeat(20) + "…");
 });
 
 Deno.test("normalizeUrl: lowercases the whole string", () => {

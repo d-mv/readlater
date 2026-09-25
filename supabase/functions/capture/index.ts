@@ -1,7 +1,8 @@
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { checkAuth } from "./checkAuth.ts";
 import { detectType } from "./detectType.ts";
-import { hasAllowedScheme, isBareUrl, normalizeUrl, truncateTitle } from "./captureLogic.ts";
+import { hasAllowedScheme, isBareUrl, normalizeUrl } from "./captureLogic.ts";
+import { readyNoteRow } from "../_shared/noteRow.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -65,21 +66,14 @@ async function insertPendingUrl(
   return json({ status: "created", id: data.id });
 }
 
-async function insertReadyNote(
+export async function insertReadyNote(
   client: SupabaseClient,
   ownerUserId: string | undefined,
   text: string,
 ): Promise<Response> {
   const { data, error } = await client
     .from("bookmarks")
-    .insert({
-      url: null,
-      title: truncateTitle(text),
-      content_md: text,
-      type: "note",
-      status: "ready",
-      user_id: ownerUserId,
-    })
+    .insert(readyNoteRow({ userId: ownerUserId, content: text }))
     .select("id")
     .single();
 

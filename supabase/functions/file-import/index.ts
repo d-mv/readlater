@@ -2,15 +2,9 @@ import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { Buffer } from "node:buffer";
 import mammoth from "npm:mammoth";
 import TurndownService from "npm:turndown";
-import {
-  decodeBase64,
-  detectKind,
-  maxBytesFor,
-  readingTimeFromWordCount,
-  titleFromFilename,
-  truncateTitle,
-  wordCount,
-} from "./fileImportLogic.ts";
+import { detectKind, maxBytesFor } from "./fileImportLogic.ts";
+import { decodeBase64, titleFromFilename } from "../_shared/file.ts";
+import { readyNoteRow } from "../_shared/noteRow.ts";
 
 // apikey and x-client-info are sent on every supabase-js request (including
 // functions.invoke), not just authorization/content-type — omitting them
@@ -74,21 +68,9 @@ export async function handleFileImport(
   }
   if (!content) return json("file is empty", 400);
 
-  const words = wordCount(content);
-  const title = truncateTitle(titleFromFilename(filename));
-
   const { data, error } = await supabase
     .from("bookmarks")
-    .insert({
-      url: null,
-      title,
-      content_md: content,
-      type: "note",
-      status: "ready",
-      word_count: words,
-      reading_time: readingTimeFromWordCount(words),
-      user_id: user.id,
-    })
+    .insert(readyNoteRow({ userId: user.id, content, title: titleFromFilename(filename) }))
     .select("*, tags(id, name, color)")
     .single();
 

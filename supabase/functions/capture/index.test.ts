@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert";
-import { handleRefresh } from "./index.ts";
+import { handleRefresh, insertReadyNote } from "./index.ts";
 
 function fakeSupabase(opts: {
   contentEdited?: boolean;
@@ -67,4 +67,32 @@ Deno.test("handleRefresh: returns 500 with the DB error message on update failur
 
   assertEquals(res.status, 500);
   assertEquals(body, "update failed");
+});
+
+Deno.test("insertReadyNote: stores a ready note with word count and reading time", async () => {
+  let inserted: Record<string, unknown> | undefined;
+  const single = () => Promise.resolve({ data: { id: "n1" }, error: null });
+  const client = {
+    from: (_table: string) => ({
+      insert: (row: Record<string, unknown>) => {
+        inserted = row;
+        return { select: (_cols: string) => ({ single }) };
+      },
+    }),
+  };
+
+  // deno-lint-ignore no-explicit-any
+  const res = await insertReadyNote(client as any, "owner-1", "a quick thought to keep");
+
+  assertEquals(res.status, 200);
+  assertEquals(inserted, {
+    url: null,
+    type: "note",
+    status: "ready",
+    title: "a quick thought to keep",
+    content_md: "a quick thought to keep",
+    word_count: 5,
+    reading_time: 1,
+    user_id: "owner-1",
+  });
 });

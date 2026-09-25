@@ -1,17 +1,14 @@
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { extractText, getDocumentProxy } from "npm:unpdf";
 import {
-  decodeBase64,
   isPdfFilename,
   MAX_PDF_BYTES,
   normalizeExtractedText,
   PDF_BUCKET,
   pdfObjectPath,
-  readingTimeFromWordCount,
-  titleFromFilename,
-  truncateTitle,
-  wordCount,
 } from "./pdfImportLogic.ts";
+import { decodeBase64, titleFromFilename } from "../_shared/file.ts";
+import { readingTimeFromWordCount, truncateTitle, wordCount } from "../_shared/noteRow.ts";
 
 // apikey and x-client-info are sent on every supabase-js request (including
 // functions.invoke), not just authorization/content-type — omitting them

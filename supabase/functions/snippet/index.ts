@@ -1,6 +1,7 @@
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import TurndownService from "npm:turndown";
-import { readingTimeFromWordCount, resolveContent, truncateTitle, wordCount } from "./snippetLogic.ts";
+import { resolveContent } from "./snippetLogic.ts";
+import { readyNoteRow } from "../_shared/noteRow.ts";
 
 // apikey and x-client-info are sent on every supabase-js request (including
 // functions.invoke), not just authorization/content-type — omitting them
@@ -33,20 +34,9 @@ export async function handleSnippet(
   const content = resolveContent(converted, text);
   if (!content) return json("snippet is empty", 400);
 
-  const words = wordCount(content);
-
   const { data, error } = await supabase
     .from("bookmarks")
-    .insert({
-      url: null,
-      title: truncateTitle(content),
-      content_md: content,
-      type: "note",
-      status: "ready",
-      word_count: words,
-      reading_time: readingTimeFromWordCount(words),
-      user_id: user.id,
-    })
+    .insert(readyNoteRow({ userId: user.id, content }))
     .select("*, tags(id, name, color)")
     .single();
 

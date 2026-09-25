@@ -165,6 +165,9 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.8 Shared note-row builder for edge functions
 
+**Status:** done (app 0.0.5). Edge functions need a redeploy (`capture`, `snippet`,
+`file-import`, `pdf-import`) to pick up `_shared/`.
+
 - **Where:** `truncateTitle` ×4, `wordCount`/`readingTimeFromWordCount` ×3,
   `decodeBase64`/`titleFromFilename` ×2 across `supabase/functions/*/…Logic.ts`.
 - **Problem:** notes from `capture` (`capture/index.ts:73-84`) and the app's

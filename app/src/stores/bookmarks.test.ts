@@ -737,6 +737,8 @@ describe("useBookmarksStore", () => {
         type: "note",
         status: "ready",
         content_md: "hello",
+        word_count: 1,
+        reading_time: 1,
         user_id: "user-1",
       }),
     );

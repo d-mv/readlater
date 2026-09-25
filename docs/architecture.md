@@ -253,8 +253,12 @@ const content = converted || (typeof text === "string" ? text.trim() : "");
 If no HTML was captured (plain typing, or a source with no `text/html`), it
 falls back to the existing client-side `store.addNote()` — no round trip.
 
-**Notes in general** (`type = 'note'`) have `content_md` written directly at
-insert time and never touch the worker or the `pending` queue. They flow
+**Notes in general** (`type = 'note'`) have `content_md`, `word_count` and
+`reading_time` written directly at insert time and never touch the worker or
+the `pending` queue. The edge functions build that row with one shared
+`readyNoteRow()` (`supabase/functions/_shared/noteRow.ts`, bundled by
+`supabase functions deploy`); the app's `store.addNote()` computes the same
+metrics client-side (`utils/reading.ts`). They flow
 through search, tags, and public sharing identically to articles/videos.
 
 **File mode — Markdown/Word.** A third mode on `AddBookmarkDialog.vue`,

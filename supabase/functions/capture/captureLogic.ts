@@ -24,14 +24,6 @@ export function isBareUrl(s: string): boolean {
   }
 }
 
-export function truncateTitle(text: string, max = 100): string {
-  if (text.length <= max) return text;
-  const slice = text.slice(0, max);
-  const lastSpace = slice.lastIndexOf(" ");
-  const cut = lastSpace > 0 ? slice.slice(0, lastSpace) : slice; // fallback: no space found, hard cut
-  return cut.trim() + "…";
-}
-
 // Mirrors the `url_normalized` generated column in the bookmarks table
 // (lower(regexp_replace(url, '/+$', ''))) so a post-conflict lookup queries
 // by the same value Postgres computed on insert.

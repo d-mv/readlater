@@ -7,6 +7,7 @@ import { truncateTitle } from "../utils/captureText";
 import { arrayBufferToBase64 } from "../utils/base64";
 import { detectFileKind, maxBytesForFileKind } from "../utils/fileKind";
 import { normalizeUrl } from "../utils/normalizeUrl";
+import { readingTimeFromWordCount, wordCount } from "../utils/reading";
 import * as offlineDb from "../lib/offlineDb";
 import { useAuthStore } from "./auth";
 import { useOfflineCacheStore } from "./offlineCache";
@@ -343,6 +344,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const userId = useAuthStore().userId;
     if (!userId) return { error: "You must be signed in." };
 
+    const words = wordCount(trimmed);
     const { data, error } = await supabase
       .from("bookmarks")
       .insert({
@@ -351,6 +353,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         content_md: trimmed,
         type: "note",
         status: "ready",
+        word_count: words,
+        reading_time: readingTimeFromWordCount(words),
         user_id: userId,
       })
       .select(DETAIL_SELECT)
