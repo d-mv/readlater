@@ -3,8 +3,20 @@ import { computed, shallowRef } from "vue";
 import type { AddBookmarkResult } from "../../lib/supabase";
 import { useBookmarksStore } from "../../stores/bookmarks";
 import { detectFileKind, maxBytesForFileKind } from "../../utils/fileKind";
+import { cn } from "../../shared/clsx";
+import Button from "../../shared/ui/Button.vue";
+import Dialog from "../../shared/ui/Dialog.vue";
+import Input from "../../shared/ui/Input.vue";
+import Message from "../../shared/ui/Message.vue";
+import Tabs, { type TabOption } from "../../shared/ui/Tabs.vue";
 
 type Mode = "url" | "snippet" | "file";
+
+const MODE_OPTIONS: TabOption<Mode>[] = [
+  { value: "url", label: "URL", testId: "mode-url" },
+  { value: "snippet", label: "Snippet", testId: "mode-snippet" },
+  { value: "file", label: "File", testId: "mode-file" },
+];
 
 const FILE_KIND_LIMIT_LABEL = { markdown: "500KB", docx: "5MB", pdf: "20MB" } as const;
 
@@ -198,374 +210,126 @@ async function confirmDuplicate() {
 </script>
 
 <template>
-  <button data-testid="add-btn" class="btn btn-primary add-btn" type="button" @click="open">
-    Add
-  </button>
+  <Button test-id="add-btn" @click="open">Add</Button>
 
-  <div data-testid="backdrop" v-if="isOpen" class="backdrop" @click.self="close">
-    <dialog open class="dialog">
-      <div v-if="phase.kind === 'confirmDuplicate'" class="duplicate-confirm">
-        <p class="confirm-message">This URL is already saved. Add it again?</p>
-        <div class="dialog-actions">
-          <button
-            data-testid="cancel-btn"
-            class="btn btn-secondary cancel-btn"
-            type="button"
-            @click="cancelDuplicate"
-          >
-            Cancel
-          </button>
-          <button
-            data-testid="confirm-btn"
-            class="btn btn-primary confirm-btn"
-            type="button"
-            :disabled="submitting"
-            @click="confirmDuplicate"
-          >
-            Add anyway
-          </button>
-        </div>
+  <Dialog v-if="isOpen" @close="close">
+    <div v-if="phase.kind === 'confirmDuplicate'">
+      <p class="m-0 text-base text-ink">This URL is already saved. Add it again?</p>
+      <div class="mt-16 flex justify-end gap-8">
+        <Button variant="secondary" test-id="cancel-btn" @click="cancelDuplicate">Cancel</Button>
+        <Button test-id="confirm-btn" :disabled="submitting" @click="confirmDuplicate">
+          Add anyway
+        </Button>
       </div>
-      <form v-else @submit.prevent="onSubmit">
-        <div class="mode-switch">
-          <button
-            type="button"
-            class="mode-btn mode-url"
-            :class="{ active: mode === 'url' }"
-            @click="setMode('url')"
-          >
-            URL
-          </button>
-          <button
-            data-testid="mode-snippet"
-            type="button"
-            class="mode-btn mode-snippet"
-            :class="{ active: mode === 'snippet' }"
-            @click="setMode('snippet')"
-          >
-            Snippet
-          </button>
-          <button
-            data-testid="mode-file"
-            type="button"
-            class="mode-btn mode-file"
-            :class="{ active: mode === 'file' }"
-            @click="setMode('file')"
-          >
-            File
-          </button>
-        </div>
+    </div>
+    <form v-else @submit.prevent="onSubmit">
+      <Tabs
+        variant="segmented"
+        :options="MODE_OPTIONS"
+        :model-value="mode"
+        class="mb-16"
+        @update:model-value="setMode"
+      />
 
-        <template v-if="mode === 'url'">
-          <label class="field-label" for="bookmark-url">URL</label>
+      <template v-if="mode === 'url'">
+        <label class="mb-4 block text-xs text-ink-muted" for="bookmark-url">URL</label>
+        <Input
+          id="bookmark-url"
+          v-model="url"
+          type="url"
+          placeholder="https://example.com/article"
+          required
+          autofocus
+        />
+      </template>
+      <template v-else-if="mode === 'snippet'">
+        <label class="mb-4 block text-xs text-ink-muted" for="bookmark-snippet">Snippet</label>
+        <Input
+          id="bookmark-snippet"
+          v-model="snippetText"
+          area
+          placeholder="Paste or type a snippet"
+          autofocus
+          @paste="onSnippetPaste"
+        />
+      </template>
+      <template v-else>
+        <label class="mb-4 block text-xs text-ink-muted" for="bookmark-file">File</label>
+        <div
+          data-testid="dropzone"
+          :class="
+            cn(
+              'box-border flex min-h-140 w-full cursor-pointer flex-col items-center justify-center gap-4 rounded-md border border-dashed border-line bg-canvas px-16 py-20 text-center text-ink-muted transition-[border-color,background] duration-150 hover:border-accent focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+              isDragging && 'border-solid border-accent bg-drop-target',
+              selectedFile && 'border-solid border-accent',
+            )
+          "
+          :data-dragging="isDragging || undefined"
+          tabindex="0"
+          role="button"
+          aria-label="Choose a file or drop it here"
+          autofocus
+          @click="openFilePicker"
+          @keydown.enter="openFilePicker"
+          @keydown.space.prevent="openFilePicker"
+          @dragenter="onDragEnter"
+          @dragover="onDragOver"
+          @dragleave="onDragLeave"
+          @drop="onDrop"
+        >
           <input
-            id="bookmark-url"
-            v-model="url"
-            type="url"
-            placeholder="https://example.com/article"
-            class="field-input"
-            required
-            autofocus
+            id="bookmark-file"
+            ref="fileInput"
+            type="file"
+            class="sr-only"
+            accept=".md,.markdown,.docx,.pdf"
+            tabindex="-1"
+            @change="onFileChange"
+            @click.stop
           />
-        </template>
-        <template v-else-if="mode === 'snippet'">
-          <label class="field-label" for="bookmark-snippet">Snippet</label>
-          <textarea
-            id="bookmark-snippet"
-            v-model="snippetText"
-            class="field-input snippet-input"
-            placeholder="Paste or type a snippet"
-            autofocus
-            @paste="onSnippetPaste"
-          ></textarea>
-        </template>
-        <template v-else>
-          <label class="field-label" for="bookmark-file">File</label>
-          <div
-            data-testid="dropzone"
-            class="dropzone"
-            :class="{ dragging: isDragging, filled: selectedFile }"
-            :data-dragging="isDragging || undefined"
-            tabindex="0"
-            role="button"
-            aria-label="Choose a file or drop it here"
-            autofocus
-            @click="openFilePicker"
-            @keydown.enter="openFilePicker"
-            @keydown.space.prevent="openFilePicker"
-            @dragenter="onDragEnter"
-            @dragover="onDragOver"
-            @dragleave="onDragLeave"
-            @drop="onDrop"
+          <svg
+            :class="cn('mb-4 text-ink-muted', (selectedFile || isDragging) && 'text-accent')"
+            width="28"
+            height="28"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
           >
-            <input
-              id="bookmark-file"
-              ref="fileInput"
-              type="file"
-              class="file-input-hidden"
-              accept=".md,.markdown,.docx,.pdf"
-              tabindex="-1"
-              @change="onFileChange"
-              @click.stop
+            <path d="M12 15V3m0 0 4 4m-4-4-4 4" stroke-linecap="round" stroke-linejoin="round" />
+            <path
+              d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
+              stroke-linecap="round"
+              stroke-linejoin="round"
             />
-            <svg
-              class="dropzone-icon"
-              width="28"
-              height="28"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.5"
-            >
-              <path d="M12 15V3m0 0 4 4m-4-4-4 4" stroke-linecap="round" stroke-linejoin="round" />
-              <path
-                d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              />
-            </svg>
-            <p v-if="selectedFile" class="dropzone-filename">{{ selectedFile.name }}</p>
-            <p v-else class="dropzone-text">
-              <span class="dropzone-link">Click to upload</span> or drag and drop
-            </p>
-            <p class="file-hint">
-              Markdown (.md, up to 500KB), Word (.docx, up to 5MB), or PDF (up to 20MB)
-            </p>
-          </div>
-        </template>
-
-        <p data-testid="error" v-if="error" class="error">{{ error }}</p>
-        <div class="dialog-actions">
-          <button
-            data-testid="cancel-btn"
-            class="btn btn-secondary cancel-btn"
-            type="button"
-            @click="close"
-          >
-            Cancel
-          </button>
-          <button
-            data-testid="submit-btn"
-            class="btn btn-primary submit-btn"
-            type="submit"
-            :disabled="
-              submitting ||
-              (mode === 'snippet' && !snippetText.trim()) ||
-              (mode === 'file' && !selectedFile)
-            "
-          >
-            Add
-          </button>
+          </svg>
+          <p v-if="selectedFile" class="m-0 text-sm font-medium break-all text-ink">
+            {{ selectedFile.name }}
+          </p>
+          <p v-else class="m-0 text-sm">
+            <span class="font-medium text-accent">Click to upload</span> or drag and drop
+          </p>
+          <p class="mx-0 mt-8 mb-0 text-2xs text-ink-muted">
+            Markdown (.md, up to 500KB), Word (.docx, up to 5MB), or PDF (up to 20MB)
+          </p>
         </div>
-      </form>
-    </dialog>
-  </div>
+      </template>
+
+      <Message v-if="error" tone="accent" test-id="error" class="mt-8">{{ error }}</Message>
+      <div class="mt-16 flex justify-end gap-8">
+        <Button variant="secondary" test-id="cancel-btn" @click="close">Cancel</Button>
+        <Button
+          type="submit"
+          test-id="submit-btn"
+          :disabled="
+            submitting ||
+            (mode === 'snippet' && !snippetText.trim()) ||
+            (mode === 'file' && !selectedFile)
+          "
+        >
+          Add
+        </Button>
+      </div>
+    </form>
+  </Dialog>
 </template>
-
-<style scoped>
-.btn {
-  display: inline-flex;
-  align-items: center;
-  height: 34px;
-  padding: 0 14px;
-  border-radius: var(--rl-radius);
-  font-size: 13px;
-  cursor: pointer;
-  border: none;
-}
-
-.btn-secondary {
-  background: transparent;
-  border: 0.5px solid var(--rl-border);
-  color: var(--rl-text-primary);
-}
-
-.btn-primary {
-  background: var(--rl-accent);
-  color: var(--rl-on-accent);
-  font-weight: 500;
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgb(0 0 0 / 40%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 10;
-}
-
-.dialog {
-  border: none;
-  border-radius: var(--rl-radius);
-  background: var(--rl-surface);
-  color: var(--rl-text-primary);
-  padding: 24px;
-  width: 320px;
-  max-width: calc(100vw - 32px);
-}
-
-.mode-switch {
-  display: flex;
-  border-radius: var(--rl-radius);
-  border: 0.5px solid var(--rl-border);
-  padding: 2px;
-  margin-bottom: 16px;
-}
-
-.mode-btn {
-  flex: 1;
-  background: transparent;
-  border: none;
-  border-radius: calc(var(--rl-radius) - 2px);
-  color: var(--rl-text-secondary);
-  font-size: 13px;
-  height: 28px;
-  cursor: pointer;
-}
-
-.mode-btn.active {
-  background: var(--rl-accent);
-  color: var(--rl-on-accent);
-  font-weight: 500;
-}
-
-.field-label {
-  font-size: 12px;
-  color: var(--rl-text-secondary);
-  display: block;
-  margin-bottom: 4px;
-}
-
-.field-input {
-  width: 100%;
-  height: 40px;
-  border-radius: var(--rl-radius);
-  border: 0.5px solid var(--rl-border);
-  background: var(--rl-bg);
-  color: var(--rl-text-primary);
-  padding: 0 12px;
-  font-size: 14px;
-  box-sizing: border-box;
-}
-
-.snippet-input {
-  height: 120px;
-  padding: 8px 12px;
-  resize: vertical;
-  font-family: inherit;
-}
-
-.file-input-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
-}
-
-.dropzone {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  width: 100%;
-  min-height: 140px;
-  border-radius: var(--rl-radius);
-  border: 1px dashed var(--rl-border);
-  background: var(--rl-bg);
-  color: var(--rl-text-secondary);
-  padding: 20px 16px;
-  box-sizing: border-box;
-  cursor: pointer;
-  text-align: center;
-  transition:
-    border-color 0.15s,
-    background 0.15s;
-}
-
-.dropzone:hover,
-.dropzone:focus-visible {
-  border-color: var(--rl-accent);
-}
-
-.dropzone:focus-visible {
-  outline: 2px solid var(--rl-accent);
-  outline-offset: 2px;
-}
-
-.dropzone.dragging {
-  border-color: var(--rl-accent);
-  border-style: solid;
-  background: color-mix(in srgb, var(--rl-accent) 8%, var(--rl-bg));
-}
-
-.dropzone.filled {
-  border-style: solid;
-  border-color: var(--rl-accent);
-}
-
-.dropzone-icon {
-  color: var(--rl-text-secondary);
-  margin-bottom: 4px;
-}
-
-.dropzone.filled .dropzone-icon,
-.dropzone.dragging .dropzone-icon {
-  color: var(--rl-accent);
-}
-
-.dropzone-text {
-  font-size: 13px;
-  margin: 0;
-}
-
-.dropzone-link {
-  color: var(--rl-accent);
-  font-weight: 500;
-}
-
-.dropzone-filename {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--rl-text-primary);
-  margin: 0;
-  word-break: break-all;
-}
-
-.file-hint {
-  font-size: 11px;
-  color: var(--rl-text-secondary);
-  margin: 8px 0 0;
-}
-
-.error {
-  color: var(--rl-accent);
-  font-size: 13px;
-  margin: 8px 0 0;
-}
-
-.confirm-message {
-  font-size: 14px;
-  color: var(--rl-text-primary);
-  margin: 0;
-}
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 16px;
-}
-</style>

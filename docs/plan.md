@@ -434,6 +434,9 @@ more than it saves. Check that Tailwind's preflight doesn't break
   only; its typed-contract and no-fallthrough rules still apply.
 - Tailwind's default `--text-*` scale is reset (`--text-*: initial`), so
   text utilities change only the font size, not the line-height.
+- Don't put `color-mix(…var(--color-*)…)` in arbitrary values. Tailwind's
+  CSS compiler folds it into a static light-theme colour. Derived colours
+  get their own themed token instead (e.g. `--color-drop-target`).
 
 0. ✅ *(done, app 0.2.1: `data-testid` hooks, `aria-pressed`/`data-*` for state; e2e derive the Supabase host from `app/.env` and run on port 5183)* **Tests first.** 108 `find('.class')` selectors (38 distinct classes) in
    the Vitest suites, plus Playwright specs, will break once class names

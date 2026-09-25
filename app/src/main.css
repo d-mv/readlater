@@ -33,6 +33,8 @@
   --color-accent-ink: #ffffff;
   --color-danger: #c23b3b;
   --color-focus: #1a1a18;
+  /* Dropzone while a file is dragged over it: accent at 8% over canvas. */
+  --color-drop-target: #f3e8e2;
 
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-serif: "Source Serif 4", Georgia, serif;
@@ -77,6 +79,7 @@
   --color-accent-ink: #2c1006;
   --color-danger: #e2685f;
   --color-focus: #f0eee8;
+  --color-drop-target: #2d2521;
 }
 
 :root {
