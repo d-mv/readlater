@@ -28,6 +28,7 @@ describe("Input", () => {
         autocomplete: "email",
         ariaLabel: "Email",
         testId: "email-input",
+        maxlength: 200,
       },
     }).get("input");
     expect(input.attributes()).toMatchObject({
@@ -37,6 +38,7 @@ describe("Input", () => {
       autocomplete: "email",
       "aria-label": "Email",
       "data-testid": "email-input",
+      maxlength: "200",
     });
     expect(input.attributes("required")).toBeDefined();
   });

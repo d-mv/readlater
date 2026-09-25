@@ -13,6 +13,8 @@ import BookmarkList from "../components/list/BookmarkList.vue";
 import AddBookmarkDialog from "../components/list/AddBookmarkDialog.vue";
 import TagFilterBar from "../components/list/TagFilterBar.vue";
 import ThemeToggle from "../components/ThemeToggle.vue";
+import IconButton from "../shared/ui/IconButton.vue";
+import Input from "../shared/ui/Input.vue";
 import type { BookmarkFilter } from "../stores/bookmarks";
 
 const router = useRouter();
@@ -113,31 +115,26 @@ function onToggleTag(tagId: string) {
 </script>
 
 <template>
-  <main class="list-view">
-    <div class="title-row">
-      <h1 class="app-title">Read Later</h1>
-      <div class="title-actions">
+  <main class="mx-auto min-h-screen max-w-640 bg-canvas">
+    <div class="flex items-center justify-between px-16 pt-16 pb-4">
+      <h1 class="m-0 text-md font-medium text-ink">Read Later</h1>
+      <div class="flex items-center gap-12">
         <AddBookmarkDialog />
-        <button
-          class="icon-btn"
-          type="button"
-          aria-label="Settings"
-          @click="router.push({ name: 'settings' })"
-        >
+        <IconButton title="Settings" @click="router.push({ name: 'settings' })">
           <IconSettings :size="18" />
-        </button>
+        </IconButton>
         <ThemeToggle />
       </div>
     </div>
-    <form data-testid="search-form" class="search-form" @submit.prevent="onSearchSubmit">
-      <input
-        data-testid="search-input"
+    <form data-testid="search-form" class="contents" @submit.prevent="onSearchSubmit">
+      <Input
         v-model="searchInput"
-        class="search-input"
+        test-id="search-input"
         type="search"
         placeholder="Search…"
-        maxlength="200"
-        @input="onSearchInput"
+        :maxlength="200"
+        class="mx-16 my-4 block h-34 w-[calc(100%-32px)] bg-transparent focus:border-accent focus:outline-none"
+        @update:model-value="onSearchInput"
       />
     </form>
     <TagFilterBar
@@ -159,80 +156,9 @@ function onToggleTag(tagId: string) {
     <div
       v-if="store.hasMore && store.visibleBookmarks.length > 0"
       ref="loadMoreSentinel"
-      class="load-more-sentinel"
+      class="min-h-px p-16 text-center"
     >
-      <span v-if="store.loadingMore" class="load-more-label">Loading more…</span>
+      <span v-if="store.loadingMore" class="text-xs text-ink-faint">Loading more…</span>
     </div>
   </main>
 </template>
-
-<style scoped>
-.list-view {
-  max-width: 640px;
-  margin: 0 auto;
-  min-height: 100vh;
-  background: var(--rl-bg);
-}
-
-.title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 16px 4px;
-}
-
-.app-title {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--rl-text-primary);
-  margin: 0;
-}
-
-.title-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.icon-btn {
-  display: inline-flex;
-  border: none;
-  background: transparent;
-  color: var(--rl-text-secondary);
-  cursor: pointer;
-  padding: 0;
-}
-
-.search-form {
-  display: contents;
-}
-
-.load-more-sentinel {
-  min-height: 1px;
-  padding: 16px;
-  text-align: center;
-}
-
-.load-more-label {
-  font-size: 12px;
-  color: var(--rl-text-muted);
-}
-
-.search-input {
-  display: block;
-  width: calc(100% - 32px);
-  margin: 4px 16px;
-  height: 34px;
-  padding: 0 12px;
-  border-radius: var(--rl-radius);
-  border: 0.5px solid var(--rl-border);
-  background: transparent;
-  color: var(--rl-text-primary);
-  font-size: 14px;
-}
-
-.search-input:focus {
-  outline: none;
-  border-color: var(--rl-accent);
-}
-</style>

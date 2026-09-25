@@ -11,6 +11,7 @@ export interface InputProps {
   required?: boolean;
   autofocus?: boolean;
   autocomplete?: string;
+  maxlength?: number;
   ariaLabel?: string;
   testId?: string;
   class?: string;
@@ -31,6 +32,7 @@ const props = withDefaults(defineProps<InputProps>(), {
   required: false,
   autofocus: false,
   autocomplete: undefined,
+  maxlength: undefined,
   ariaLabel: undefined,
   testId: undefined,
   class: undefined,
@@ -53,6 +55,7 @@ function onInput(event: Event) {
     :placeholder="props.placeholder"
     :required="props.required"
     :autofocus="props.autofocus"
+    :maxlength="props.maxlength"
     :aria-label="props.ariaLabel"
     :data-testid="props.testId"
     :class="cn(base, 'h-120 py-8 resize-y [font-family:inherit]', props.class)"
@@ -68,6 +71,7 @@ function onInput(event: Event) {
     :required="props.required"
     :autofocus="props.autofocus"
     :autocomplete="props.autocomplete"
+    :maxlength="props.maxlength"
     :aria-label="props.ariaLabel"
     :data-testid="props.testId"
     :class="cn(base, props.class)"
