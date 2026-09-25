@@ -2,6 +2,8 @@
 import { ref } from "vue";
 import { IconX } from "@tabler/icons-vue";
 import type { Tag } from "../../lib/supabase";
+import IconButton from "../../shared/ui/IconButton.vue";
+import Pill from "../../shared/ui/Pill.vue";
 
 defineProps<{
   tags: Tag[];
@@ -23,77 +25,32 @@ function onSubmit() {
 </script>
 
 <template>
-  <div class="tag-input">
-    <span
-      data-testid="tag-chip"
+  <div class="flex flex-wrap items-center gap-8 px-16 py-12">
+    <Pill
       v-for="tag in tags"
       :key="tag.id"
-      class="tag-chip"
-      :style="{ '--tag-color': tag.color }"
+      tone="solid"
+      test-id="tag-chip"
+      :color="tag.color"
+      class="h-24 gap-4 border-0 bg-(--tag-color,var(--color-line)) px-8"
     >
       {{ tag.name }}
-      <button
-        data-testid="remove-btn"
-        class="remove-btn"
-        type="button"
-        :aria-label="`Remove ${tag.name}`"
+      <IconButton
+        :title="`Remove ${tag.name}`"
+        test-id="remove-btn"
+        class="text-[inherit] opacity-80"
         @click="emit('remove', tag.id)"
       >
         <IconX :size="12" />
-      </button>
-    </span>
+      </IconButton>
+    </Pill>
     <input
-      data-testid="tag-draft-input"
       v-model="draft"
-      class="tag-draft-input"
+      data-testid="tag-draft-input"
+      class="min-w-80 flex-1 border-0 bg-transparent text-xs text-ink focus:outline-none"
       type="text"
       placeholder="Add tag…"
       @keydown.enter.prevent="onSubmit"
     />
   </div>
 </template>
-
-<style scoped>
-.tag-input {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 16px;
-}
-
-.tag-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 999px;
-  background: var(--tag-color, var(--rl-border));
-  color: var(--rl-on-accent);
-  font-size: 12px;
-}
-
-.remove-btn {
-  display: inline-flex;
-  border: none;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  padding: 0;
-  opacity: 0.8;
-}
-
-.tag-draft-input {
-  border: none;
-  background: transparent;
-  font-size: 12px;
-  color: var(--rl-text-primary);
-  min-width: 80px;
-  flex: 1;
-}
-
-.tag-draft-input:focus {
-  outline: none;
-}
-</style>

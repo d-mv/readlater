@@ -4,6 +4,7 @@ import { IconChevronLeft } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
 import { domainFromUrl } from "../../utils/format";
 import ReaderMenu from "./ReaderMenu.vue";
+import IconButton from "../../shared/ui/IconButton.vue";
 
 const props = defineProps<{
   bookmark: Bookmark;
@@ -26,11 +27,11 @@ const domain = computed(() => domainFromUrl(props.bookmark.url));
 </script>
 
 <template>
-  <div class="header">
-    <button data-testid="back-btn" class="icon-btn back-btn" type="button" @click="emit('back')">
+  <div class="flex items-center justify-between border-b-[0.5px] border-line px-16 py-12">
+    <IconButton title="Back" test-id="back-btn" @click="emit('back')">
       <IconChevronLeft :size="20" />
-    </button>
-    <span class="domain">{{ domain }}</span>
+    </IconButton>
+    <span class="min-w-0 truncate font-mono text-xs text-ink-faint">{{ domain }}</span>
     <ReaderMenu
       :bookmark="bookmark"
       @archive="emit('archive')"
@@ -45,32 +46,3 @@ const domain = computed(() => domainFromUrl(props.bookmark.url));
     />
   </div>
 </template>
-
-<style scoped>
-.header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 0.5px solid var(--rl-border);
-}
-
-.domain {
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-family: var(--rl-font-mono);
-  font-size: 12px;
-  color: var(--rl-text-muted);
-}
-
-.icon-btn {
-  display: inline-flex;
-  border: none;
-  background: transparent;
-  color: var(--rl-text-secondary);
-  cursor: pointer;
-  padding: 0;
-}
-</style>

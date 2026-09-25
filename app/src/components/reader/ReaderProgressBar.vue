@@ -9,19 +9,7 @@ const widthPercent = computed(() => `${Math.min(100, Math.max(0, props.progress 
 </script>
 
 <template>
-  <div class="track">
-    <div data-testid="fill" class="fill" :style="{ width: widthPercent }" />
+  <div class="h-2 bg-line">
+    <div data-testid="fill" class="h-full bg-accent" :style="{ width: widthPercent }" />
   </div>
 </template>
-
-<style scoped>
-.track {
-  height: 2px;
-  background: var(--rl-border);
-}
-
-.fill {
-  height: 100%;
-  background: var(--rl-accent);
-}
-</style>
