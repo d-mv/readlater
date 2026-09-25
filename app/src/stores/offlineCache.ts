@@ -62,10 +62,21 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
   }
 
   function cacheBookmark(bookmark: Bookmark): Promise<void> {
+    if (!bookmark.content_md || entries.value.get(bookmark.id) === "saved")
+      return Promise.resolve();
+    return inFlight.get(bookmark.id) ?? startSave(bookmark, { reuseExisting: true });
+  }
+
+  // Re-caches an article that is already offline (or being saved) after its
+  // body or translation changed, so the offline copy doesn't go stale.
+  function refreshCached(bookmark: Bookmark): Promise<void> {
+    if (!bookmark.content_md || !entries.value.has(bookmark.id)) return Promise.resolve();
+    return startSave(bookmark, { reuseExisting: false });
+  }
+
+  function startSave(bookmark: Bookmark, opts: { reuseExisting: boolean }): Promise<void> {
     const { id, content_md: contentMd } = bookmark;
-    if (!contentMd || entries.value.get(id) === "saved") return Promise.resolve();
-    const pending = inFlight.get(id);
-    if (pending) return pending;
+    if (!contentMd) return Promise.resolve();
 
     const save: Promise<void> = (async () => {
       const isCurrent = () => inFlight.get(id) === save;
@@ -73,7 +84,7 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
         // The reader auto-caches every article it opens; without this check
         // that re-downloads every inline image and rewrites the record on
         // each open of an article cached in a previous session.
-        if (await offlineDb.getArticle(id)) {
+        if (opts.reuseExisting && (await offlineDb.getArticle(id))) {
           if (isCurrent()) setEntry(id, "saved");
           return;
         }
@@ -84,12 +95,13 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
         await offlineDb.putArticle({
           id,
           content_md: contentMd,
+          translated_content_md: bookmark.translated_content_md ?? null,
           images,
           cachedAt: new Date().toISOString(),
         });
         // Removed while the write was in progress: undo it.
         if (!isCurrent()) {
-          await offlineDb.deleteArticle(id);
+          if (!inFlight.has(id)) await offlineDb.deleteArticle(id);
           return;
         }
         setEntry(id, "saved");
@@ -101,8 +113,9 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
       }
     })();
 
+    // Replacing an in-flight save supersedes it: only the newest may commit.
     inFlight.set(id, save);
-    setEntry(id, "saving");
+    if (entries.value.get(id) !== "saved") setEntry(id, "saving");
     return save;
   }
 
@@ -112,7 +125,7 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
     await offlineDb.deleteArticle(id);
   }
 
-  return { cachedIds, init, isCached, cacheBookmark, removeCachedBookmark };
+  return { cachedIds, init, isCached, cacheBookmark, refreshCached, removeCachedBookmark };
 });
 
 if (import.meta.hot) {

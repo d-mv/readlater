@@ -247,8 +247,9 @@ the worker, or surface "images not cached". Needs a decision. Effort M.
 
 - **True `updated_at` delta sync** for the list, with delete tombstones — if the
   first-page fetch per session becomes visible. (Kairos task exists.)
-- **Refresh the offline copy when an article is edited/translated** — the
-  cached `articles` row is never updated after the first cache. (Kairos task exists.)
+- ~~**Refresh the offline copy when an article is edited/translated**~~ — done
+  (app 0.1.1): `offlineCache.refreshCached()` on edit/translate; the record also
+  stores the translation.
 
 ---
 

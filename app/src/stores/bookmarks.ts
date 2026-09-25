@@ -63,7 +63,15 @@ async function loadOfflineBookmarks(): Promise<Bookmark[]> {
   return Promise.all(
     metaList.map(async (meta) => {
       const article = await offlineDb.getArticle(meta.id);
-      return { ...meta, content_md: article ? offlineDb.hydrateArticleContent(article) : null };
+      if (!article) return { ...meta, content_md: null };
+      const translated = article.translated_content_md;
+      return {
+        ...meta,
+        content_md: offlineDb.hydrateArticleContent(article),
+        translated_content_md: translated
+          ? offlineDb.hydrateArticleContent({ ...article, content_md: translated })
+          : (meta.translated_content_md ?? null),
+      };
     }),
   );
 }
@@ -471,6 +479,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (bookmark) {
       bookmark.translated_content_md = data.translated_text;
       bookmark.translated_lang = data.translated_lang;
+      refreshOfflineCopy(bookmark);
     }
     return { translatedText: data.translated_text, error: null };
   }
@@ -545,7 +554,18 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     };
     await supabase.from("bookmarks").update(update).eq("id", id);
     const bookmark = bookmarks.value.find((b) => b.id === id);
-    if (bookmark) Object.assign(bookmark, update);
+    if (bookmark) {
+      Object.assign(bookmark, update);
+      refreshOfflineCopy(bookmark);
+    }
+  }
+
+  // Best-effort: keeps an offline copy in step with an edited body or a new
+  // translation; a failure just leaves the previous copy in place.
+  function refreshOfflineCopy(bookmark: Bookmark) {
+    useOfflineCacheStore()
+      .refreshCached({ ...bookmark })
+      .catch(() => {});
   }
 
   async function setPublic(id: string, isPublic: boolean) {

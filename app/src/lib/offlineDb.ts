@@ -11,6 +11,9 @@ export interface CachedImage {
 export interface CachedArticle {
   id: string;
   content_md: string;
+  // Cached DeepL translation, if the article had one when it was cached.
+  // Optional: records written before this field existed don't have it.
+  translated_content_md?: string | null;
   images: CachedImage[];
   cachedAt: string;
 }

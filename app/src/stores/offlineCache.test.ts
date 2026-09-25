@@ -218,4 +218,43 @@ describe("useOfflineCacheStore", () => {
       expect(store.isCached("1")).toBe(true);
     });
   });
+
+  describe("refreshCached", () => {
+    test("rewrites an already-cached article with its edited body and translation", async () => {
+      const store = useOfflineCacheStore();
+      await store.cacheBookmark(makeBookmark({ content_md: "old body" }));
+      putArticle.mockClear();
+
+      await store.refreshCached(
+        makeBookmark({ content_md: "edited body", translated_content_md: "cuerpo editado" }),
+      );
+
+      expect(putArticle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "1",
+          content_md: "edited body",
+          translated_content_md: "cuerpo editado",
+        }),
+      );
+      expect(store.isCached("1")).toBe(true);
+    });
+
+    test("does nothing for an article that isn't cached offline", async () => {
+      const store = useOfflineCacheStore();
+
+      await store.refreshCached(makeBookmark({ content_md: "edited body" }));
+
+      expect(putArticle).not.toHaveBeenCalled();
+      expect(store.isCached("1")).toBe(false);
+    });
+  });
+
+  test("cacheBookmark stores the cached translation alongside the body", async () => {
+    const store = useOfflineCacheStore();
+    await store.cacheBookmark(makeBookmark({ translated_content_md: "traducción" }));
+
+    expect(putArticle).toHaveBeenCalledWith(
+      expect.objectContaining({ translated_content_md: "traducción" }),
+    );
+  });
 });

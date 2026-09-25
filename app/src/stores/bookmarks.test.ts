@@ -85,8 +85,13 @@ vi.mock("../lib/offlineDb", () => ({
   hydrateArticleContent,
 }));
 
-const { removeCachedBookmark } = vi.hoisted(() => ({ removeCachedBookmark: vi.fn() }));
-vi.mock("./offlineCache", () => ({ useOfflineCacheStore: () => ({ removeCachedBookmark }) }));
+const { removeCachedBookmark, refreshCached } = vi.hoisted(() => ({
+  removeCachedBookmark: vi.fn(),
+  refreshCached: vi.fn(),
+}));
+vi.mock("./offlineCache", () => ({
+  useOfflineCacheStore: () => ({ removeCachedBookmark, refreshCached }),
+}));
 
 const { useBookmarksStore } = await import("./bookmarks");
 
@@ -132,6 +137,7 @@ describe("useBookmarksStore", () => {
     getArticle.mockResolvedValue(undefined);
     deleteBookmarkMeta.mockResolvedValue(undefined);
     removeCachedBookmark.mockResolvedValue(undefined);
+    refreshCached.mockResolvedValue(undefined);
     hydrateArticleContent.mockImplementation(
       (article: { content_md: string }) => article.content_md,
     );
@@ -914,6 +920,66 @@ describe("useBookmarksStore", () => {
     expect(result).toEqual({ translatedText: "Hello", error: null });
     expect(store.bookmarks[0]?.translated_content_md).toBe("Hello");
     expect(store.bookmarks[0]?.translated_lang).toBe("EN");
+  });
+
+  describe("keeping the offline copy current", () => {
+    test("updateContent refreshes the offline copy with the edited body", async () => {
+      from.mockReturnValue({
+        select: () => listQuery([makeBookmark({ id: "1", content_md: "old" })]),
+        update: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }),
+      });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      await store.updateContent("1", {
+        title: "T",
+        content_md: "new body",
+        word_count: 2,
+        reading_time: 1,
+      });
+
+      expect(refreshCached).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "1", content_md: "new body" }),
+      );
+    });
+
+    test("a successful translation refreshes the offline copy", async () => {
+      from.mockReturnValue({
+        select: () => listQuery([makeBookmark({ id: "1", content_md: "Hola" })]),
+      });
+      invoke.mockResolvedValue({
+        data: { translated_text: "Hi", translated_lang: "EN" },
+        error: null,
+      });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      await store.translateBookmark("1", "Hola", "EN");
+
+      expect(refreshCached).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "1", translated_content_md: "Hi" }),
+      );
+    });
+
+    test("offline, a cached translation is restored with the article", async () => {
+      from.mockReturnValue({ select: () => listQuery(null, { message: "Failed to fetch" }) });
+      getBookmarksList.mockResolvedValue([
+        { ...makeBookmark({ id: "1" }), content_md: undefined, translated_content_md: undefined },
+      ]);
+      getArticle.mockResolvedValue({
+        id: "1",
+        content_md: "Hola",
+        translated_content_md: "Hi",
+        images: [],
+        cachedAt: "t",
+      });
+      const store = useBookmarksStore();
+
+      await store.fetch();
+
+      expect(store.bookmarks[0]?.content_md).toBe("Hola");
+      expect(store.bookmarks[0]?.translated_content_md).toBe("Hi");
+    });
   });
 
   test("translateBookmark discards a translation of text that was edited while it was in flight", async () => {

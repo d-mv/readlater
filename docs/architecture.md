@@ -589,8 +589,11 @@ queries, which must stay network-fresh — so Workbox's URL-pattern runtime
 caching can't safely distinguish them. Caching is app-level instead, via
 IndexedDB (`idb` package, `app/src/lib/offlineDb.ts`, `read-later-offline`
 DB):
-- `articles` store — keyed by bookmark id → `{ content_md, images: {url,
-  blob}[], cachedAt }`. Every image referenced in the markdown (plus the
+- `articles` store — keyed by bookmark id → `{ content_md,
+  translated_content_md?, images: {url, blob}[], cachedAt }`. Editing or
+  translating an article that is already offline re-caches it
+  (`offlineCache.refreshCached()`), so the offline copy tracks the latest
+  body and translation. Every image referenced in the markdown (plus the
   thumbnail) is fetched and stored as a blob — mostly hot-linked source
   images, so CORS failures are skipped silently — and swapped to `blob:` URLs
   at render time when offline (one object URL per cached image, reused
