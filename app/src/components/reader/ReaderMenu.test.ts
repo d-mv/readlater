@@ -172,16 +172,33 @@ describe("ReaderMenu", () => {
     expect(wrapper.emitted("trashOriginalPdf")).toBeUndefined();
   });
 
-  test("links 'Translate…' to a Google Translate page-proxy URL when the bookmark has a URL", async () => {
+  test("translates an article in-app, and offers Google's page translation as a separate link", async () => {
     const wrapper = mount(ReaderMenu, {
-      props: { bookmark: makeBookmark({ url: "https://example.com/a" }) },
+      props: {
+        bookmark: makeBookmark({ url: "https://example.com/a", content_md: "Bonjour le monde" }),
+      },
     });
     await openMenu(wrapper);
-    const link = wrapper.find(".translate-item");
-    expect(link.exists()).toBe(true);
+
+    const item = wrapper.find(".translate-item");
+    expect(item.element.tagName).toBe("BUTTON");
+    await item.trigger("click");
+    expect(wrapper.emitted("translate")).toHaveLength(1);
+
+    await openMenu(wrapper);
+    const link = wrapper.find(".translate-page-item");
     expect(link.attributes("href")).toContain("translate.google.com/translate?");
     expect(link.attributes("href")).toContain(encodeURIComponent("https://example.com/a"));
     expect(link.attributes("target")).toBe("_blank");
+  });
+
+  test("offers only the page translation for an article whose body isn't loaded", async () => {
+    const wrapper = mount(ReaderMenu, {
+      props: { bookmark: makeBookmark({ url: "https://example.com/a", content_md: null }) },
+    });
+    await openMenu(wrapper);
+    expect(wrapper.find(".translate-item").exists()).toBe(false);
+    expect(wrapper.find(".translate-page-item").exists()).toBe(true);
   });
 
   test("emits translate and closes the menu when the translate item is clicked for URL-less bookmarks (notes)", async () => {
@@ -205,6 +222,7 @@ describe("ReaderMenu", () => {
     });
     await openMenu(wrapper);
     expect(wrapper.find(".translate-item").exists()).toBe(false);
+    expect(wrapper.find(".translate-page-item").exists()).toBe(false);
   });
 
   test("emits delete when confirmed", async () => {

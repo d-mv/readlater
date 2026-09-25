@@ -500,17 +500,18 @@ Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
   raw HTML by default); theme bound to the theme store; single-pane
   edit/preview toggle below 640px. Save recomputes `word_count`/`reading_time`
   client-side and sets `content_edited = true`.
-- **Translation** — for notes, "Translate" calls `store.translateBookmark()` →
+- **Translation** — for anything with a body (notes and articles), "Translate" calls `store.translateBookmark()` →
   `translate` edge function (DeepL, `DEEPL_API_KEY`), which stores
   `translated_content_md`/`translated_lang` on the row. A cached translation is
-  shown by default with a translated/original toggle. `ReaderView` keeps
+  shown by default with a translated/original toggle. Long articles are split
+  at paragraph boundaries into ≤60 KB requests (DeepL caps a request at
+  128 KiB) and reassembled. Bookmarks with a URL also offer "Translate page",
+  a link to Google Translate's page proxy for the live page. `ReaderView` keeps
   reading / translating / editing as one `ContentMode`, so a second Translate
   is ignored while one is in flight and a late result only lands on the
   bookmark it was started for. If the text was edited while DeepL was
   working, `translateBookmark()` discards the result and clears the copy the
-  edge function already cached. Bookmarks with a `url`
-  currently open Google Translate on the source page instead (see
-  [`plan.md`](plan.md) §3.1).
+  edge function already cached.
 - **Settings** (`SettingsView.vue`, `/settings`) — JSON export/import of the
   library (`utils/dataTransfer.ts`, `stores/dataTransfer.ts`). Import rebuilds
   each row from the export's field list (unknown keys dropped, defaults for

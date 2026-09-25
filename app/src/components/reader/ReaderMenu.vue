@@ -37,16 +37,16 @@ const canMarkUnread = computed(
   () => props.bookmark.status === "ready" && props.bookmark.read_at !== null,
 );
 
-// Bookmarks with a URL have a real page to hand off to Google Translate's
-// page proxy. URL-less bookmarks (notes/snippets) have no such page, so
-// those are translated inline instead — see the translate-item button below.
-const translateUrl = computed(() => {
+// Anything with a body is translated in-app (DeepL via the translate edge
+// function, cached on the row). Bookmarks with a URL additionally offer
+// Google Translate's page proxy, which translates the live page instead.
+const translatePageUrl = computed(() => {
   if (!props.bookmark.url) return null;
   const targetLang = navigator.language.split("-")[0] || "en";
   return `https://translate.google.com/translate?sl=auto&tl=${targetLang}&u=${encodeURIComponent(props.bookmark.url)}`;
 });
 
-const canTranslateInline = computed(() => !props.bookmark.url && !!props.bookmark.content_md);
+const canTranslateInline = computed(() => !!props.bookmark.content_md);
 
 // A PDF has no source URL — its "original" is the uploaded file kept in
 // Storage, opened via a signed url the parent resolves on click.
@@ -147,20 +147,8 @@ onUnmounted(() => {
         <IconExternalLink :size="16" />
         Open original
       </button>
-      <a
-        v-if="translateUrl"
-        class="menu-item translate-item"
-        :href="translateUrl"
-        target="_blank"
-        rel="noopener"
-        role="menuitem"
-        @click="close"
-      >
-        <IconLanguage :size="16" />
-        Translate…
-      </a>
       <button
-        v-else-if="canTranslateInline"
+        v-if="canTranslateInline"
         class="menu-item translate-item"
         type="button"
         role="menuitem"
@@ -169,6 +157,18 @@ onUnmounted(() => {
         <IconLanguage :size="16" />
         Translate…
       </button>
+      <a
+        v-if="translatePageUrl"
+        class="menu-item translate-page-item"
+        :href="translatePageUrl"
+        target="_blank"
+        rel="noopener"
+        role="menuitem"
+        @click="close"
+      >
+        <IconLanguage :size="16" />
+        Translate page
+      </a>
       <button
         class="menu-item edit-item"
         type="button"

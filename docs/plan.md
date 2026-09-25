@@ -217,6 +217,7 @@ should own them.
 ## 3. Open from the 2026-08-25 audit
 
 ### 3.1 Articles bypass in-app DeepL translation
+**Status:** done (app 0.1.0). Google's page translation stays as a secondary "Translate page" link. The `translate` edge function needs a redeploy.
 `ReaderMenu.vue:46` sends bookmarks with a `url` to translate.google.com; only
 notes use `store.translateBookmark()` → `translate` edge function. Route
 articles through DeepL too (cached `translated_content_md`, inline toggle).

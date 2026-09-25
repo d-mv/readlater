@@ -1,5 +1,11 @@
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
-import { deeplApiBase, normalizeTargetLang } from "./translateLogic.ts";
+import {
+  chunkText,
+  deeplApiBase,
+  joinChunks,
+  normalizeTargetLang,
+  type TextChunk,
+} from "./translateLogic.ts";
 
 // apikey and x-client-info are sent on every supabase-js request (including
 // functions.invoke), not just authorization/content-type — omitting them
@@ -38,20 +44,30 @@ export async function handleTranslate(
     typeof input.target_lang === "string" && input.target_lang ? input.target_lang : "EN",
   );
 
-  const deeplRes = await fetchImpl(`${deeplApiBase(apiKey)}/v2/translate`, {
-    method: "POST",
-    headers: {
-      Authorization: `DeepL-Auth-Key ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ text: [text], target_lang: targetLang }),
-  });
+  // One DeepL request per chunk: a long article can exceed DeepL's request
+  // size limit, so it's split at paragraph boundaries and reassembled.
+  const chunks = chunkText(text);
+  const translatedChunks: TextChunk[] = [];
+  let detectedSourceLang: string | null = null;
+  for (const chunk of chunks) {
+    const deeplRes = await fetchImpl(`${deeplApiBase(apiKey)}/v2/translate`, {
+      method: "POST",
+      headers: {
+        Authorization: `DeepL-Auth-Key ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ text: [chunk.text], target_lang: targetLang }),
+    });
 
-  if (!deeplRes.ok) return json(`DeepL error: ${await deeplRes.text()}`, 502);
+    if (!deeplRes.ok) return json(`DeepL error: ${await deeplRes.text()}`, 502);
 
-  const body = await deeplRes.json();
-  const translated = body?.translations?.[0]?.text;
-  if (typeof translated !== "string") return json("DeepL returned no translation", 502);
+    const body = await deeplRes.json();
+    const translatedText = body?.translations?.[0]?.text;
+    if (typeof translatedText !== "string") return json("DeepL returned no translation", 502);
+    detectedSourceLang ??= body.translations[0].detected_source_lang ?? null;
+    translatedChunks.push({ text: translatedText, glue: chunk.glue });
+  }
+  const translated = joinChunks(translatedChunks);
 
   // Persisted under RLS as the caller's own session, so this can only ever
   // touch a bookmark the requesting user owns — caching the result here (not
@@ -65,7 +81,7 @@ export async function handleTranslate(
   return json({
     translated_text: translated,
     translated_lang: targetLang,
-    detected_source_lang: body.translations[0].detected_source_lang ?? null,
+    detected_source_lang: detectedSourceLang,
   });
 }
 

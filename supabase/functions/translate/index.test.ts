@@ -166,3 +166,34 @@ Deno.test("handleTranslate: returns 500 with the DB error message when persistin
 Deno.test("corsHeaders: allows the apikey header supabase-js attaches to functions.invoke calls", () => {
   assertStringIncludes(corsHeaders["Access-Control-Allow-Headers"], "apikey");
 });
+
+Deno.test("handleTranslate: splits a long article into several DeepL requests and joins the result", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const sent: string[] = [];
+  const fetchImpl: typeof fetch = (_url, init) => {
+    const { text } = JSON.parse(init?.body as string) as { text: string[] };
+    sent.push(...text);
+    return Promise.resolve({
+      ok: true,
+      status: 200,
+      json: () => Promise.resolve({ translations: text.map((t) => ({ text: t.toUpperCase() })) }),
+      text: () => Promise.resolve(""),
+    } as Response);
+  };
+  const paragraph = "word ".repeat(10_000).trim(); // ~50KB
+  const article = [paragraph, paragraph, paragraph].join("\n\n");
+
+  const res = await handleTranslate(
+    // deno-lint-ignore no-explicit-any
+    supabase as any,
+    "abc123:fx",
+    { bookmark_id: "b1", text: article, target_lang: "de" },
+    fetchImpl,
+  );
+
+  assertEquals(res.status, 200);
+  assertEquals(sent.length > 1, true);
+  assertEquals(sent.join("\n\n"), article);
+  assertEquals(supabase.lastUpdatePayload?.translated_content_md, article.toUpperCase());
+});
+
