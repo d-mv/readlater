@@ -561,6 +561,106 @@ describe("ReaderView", () => {
       expect(scrollEl.scrollTop).toBe(400);
     });
 
+    test("restores the saved position once the body arrives for a list row opened without one", async () => {
+      const store = useBookmarksStore();
+      const listRow = makeBookmark({ id: "1", status: "ready", progress: 0.5 });
+      delete (listRow as unknown as Record<string, unknown>).content_md;
+      store.bookmarks = [listRow];
+
+      let resolveFetch!: (value: { data: Bookmark; error: null }) => void;
+      const single = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveFetch = resolve;
+          }),
+      );
+      from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })) });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      // While the body is loading only a placeholder renders — nothing to scroll.
+      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 200, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+      expect(scrollEl.scrollTop).toBe(0);
+
+      resolveFetch({
+        data: makeBookmark({ id: "1", status: "ready", progress: 0.5, content_md: "Long body" }),
+        error: null,
+      });
+      await flushPromises();
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(scrollEl.scrollTop).toBe(400);
+    });
+
+    test("does not save progress from scrolls made before the body is restored", async () => {
+      const store = useBookmarksStore();
+      const listRow = makeBookmark({ id: "1", status: "ready", progress: 0.5 });
+      delete (listRow as unknown as Record<string, unknown>).content_md;
+      store.bookmarks = [listRow];
+
+      const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+      const single = vi.fn(() => new Promise(() => {}));
+      from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })), update });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      // A stray scroll on the placeholder (10%) must not overwrite the saved 50%.
+      Object.defineProperty(scrollEl, "scrollTop", {
+        value: 80,
+        configurable: true,
+        writable: true,
+      });
+      scrollEl.dispatchEvent(new Event("scroll"));
+      await nextTick();
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    test("writes a pending position to the bookmark it was read on, not the next one", async () => {
+      const store = useBookmarksStore();
+      const eqUpdate = vi.fn().mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq: eqUpdate }));
+      store.bookmarks = [
+        makeBookmark({ id: "1", status: "ready", progress: 0, content_md: "One" }),
+        makeBookmark({ id: "2", status: "ready", progress: 0, content_md: "Two" }),
+      ];
+      from.mockReturnValue({ update });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      const scrollEl = wrapper.find(".scroll-area").element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      Object.defineProperty(scrollEl, "scrollTop", {
+        value: 400,
+        configurable: true,
+        writable: true,
+      });
+      scrollEl.dispatchEvent(new Event("scroll"));
+      await nextTick();
+
+      // Navigate to another bookmark before the debounced write fires.
+      await wrapper.setProps({ id: "2" });
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenCalledWith({ progress: 0.5 });
+      expect(eqUpdate).toHaveBeenCalledWith("id", "1");
+    });
+
     test("saves progress as the user scrolls", async () => {
       const eqUpdate = vi.fn().mockResolvedValue({ error: null });
       const update = vi.fn(() => ({ eq: eqUpdate }));

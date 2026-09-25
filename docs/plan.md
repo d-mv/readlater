@@ -68,6 +68,8 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.1 Reading position lost when opening from the list
 
+**Status:** done (app 0.0.1). `ReaderView` keeps one `ProgressSession` per bookmark.
+
 - **Where:** `app/src/views/ReaderView.vue:38-69`, `:330-331`.
 - **Problem:** list rows have no body (`content_md === undefined`) until
   `fetchOne()`. The scroll container renders regardless, so the restore watch

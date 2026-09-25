@@ -35,62 +35,87 @@ const bodyLoaded = computed(
 const scrollContainer = useTemplateRef<HTMLDivElement>("scrollContainer");
 const { progress } = useScrollProgress(scrollContainer);
 
-const restoredScrollForId = ref<string | null>(null);
-// Last progress value we persisted — the guard for coalescing writes below.
-let lastWrittenProgress = 0;
+// Reading progress for the bookmark on screen. One record owns it so a
+// position can only be restored once there's a body to scroll, and a pending
+// write always lands on the bookmark it was read on:
+// - "awaiting-body": the body (or a ready status) isn't there yet — the
+//   container only holds a placeholder, so scrolls are meaningless.
+// - "tracking": the saved position has been restored; scrolls are recorded.
+type ProgressSession = {
+  id: string;
+  phase: "awaiting-body" | "tracking";
+  // Last value persisted (or restored) — the guard for coalescing writes.
+  lastWritten: number;
+  pending: number | null;
+};
+let progressSession: ProgressSession | null = null;
 
-function restoreReadingProgress() {
-  if (!bookmark.value || bookmark.value.status !== "ready" || !scrollContainer.value) return;
-  if (restoredScrollForId.value === bookmark.value.id) return;
-  restoredScrollForId.value = bookmark.value.id;
+// Reading progress is a nice-to-have, not something worth a DB write on every
+// debounce tick of a long scroll: coalesce to one write per 2s, only when the
+// position moved a meaningful amount, and flush whatever is pending when the
+// page goes away or the reader switches bookmarks.
+const PROGRESS_WRITE_DELTA = 0.02;
 
-  const targetProgress = bookmark.value.progress ?? 0;
-  if (targetProgress <= 0) return;
-  // The restore scroll re-fires the progress watcher; treat the restored
-  // value as already persisted so it doesn't trigger a redundant write.
-  lastWrittenProgress = targetProgress;
+function flushProgress() {
+  const session = progressSession;
+  if (!session || session.pending === null) return;
+  const value = session.pending;
+  session.pending = null;
+  session.lastWritten = value;
+  store.updateProgress(session.id, value);
+}
 
+const flushProgressDebounced = useDebouncedFn(flushProgress, 2000);
+
+function restoreScroll(target: number) {
   nextTick(() => {
     requestAnimationFrame(() => {
       const el = scrollContainer.value;
       if (!el) return;
       const scrollable = el.scrollHeight - el.clientHeight;
-      if (scrollable > 0) {
-        el.scrollTop = Math.round(targetProgress * scrollable);
-      }
+      if (scrollable > 0) el.scrollTop = Math.round(target * scrollable);
     });
   });
 }
 
+function syncProgressSession() {
+  const current = bookmark.value;
+  if (!current) return;
+
+  if (progressSession?.id !== current.id) {
+    flushProgress();
+    progressSession = { id: current.id, phase: "awaiting-body", lastWritten: 0, pending: null };
+  }
+
+  const readable = current.status === "ready" && bodyLoaded.value && scrollContainer.value;
+  if (!readable) {
+    // Body is being (re)loaded, e.g. pending → ready: keep what was read so
+    // far, then restore again once the new body renders.
+    flushProgress();
+    progressSession.phase = "awaiting-body";
+    return;
+  }
+  if (progressSession.phase === "tracking") return;
+
+  progressSession.phase = "tracking";
+  const target = current.progress ?? 0;
+  // The restore scroll re-fires the progress watcher; treat the restored
+  // value as already persisted so it doesn't trigger a redundant write.
+  progressSession.lastWritten = target;
+  if (target > 0) restoreScroll(target);
+}
+
 watch(
-  () => [bookmark.value?.id, bookmark.value?.status, scrollContainer.value],
-  restoreReadingProgress,
+  () => [bookmark.value?.id, bookmark.value?.status, bodyLoaded.value, scrollContainer.value],
+  syncProgressSession,
   { immediate: true },
 );
 
-// Reading progress is a nice-to-have, not something worth a DB write on every
-// debounce tick of a long scroll: coalesce to one write per 2s, only when the
-// position moved a meaningful amount, and flush whatever is pending when the
-// page goes away.
-const PROGRESS_WRITE_DELTA = 0.02;
-let pendingProgress: number | null = null;
-
-function flushProgress() {
-  if (pendingProgress === null) return;
-  const value = pendingProgress;
-  pendingProgress = null;
-  if (bookmark.value && bookmark.value.status === "ready") {
-    lastWrittenProgress = value;
-    store.updateProgress(bookmark.value.id, value);
-  }
-}
-
-const flushProgressDebounced = useDebouncedFn(flushProgress, 2000);
-
 watch(progress, (newVal) => {
-  if (!bookmark.value || restoredScrollForId.value !== bookmark.value.id) return;
-  if (Math.abs(newVal - lastWrittenProgress) < PROGRESS_WRITE_DELTA) return;
-  pendingProgress = newVal;
+  const session = progressSession;
+  if (!session || session.phase !== "tracking") return;
+  if (Math.abs(newVal - session.lastWritten) < PROGRESS_WRITE_DELTA) return;
+  session.pending = newVal;
   flushProgressDebounced();
 });
 
