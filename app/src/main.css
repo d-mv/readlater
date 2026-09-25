@@ -1,0 +1,135 @@
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/source-serif-4/400.css";
+@import "@fontsource/jetbrains-mono/400.css";
+@import "@fontsource/jetbrains-mono/500.css";
+
+/* Tailwind v4, set up like kairos-v2's client (see docs/plan.md §7).
+   Preflight (Tailwind's base reset) is deliberately not imported yet: the
+   components still on scoped CSS, and the rendered article, rely on browser
+   defaults. It is switched on once every component is migrated. */
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+@theme {
+  /* Surfaces, lines and ink — kairos token names, read-later's palette. */
+  --color-canvas: #f5f4f2;
+  --color-raised: #fafaf8;
+  --color-recessed: #ecebe7;
+  --color-scrim: rgba(26, 26, 24, 0.35);
+  --color-line: #e3e1db;
+  --color-line-strong: #cbc8bf;
+  --color-ink: #1a1a18;
+  --color-ink-muted: #6b6963;
+  --color-ink-faint: #9b9990;
+  --color-ink-inverse: #fafaf8;
+  --color-accent: #d85a30;
+  --color-accent-hover: #c04d26;
+  --color-accent-wash: #faece7;
+  --color-accent-wash-ink: #993c1d;
+  --color-accent-ink: #ffffff;
+  --color-danger: #c23b3b;
+  --color-focus: #1a1a18;
+
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: "Source Serif 4", Georgia, serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+
+  /* Root font-size is 62.5% (1rem = 10px), as in kairos. Spacing is one
+     unit per pixel (p-8 = 8px) so the scoped CSS converts one-to-one. */
+  --spacing: 0.1rem;
+  --text-2xs: 1.1rem;
+  --text-xs: 1.2rem;
+  --text-sm: 1.3rem;
+  --text-base: 1.4rem;
+  --text-md: 1.6rem;
+  --text-lg: 1.8rem;
+  --text-xl: 2rem;
+
+  --radius-sm: 0.6rem;
+  --radius-md: 0.8rem;
+
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+  --duration: 140ms;
+}
+
+[data-theme="dark"] {
+  --color-canvas: #1c1b19;
+  --color-raised: #242320;
+  --color-recessed: #161513;
+  --color-scrim: rgba(0, 0, 0, 0.55);
+  --color-line: #38362f;
+  --color-line-strong: #4d4a41;
+  --color-ink: #f0eee8;
+  --color-ink-muted: #a8a69e;
+  --color-ink-faint: #726f66;
+  --color-ink-inverse: #1c1b19;
+  --color-accent: #f0997b;
+  --color-accent-hover: #f4ae95;
+  --color-accent-wash: #4a1b0c;
+  --color-accent-wash-ink: #f0997b;
+  --color-accent-ink: #2c1006;
+  --color-danger: #e2685f;
+  --color-focus: #f0eee8;
+}
+
+:root {
+  /* Reader font size, written at runtime by stores/fontSize.ts (px). */
+  --rl-article-font-size: 16px;
+
+  /* Temporary aliases for components still on scoped CSS; removed once the
+     migration is complete (plan §7.6 step 5). */
+  --rl-bg: var(--color-canvas);
+  --rl-surface: var(--color-raised);
+  --rl-border: var(--color-line);
+  --rl-text-primary: var(--color-ink);
+  --rl-text-secondary: var(--color-ink-muted);
+  --rl-text-muted: var(--color-ink-faint);
+  --rl-accent: var(--color-accent);
+  --rl-accent-tint: var(--color-accent-wash);
+  --rl-on-accent-tint: var(--color-accent-wash-ink);
+  --rl-on-accent: var(--color-accent-ink);
+  --rl-danger: var(--color-danger);
+  --rl-radius: 8px;
+  --rl-font-ui: var(--font-sans);
+  --rl-font-serif: var(--font-serif);
+  --rl-font-mono: var(--font-mono);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  font-size: 62.5%;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  /* Body copy defaults back to 16px under the 62.5% root. */
+  font-size: 1.6rem;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}

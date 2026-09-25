@@ -422,11 +422,19 @@ more than it saves. Check that Tailwind's preflight doesn't break
 
 ### 7.6 Steps
 
+**Deviations from kairos (logged):**
+- `--spacing: 0.1rem` (1 unit = 1px) instead of Tailwind's 0.25rem. With the
+  62.5% root the default unit is 2.5px, which doesn't map to the app's
+  4/8/12/16px rhythm.
+- Preflight is imported only after every component is migrated, so the
+  intermediate steps are visually neutral.
+- Fonts stay self-hosted via `@fontsource`; kairos loads them from Google Fonts.
+
 0. ✅ *(done, app 0.2.1: `data-testid` hooks, `aria-pressed`/`data-*` for state; e2e derive the Supabase host from `app/.env` and run on port 5183)* **Tests first.** 108 `find('.class')` selectors (38 distinct classes) in
    the Vitest suites, plus Playwright specs, will break once class names
    disappear. Move them to roles, labels or `data-testid` while the old CSS
    is still in place, and keep the suite green.
-1. Setup and tokens (7.1–7.2), with temporary `--rl-*` → new-token aliases
+1. ✅ *(done, app 0.2.2; theme and utilities layers only, preflight deferred to step 5; `--spacing: 0.1rem`, so 1 unit = 1px; login screenshots byte-identical before and after)* Setup and tokens (7.1–7.2), with temporary `--rl-*` → new-token aliases
    so unmigrated components keep rendering.
 2. Tri-state theme (7.3) — independent of styling, can land first.
 3. `shared/clsx.ts` and the `shared/ui` primitives, each with tests
