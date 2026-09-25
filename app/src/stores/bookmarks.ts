@@ -458,6 +458,16 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (error) return { translatedText: null, error: error.message };
 
     const bookmark = bookmarks.value.find((b) => b.id === id);
+    // DeepL can take seconds; if the text was edited meanwhile, this is a
+    // translation of text that no longer exists. The edge function has
+    // already cached it on the row, so clear that copy too.
+    if (bookmark && bookmark.content_md !== text) {
+      await supabase
+        .from("bookmarks")
+        .update({ translated_content_md: null, translated_lang: null })
+        .eq("id", id);
+      return { translatedText: null, error: "The text changed while translating. Try again." };
+    }
     if (bookmark) {
       bookmark.translated_content_md = data.translated_text;
       bookmark.translated_lang = data.translated_lang;

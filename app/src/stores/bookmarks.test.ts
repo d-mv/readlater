@@ -916,6 +916,32 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks[0]?.translated_lang).toBe("EN");
   });
 
+  test("translateBookmark discards a translation of text that was edited while it was in flight", async () => {
+    const rows = [makeBookmark({ id: "1", content_md: "Bonjour" })];
+    const eqUpdate = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn(() => ({ eq: eqUpdate }));
+    from.mockReturnValue({ select: () => listQuery(rows), update });
+
+    let respond!: (value: unknown) => void;
+    invoke.mockReturnValue(new Promise((r) => (respond = r)));
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    const pending = store.translateBookmark("1", "Bonjour", "EN");
+
+    // The user saves an edit before DeepL answers.
+    store.bookmarks[0].content_md = "Bonjour, édité";
+    store.bookmarks[0].translated_content_md = null;
+    respond({ data: { translated_text: "Hello", translated_lang: "EN" }, error: null });
+    const result = await pending;
+
+    expect(result.error).toMatch(/changed/i);
+    expect(store.bookmarks[0]?.translated_content_md).toBeNull();
+    // The edge function already persisted the stale translation — clear it.
+    expect(update).toHaveBeenCalledWith({ translated_content_md: null, translated_lang: null });
+    expect(eqUpdate).toHaveBeenCalledWith("id", "1");
+  });
+
   test("translateBookmark propagates an error from the edge function without touching local state", async () => {
     const rows = [makeBookmark({ id: "1", content_md: "Bonjour" })];
     from.mockReturnValue({

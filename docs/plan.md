@@ -156,6 +156,8 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.7 Reader edit / translate modes
 
+**Status:** done (app 0.0.8), including the store-side guard in `translateBookmark`.
+
 - **Where:** `app/src/views/ReaderView.vue:183-248`, `:303-311`, template `:332-374`.
 - **Problem:** six independent refs. Double Translate → two DeepL calls. Translate,
   then edit & save → the in-flight translation of the old text is written back

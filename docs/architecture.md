@@ -488,7 +488,12 @@ Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
 - **Translation** — for notes, "Translate" calls `store.translateBookmark()` →
   `translate` edge function (DeepL, `DEEPL_API_KEY`), which stores
   `translated_content_md`/`translated_lang` on the row. A cached translation is
-  shown by default with a translated/original toggle. Bookmarks with a `url`
+  shown by default with a translated/original toggle. `ReaderView` keeps
+  reading / translating / editing as one `ContentMode`, so a second Translate
+  is ignored while one is in flight and a late result only lands on the
+  bookmark it was started for. If the text was edited while DeepL was
+  working, `translateBookmark()` discards the result and clears the copy the
+  edge function already cached. Bookmarks with a `url`
   currently open Google Translate on the source page instead (see
   [`plan.md`](plan.md) §3.1).
 - **Settings** (`SettingsView.vue`, `/settings`) — JSON export/import of the

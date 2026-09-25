@@ -296,6 +296,64 @@ describe("ReaderView", () => {
       );
     });
 
+    test("a second Translate while one is in flight does not call DeepL again", async () => {
+      mockReadyNote(
+        makeBookmark({ id: "1", status: "ready", url: null, type: "note", content_md: "Salut" }),
+      );
+      invoke.mockReturnValue(new Promise(() => {}));
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await clickTranslate(wrapper);
+      await clickTranslate(wrapper);
+      await flushPromises();
+
+      expect(invoke).toHaveBeenCalledTimes(1);
+      expect(wrapper.text()).toContain("Translating…");
+    });
+
+    test("editing during a translation keeps the editor open when the translation arrives", async () => {
+      mockReadyNote(
+        makeBookmark({ id: "1", status: "ready", url: null, type: "note", content_md: "Salut" }),
+      );
+      let respond!: (value: unknown) => void;
+      invoke.mockReturnValue(new Promise((r) => (respond = r)));
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await clickTranslate(wrapper);
+      await wrapper.find(".menu-trigger").trigger("click");
+      await wrapper.find(".edit-item").trigger("click");
+
+      respond({ data: { translated_text: "Hi", translated_lang: "EN" }, error: null });
+      await flushPromises();
+
+      expect(wrapper.find("input.title-input").exists()).toBe(true);
+      expect(wrapper.find(".translate-bar").exists()).toBe(false);
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("editing")).toBe(true);
+    });
+
+    test("a translation that finishes after switching bookmarks doesn't touch the new one", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "1", status: "ready", url: null, type: "note", content_md: "Un" }),
+        makeBookmark({ id: "2", status: "ready", url: null, type: "note", content_md: "Deux" }),
+      ];
+      let respond!: (value: unknown) => void;
+      invoke.mockReturnValue(new Promise((r) => (respond = r)));
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      await clickTranslate(wrapper);
+      await wrapper.setProps({ id: "2" });
+
+      respond({ data: null, error: { message: "DeepL quota exceeded" } });
+      await flushPromises();
+
+      expect(wrapper.text()).not.toContain("DeepL quota exceeded");
+      expect(wrapper.find(".translate-bar").exists()).toBe(false);
+    });
+
     test("shows the edge function's error message when translation fails", async () => {
       const note = makeBookmark({
         id: "1",

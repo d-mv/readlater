@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  shallowRef,
+  useTemplateRef,
+  watch,
+} from "vue";
 import { useRouter } from "vue-router";
 import { IconLoader2, IconAlertTriangle, IconRefresh } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
@@ -205,38 +214,69 @@ function onRemoveTag(tagId: string) {
   if (bookmark.value) store.removeTag(bookmark.value.id, tagId);
 }
 
-const editing = ref(false);
-const draftTitle = ref("");
-const draftContent = ref("");
+// What the content area is doing, as one value — so it can't be editing and
+// translating at once, and a translation can only land on the bookmark it
+// was started for.
+// - reading: `view` is which body to show when a cached translation exists
+//   (translated by default); `error` is the last translation failure.
+// - translating: waiting on DeepL for `forId`.
+// - editing: the title/body drafts.
+type ContentMode =
+  | { kind: "reading"; view: "translated" | "original"; error: string | null }
+  | { kind: "translating"; forId: string }
+  | { kind: "editing"; title: string; content: string };
 
+const READING: ContentMode = { kind: "reading", view: "translated", error: null };
+const mode = shallowRef<ContentMode>(READING);
+
+const editing = computed(() => mode.value.kind === "editing");
+const translating = computed(() => mode.value.kind === "translating");
+const translateError = computed(() => (mode.value.kind === "reading" ? mode.value.error : null));
+const showOriginal = computed(
+  () => mode.value.kind === "reading" && mode.value.view === "original",
+);
+
+const draftTitle = computed({
+  get: () => (mode.value.kind === "editing" ? mode.value.title : ""),
+  set: (title: string) => {
+    if (mode.value.kind === "editing") mode.value = { ...mode.value, title };
+  },
+});
+const draftContent = computed({
+  get: () => (mode.value.kind === "editing" ? mode.value.content : ""),
+  set: (content: string) => {
+    if (mode.value.kind === "editing") mode.value = { ...mode.value, content };
+  },
+});
+
+// Editing is allowed while a translation is in flight: the pending result is
+// then dropped (the mode is no longer "translating"), and the store discards
+// a translation whose source text has since changed.
 function onEdit() {
-  if (!bookmark.value) return;
-  draftTitle.value = bookmark.value.title ?? "";
-  draftContent.value = bookmark.value.content_md ?? "";
-  editing.value = true;
+  if (!bookmark.value || mode.value.kind === "editing") return;
+  mode.value = {
+    kind: "editing",
+    title: bookmark.value.title ?? "",
+    content: bookmark.value.content_md ?? "",
+  };
 }
 
 function onCancelEdit() {
-  editing.value = false;
+  mode.value = READING;
 }
 
 async function onSaveEdit() {
-  if (!bookmark.value) return;
-  const words = wordCount(draftContent.value);
+  const current = mode.value;
+  if (!bookmark.value || current.kind !== "editing") return;
+  const words = wordCount(current.content);
   await store.updateContent(bookmark.value.id, {
-    title: draftTitle.value,
-    content_md: draftContent.value,
+    title: current.title,
+    content_md: current.content,
     word_count: words,
     reading_time: readingTimeFromWordCount(words),
   });
-  editing.value = false;
+  mode.value = READING;
 }
-
-const translating = ref(false);
-const translateError = ref<string | null>(null);
-// A cached translation (bookmark.translated_content_md) is shown by default;
-// this only tracks the user explicitly asking to see the original instead.
-const showOriginal = ref(false);
 
 const displayContentMd = computed(() => {
   if (!bookmark.value) return null;
@@ -245,31 +285,25 @@ const displayContentMd = computed(() => {
 });
 
 async function onTranslate() {
-  if (!bookmark.value?.content_md) return;
+  const current = bookmark.value;
+  if (!current?.content_md || mode.value.kind !== "reading") return;
   // Already translated and cached server-side — just make sure it's shown,
   // without spending another DeepL call.
-  if (bookmark.value.translated_content_md) {
-    showOriginal.value = false;
+  if (current.translated_content_md) {
+    mode.value = READING;
     return;
   }
-  translateError.value = null;
-  translating.value = true;
+  mode.value = { kind: "translating", forId: current.id };
   const targetLang = (navigator.language.split("-")[0] || "en").toUpperCase();
-  const { error } = await store.translateBookmark(
-    bookmark.value.id,
-    bookmark.value.content_md,
-    targetLang,
-  );
-  translating.value = false;
-  if (error) {
-    translateError.value = error;
-    return;
-  }
-  showOriginal.value = false;
+  const { error } = await store.translateBookmark(current.id, current.content_md, targetLang);
+  // Superseded: the user started editing or switched bookmarks meanwhile.
+  if (mode.value.kind !== "translating" || mode.value.forId !== props.id) return;
+  mode.value = { kind: "reading", view: "translated", error };
 }
 
 function onToggleOriginal() {
-  showOriginal.value = !showOriginal.value;
+  if (mode.value.kind !== "reading") return;
+  mode.value = { ...mode.value, view: mode.value.view === "original" ? "translated" : "original" };
 }
 
 // PDFs: view_mode is the persisted user choice; absent that, default to
@@ -328,9 +362,7 @@ async function onTrashOriginalPdf() {
 watch(
   () => props.id,
   () => {
-    showOriginal.value = false;
-    translateError.value = null;
-    translating.value = false;
+    mode.value = READING;
     pdfSignedUrl.value = null;
   },
 );
