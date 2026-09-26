@@ -32,9 +32,7 @@ matches.
 **Status:** repo side done (2026-09-25). Verified with a local `db reset`:
 `pg_dump` of `public`, the publication column list, the replica identity,
 the storage policies and the buckets are identical before and after.
-**Remaining:** steps 2–3 below on the live project. They need
-`bunx supabase login` first, and must happen before the next `db push`, or
-the CLI will refuse because of the unknown remote versions.
+**Live:** done 2026-09-26. The live history holds only `20260825000001`, and `db diff` against live is clean apart from Supabase's own `rls_auto_enable()`.
 
 `supabase/migrations/` has the flattened `20260825000001_initial_schema.sql`
 plus three follow-ups from the DB-traffic work:
@@ -171,8 +169,7 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.8 Shared note-row builder for edge functions
 
-**Status:** done (app 0.0.5). Edge functions need a redeploy (`capture`, `snippet`,
-`file-import`, `pdf-import`) to pick up `_shared/`.
+**Status:** done (app 0.0.5). Deployed 2026-09-26.
 
 - **Where:** `truncateTitle` ×4, `wordCount`/`readingTimeFromWordCount` ×3,
   `decodeBase64`/`titleFromFilename` ×2 across `supabase/functions/*/…Logic.ts`.
@@ -186,7 +183,7 @@ publication/identity state — verify with `supabase db reset` locally. Effort S
 
 ### 2.9 Worker status transitions are unguarded
 
-**Status:** done (worker 0.0.1). Needs a worker redeploy.
+**Status:** done (worker 0.0.1). Deployed 2026-09-26.
 
 - **Where:** `worker/src/index.ts:121-167`, `:199-212`.
 - **Problem:** claim and finish write by `id` only. Refresh while processing →
@@ -217,14 +214,14 @@ should own them.
 ## 3. Open from the 2026-08-25 audit
 
 ### 3.1 Articles bypass in-app DeepL translation
-**Status:** done (app 0.1.0). Google's page translation stays as a secondary "Translate page" link. The `translate` edge function needs a redeploy.
+**Status:** done (app 0.1.0). Google's page translation stays as a secondary "Translate page" link. Deployed 2026-09-26.
 `ReaderMenu.vue:46` sends bookmarks with a `url` to translate.google.com; only
 notes use `store.translateBookmark()` → `translate` edge function. Route
 articles through DeepL too (cached `translated_content_md`, inline toggle).
 Consider DeepL size limits for long articles. Effort S–M.
 
 ### 3.2 Worker SSRF hardening
-**Status:** done (worker 0.0.2). Remaining gap: DNS rebinding (the check and the connection resolve separately). Needs a worker redeploy.
+**Status:** done (worker 0.0.2). Remaining gap: DNS rebinding (the check and the connection resolve separately). Deployed 2026-09-26.
 `worker/src/parseArticle.ts` fetches arbitrary user-submitted URLs (and the
 Playwright fallback navigates to them) with no loopback / private /
 link-local rejection. Resolve the host and reject private ranges before
