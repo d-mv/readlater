@@ -32,7 +32,7 @@ const scrimClasses: Record<DialogPlacement, string> = {
 };
 
 const panelClasses: Record<DialogPlacement, string> = {
-  center: "rounded-md p-24 w-320 max-w-[calc(100vw-32px)]",
+  center: "m-auto rounded-md p-24 w-320 max-w-[calc(100vw-32px)]",
   sheet: "static m-0 w-full max-w-480 rounded-t-md p-20 flex flex-col gap-16",
 };
 </script>

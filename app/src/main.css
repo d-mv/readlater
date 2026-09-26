@@ -10,6 +10,7 @@
    defaults. It is switched on once every component is migrated. */
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/preflight.css" layer(base);
 @import "tailwindcss/utilities.css" layer(utilities);
 
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
@@ -85,24 +86,6 @@
 :root {
   /* Reader font size, written at runtime by stores/fontSize.ts (px). */
   --rl-article-font-size: 16px;
-
-  /* Temporary aliases for components still on scoped CSS; removed once the
-     migration is complete (plan §7.6 step 5). */
-  --rl-bg: var(--color-canvas);
-  --rl-surface: var(--color-raised);
-  --rl-border: var(--color-line);
-  --rl-text-primary: var(--color-ink);
-  --rl-text-secondary: var(--color-ink-muted);
-  --rl-text-muted: var(--color-ink-faint);
-  --rl-accent: var(--color-accent);
-  --rl-accent-tint: var(--color-accent-wash);
-  --rl-on-accent-tint: var(--color-accent-wash-ink);
-  --rl-on-accent: var(--color-accent-ink);
-  --rl-danger: var(--color-danger);
-  --rl-radius: 8px;
-  --rl-font-ui: var(--font-sans);
-  --rl-font-serif: var(--font-serif);
-  --rl-font-mono: var(--font-mono);
 }
 
 /* Base element rules live in the base layer: unlayered rules would beat
@@ -110,6 +93,17 @@
 @layer base {
   * {
     box-sizing: border-box;
+  }
+
+  /* Preflight sets 1.5; the app's text was designed on the browser's
+     "normal", so keep that as the inherited default. */
+  html {
+    line-height: normal;
+  }
+
+  ::placeholder {
+    /* The browser default placeholder grey (Chrome: #757575). */
+    color: #757575;
   }
 
   html {
@@ -168,6 +162,80 @@
 
   .prose a {
     color: var(--color-accent);
+    text-decoration: underline;
+  }
+
+  /* Preflight strips element defaults; articles keep the browser's classic
+     document typography for markdown structure. */
+  .prose h1 {
+    font-size: 2em;
+    margin: 0.67em 0;
+  }
+
+  .prose h2 {
+    font-size: 1.5em;
+    margin: 0.83em 0;
+  }
+
+  .prose h3 {
+    font-size: 1.17em;
+    margin: 1em 0;
+  }
+
+  .prose h4,
+  .prose h5,
+  .prose h6 {
+    font-weight: bold;
+    margin: 1.33em 0;
+  }
+
+  .prose ul,
+  .prose ol {
+    margin: 1em 0;
+    padding-left: 40px;
+  }
+
+  .prose ul {
+    list-style: disc;
+  }
+
+  .prose ol {
+    list-style: decimal;
+  }
+
+  .prose li > ul,
+  .prose li > ol {
+    margin: 0;
+  }
+
+  .prose ul ul {
+    list-style: circle;
+  }
+
+  .prose blockquote,
+  .prose figure {
+    margin: 1em 40px;
+  }
+
+  .prose pre {
+    margin: 1em 0;
+  }
+
+  .prose code,
+  .prose pre,
+  .prose kbd,
+  .prose samp {
+    font-family: monospace;
+  }
+
+  .prose hr {
+    margin: 0.5em 0;
+    border-top: 1px solid var(--color-line);
+  }
+
+  .prose img {
+    display: inline;
+    vertical-align: baseline;
   }
 }
 

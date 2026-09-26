@@ -126,7 +126,7 @@ async function onFileSelected(event: Event) {
       <ul
         v-if="skippedRows.length > 0"
         data-testid="skipped-list"
-        class="m-0 mt-8 pl-18 text-sm text-ink-muted"
+        class="m-0 mt-8 list-disc pl-18 text-sm text-ink-muted"
       >
         <li v-for="(row, index) in skippedRows" :key="index">
           {{ row.title || row.url || "Untitled" }} — {{ row.reason }}

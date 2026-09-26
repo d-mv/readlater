@@ -47,7 +47,7 @@ function onSubmit() {
     <input
       v-model="draft"
       data-testid="tag-draft-input"
-      class="min-w-80 flex-1 border-0 bg-transparent text-xs leading-[normal] text-ink focus:outline-none"
+      class="min-w-80 flex-1 border-0 bg-transparent px-2 py-1 text-xs leading-[normal] text-ink focus:outline-none"
       type="text"
       placeholder="Add tag…"
       @keydown.enter.prevent="onSubmit"

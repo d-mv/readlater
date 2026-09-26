@@ -295,6 +295,8 @@ editor with `content_edited` guard on both refresh paths). Remaining:
 
 ## 7. Frontend: migrate styling to Tailwind v4+
 
+**Status:** done (app 0.3.0).
+
 **Reference implementation:** `~/code/kairos-v2/apps/client` — follow its
 setup, theme structure and shared-component conventions. Shared components
 live in `app/src/shared/ui/`.
@@ -457,9 +459,9 @@ more than it saves. Check that Tailwind's preflight doesn't break
    Delete each `<style scoped>` block as its component is converted.
    Bug-fix items 2.5 (`AddBookmarkDialog`) and 2.7 (`ReaderView`) touch the
    same files: land them before this step, or combine them.
-5. Remove the aliases, `tokens.css` and old `main.css`. Grep that no `--rl-*`
+5. ✅ *(done, app 0.3.0: aliases removed and preflight on, with base-layer and `.prose` rules restoring the UA defaults the design used; all 48 screenshots pixel-identical)* Remove the aliases, `tokens.css` and old `main.css`. Grep that no `--rl-*`
    is left except `--rl-article-font-size`.
-6. Verify:
+6. ✅ *(done: typecheck, 420 unit tests, 3 e2e specs, build; CSS is 50 KB, 20 KB gzipped)* Verify:
    - `vue-tsc -b`, Vitest, Playwright and `vite build` all pass;
    - PWA precache and CSS size before vs. after;
    - a manual pass in both themes at phone width (list, reader, editor,

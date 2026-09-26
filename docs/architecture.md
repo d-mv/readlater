@@ -49,7 +49,7 @@ Independently replaceable pieces:
 | `file-import` / `pdf-import` edge functions | JWT-authed Markdown/Word → note, PDF → stored original + extracted text | Deno (`npm:mammoth`, `npm:unpdf`) |
 | `translate` edge function | JWT-authed DeepL translation, cached on the row | Deno |
 | VPS worker | Poll `pending`, parse, write back | Bun + TypeScript, Docker, Playwright for JS-rendered pages |
-| Vue 3 PWA | Reading list, reader, editing, tags, search, sharing, offline cache, export/import | Vue 3, Pinia, vanilla CSS, `vite-plugin-pwa` |
+| Vue 3 PWA | Reading list, reader, editing, tags, search, sharing, offline cache, export/import | Vue 3, Pinia, Tailwind v4, `vite-plugin-pwa` |
 
 ## 2. Data model
 
@@ -457,7 +457,7 @@ the click-to-play embed.
 
 ## 6. Frontend — Vue 3 PWA
 
-Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
+Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* below), `vite-plugin-pwa`
 (`generateSW`/Workbox mode, `registerType: 'autoUpdate'`, no update-prompt UI
 — single-user, deploys take effect on next load).
 
@@ -540,42 +540,40 @@ Vue 3 + Pinia, vanilla CSS, no component library, `vite-plugin-pwa`
   Inter for UI chrome, JetBrains Mono for metadata (domain, reading time,
   timestamp).
 
-### Design tokens
+### Styling and design tokens
 
-One accent color, used sparingly — the primary action and the unread count,
-nowhere else. Everything else is grayscale.
+Tailwind v4 via `@tailwindcss/vite`, one entry stylesheet `app/src/main.css`:
+theme, preflight and utilities layers; a `dark` custom variant keyed on
+`[data-theme=dark]`; an `@theme` block of semantic tokens with a
+`[data-theme="dark"]` override block. No component has a `<style>` block.
 
-```css
-:root {
-  --rl-bg: #F5F4F2;
-  --rl-surface: #FAFAF8;
-  --rl-border: #E3E1DB;
-  --rl-text-primary: #1A1A18;
-  --rl-text-secondary: #6B6963;
-  --rl-text-muted: #9B9990;
-  --rl-accent: #D85A30;
-  --rl-accent-tint: #FAECE7;
-  --rl-on-accent-tint: #993C1D;
-  --rl-on-accent: #FFFFFF;
-}
+- **Tokens** (kairos names, read-later palette): `canvas` / `raised` /
+  `recessed` surfaces, `line` / `line-strong`, `ink` / `ink-muted` /
+  `ink-faint` / `ink-inverse`, `accent` / `accent-hover` / `accent-wash` /
+  `accent-wash-ink` / `accent-ink`, `danger`, `scrim`, `focus`,
+  `drop-target`. Fonts: `font-sans` (Inter), `font-serif` (Source Serif 4),
+  `font-mono` (JetBrains Mono), self-hosted via `@fontsource`.
+- **Scale:** root `font-size: 62.5%` (1rem = 10px); `--spacing: 0.1rem`, so
+  one spacing unit is 1px (`p-16` = 16px); a replaced text scale
+  (`text-2xs` 11px … `text-xl` 20px) that sets only font-size.
+- **Base layer** restores the browser defaults the design relies on after
+  preflight: `line-height: normal`, the default placeholder grey.
+- **`.prose`** (components layer) styles rendered article markdown, which
+  can't carry utility classes: serif body at the reader font-size
+  (`--rl-article-font-size`, px, from `stores/fontSize.ts`), line-height 1.7,
+  UA-style headings, lists, blockquotes and code.
+- **Shared UI** (`app/src/shared/ui/`): `Button`, `IconButton`, `Dialog`,
+  `Input`, `Tabs`, `Pill`, `Message`, `Empty`. They have typed props/emits,
+  `inheritAttrs: false`, explicit `testId` and `class` props, and merge
+  classes with `cn()` (`app/src/shared/clsx.ts`, tailwind-merge).
+  Tests locate elements by `data-testid`, and assert state through
+  `aria-pressed` / `data-*`, never through styling classes.
 
-[data-theme="dark"] {
-  --rl-bg: #1C1B19;
-  --rl-surface: #242320;
-  --rl-border: #38362F;
-  --rl-text-primary: #F0EEE8;
-  --rl-text-secondary: #A8A69E;
-  --rl-text-muted: #726F66;
-  --rl-accent: #F0997B;
-  --rl-accent-tint: #4A1B0C;
-  --rl-on-accent-tint: #F0997B;
-  --rl-on-accent: #2C1006;
-}
-```
-Warm near-black rather than pure black for `--rl-bg` in dark mode, so it
-keeps the light palette's character instead of reading as generic
-OLED-dark. The accent lightens from the 400 to the 200 stop of the same
-coral family in dark mode — the saturated version would glare on dark.
+One accent colour, used sparingly (the primary action and the unread count);
+everything else is grayscale. Dark mode uses a warm near-black canvas rather
+than pure black, so it keeps the light palette's character, and the accent
+lightens from the 400 to the 200 stop of the same coral family, because the
+saturated version glares on dark.
 
 **Theme switching** (`stores/theme.ts`) — a `light` / `dark` / `system`
 preference (stored under `localStorage.theme`; nothing stored means `system`),

@@ -72,6 +72,7 @@ function nativeShare() {
       <input
         data-testid="toggle-input"
         type="checkbox"
+        class="mt-3 mr-3 mb-3 ml-4"
         :checked="bookmark.is_public"
         @change="onToggle"
       />
