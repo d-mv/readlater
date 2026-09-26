@@ -22,6 +22,7 @@ import ReaderProgressBar from "../components/reader/ReaderProgressBar.vue";
 import ArticleContent from "../components/reader/ArticleContent.vue";
 import ShareDialog from "../components/reader/ShareDialog.vue";
 import TagInput from "../components/reader/TagInput.vue";
+import Button from "../shared/ui/Button.vue";
 
 const props = defineProps<{
   id: string;
@@ -369,7 +370,7 @@ watch(
 </script>
 
 <template>
-  <main v-if="bookmark" class="reader-view">
+  <main v-if="bookmark" class="mx-auto flex h-full max-w-680 flex-col bg-raised">
     <ReaderProgressBar :progress="progress" />
     <ReaderHeader
       :bookmark="bookmark"
@@ -384,50 +385,48 @@ watch(
       @open-original-pdf="onOpenOriginalPdf"
       @trash-original-pdf="onTrashOriginalPdf"
     />
-    <div data-testid="scroll-area" ref="scrollContainer" class="scroll-area">
+    <div
+      data-testid="scroll-area"
+      ref="scrollContainer"
+      class="flex-1 overflow-y-auto px-20 pt-20 pb-8"
+    >
       <template v-if="bookmark.status === 'ready' && bodyLoaded">
-        <h1 data-testid="title" v-if="!editing" class="title">{{ bookmark.title }}</h1>
+        <h1
+          data-testid="title"
+          v-if="!editing"
+          class="m-0 mb-8 font-sans text-xl leading-[1.3] font-medium text-ink"
+        >
+          {{ bookmark.title }}
+        </h1>
         <input
           data-testid="title-input"
           v-else
           v-model="draftTitle"
-          class="title-input"
+          class="m-0 mb-12 w-full rounded-md border-[0.5px] border-line bg-raised px-10 py-8 font-sans text-xl leading-[normal] font-medium text-ink"
           type="text"
           placeholder="Title"
         />
-        <p v-if="byline && !editing" class="byline">{{ byline }}</p>
-        <div v-if="editing" class="edit-actions">
-          <button
-            data-testid="cancel-edit-btn"
-            class="btn-secondary cancel-edit-btn"
-            type="button"
-            @click="onCancelEdit"
-          >
+        <p v-if="byline && !editing" class="m-0 mb-20 font-mono text-xs text-ink-faint">
+          {{ byline }}
+        </p>
+        <div v-if="editing" class="m-0 mb-12 flex justify-end gap-8">
+          <Button variant="secondary" test-id="cancel-edit-btn" @click="onCancelEdit">
             Cancel
-          </button>
-          <button
-            data-testid="save-edit-btn"
-            class="btn-primary save-edit-btn"
-            type="button"
-            @click="onSaveEdit"
-          >
-            Save
-          </button>
+          </Button>
+          <Button test-id="save-edit-btn" @click="onSaveEdit">Save</Button>
         </div>
         <div
           data-testid="translate-bar"
           v-if="!editing && (translating || translateError || bookmark.translated_content_md)"
-          class="translate-bar"
+          class="m-0 mb-16 flex items-center gap-10 rounded-md bg-canvas px-10 py-8 font-sans text-sm"
         >
-          <span v-if="translating" class="translate-status">Translating…</span>
-          <span v-else-if="translateError" class="translate-status translate-status-error">{{
-            translateError
-          }}</span>
+          <span v-if="translating" class="text-ink-muted">Translating…</span>
+          <span v-else-if="translateError" class="text-danger">{{ translateError }}</span>
           <template v-else>
-            <span class="translate-status">{{ showOriginal ? "Original" : "Translated" }}</span>
+            <span class="text-ink-muted">{{ showOriginal ? "Original" : "Translated" }}</span>
             <button
               data-testid="translate-toggle"
-              class="translate-toggle"
+              class="cursor-pointer border-0 bg-transparent p-0 font-sans text-sm leading-[normal] text-accent"
               type="button"
               @click="onToggleOriginal"
             >
@@ -435,13 +434,17 @@ watch(
             </button>
           </template>
         </div>
-        <div data-testid="pdf-view-bar" v-if="!editing && canTogglePdfView" class="pdf-view-bar">
-          <span class="pdf-view-status">{{
+        <div
+          data-testid="pdf-view-bar"
+          v-if="!editing && canTogglePdfView"
+          class="m-0 mb-16 flex items-center gap-10 rounded-md bg-canvas px-10 py-8 font-sans text-sm"
+        >
+          <span class="text-ink-muted">{{
             pdfEffectiveViewMode === "original" ? "Original PDF" : "Markdown"
           }}</span>
           <button
             data-testid="pdf-view-toggle"
-            class="pdf-view-toggle"
+            class="cursor-pointer border-0 bg-transparent p-0 font-sans text-sm leading-[normal] text-accent"
             type="button"
             @click="onTogglePdfView"
           >
@@ -463,19 +466,30 @@ watch(
       <div
         data-testid="status-placeholder"
         v-else-if="bookmark.status === 'failed'"
-        class="status-placeholder"
+        class="flex flex-col items-center gap-12 px-16 py-64 text-center text-ink-faint"
       >
-        <IconAlertTriangle :size="28" class="status-icon status-icon-failed" />
-        <p class="status-text">Couldn't process this article.</p>
-        <p v-if="bookmark.error_message" class="status-detail">{{ bookmark.error_message }}</p>
-        <button data-testid="retry-btn" class="retry-btn" type="button" @click="onRetry">
+        <IconAlertTriangle :size="28" class="text-danger" />
+        <p class="m-0 font-sans text-base">Couldn't process this article.</p>
+        <p v-if="bookmark.error_message" class="m-0 max-w-480 font-mono text-xs text-ink-faint">
+          {{ bookmark.error_message }}
+        </p>
+        <button
+          data-testid="retry-btn"
+          class="mt-8 inline-flex cursor-pointer items-center gap-8 rounded-md border-[0.5px] border-line bg-raised px-14 py-8 font-sans text-sm leading-[normal] text-ink hover:bg-canvas"
+          type="button"
+          @click="onRetry"
+        >
           <IconRefresh :size="16" />
           Try again
         </button>
       </div>
-      <div data-testid="status-placeholder" v-else class="status-placeholder">
-        <IconLoader2 :size="28" class="status-icon icon-spin" />
-        <p class="status-text">Processing…</p>
+      <div
+        data-testid="status-placeholder"
+        v-else
+        class="flex flex-col items-center gap-12 px-16 py-64 text-center text-ink-faint"
+      >
+        <IconLoader2 :size="28" class="animate-spin" />
+        <p class="m-0 font-sans text-base">Processing…</p>
       </div>
     </div>
     <TagInput
@@ -492,197 +506,3 @@ watch(
     />
   </main>
 </template>
-
-<style scoped>
-.reader-view {
-  max-width: 680px;
-  margin: 0 auto;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: var(--rl-surface);
-}
-
-.scroll-area {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 20px 8px;
-}
-
-.title {
-  font-family: var(--rl-font-ui);
-  font-size: 20px;
-  font-weight: 500;
-  color: var(--rl-text-primary);
-  line-height: 1.3;
-  margin: 0 0 8px;
-}
-
-.byline {
-  font-family: var(--rl-font-mono);
-  font-size: 12px;
-  color: var(--rl-text-muted);
-  margin: 0 0 20px;
-}
-
-.title-input {
-  width: 100%;
-  border: 0.5px solid var(--rl-border);
-  border-radius: var(--rl-radius);
-  background: var(--rl-surface);
-  color: var(--rl-text-primary);
-  font-family: var(--rl-font-ui);
-  font-size: 20px;
-  font-weight: 500;
-  padding: 8px 10px;
-  margin: 0 0 12px;
-}
-
-.edit-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin: 0 0 12px;
-}
-
-.translate-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 16px;
-  padding: 8px 10px;
-  border-radius: var(--rl-radius);
-  background: var(--rl-bg);
-  font-family: var(--rl-font-ui);
-  font-size: 13px;
-}
-
-.translate-status {
-  color: var(--rl-text-secondary);
-}
-
-.translate-status-error {
-  color: var(--rl-danger);
-}
-
-.translate-toggle {
-  border: none;
-  background: transparent;
-  color: var(--rl-accent);
-  font-family: var(--rl-font-ui);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-}
-
-.pdf-view-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 16px;
-  padding: 8px 10px;
-  border-radius: var(--rl-radius);
-  background: var(--rl-bg);
-  font-family: var(--rl-font-ui);
-  font-size: 13px;
-}
-
-.pdf-view-status {
-  color: var(--rl-text-secondary);
-}
-
-.pdf-view-toggle {
-  border: none;
-  background: transparent;
-  color: var(--rl-accent);
-  font-family: var(--rl-font-ui);
-  font-size: 13px;
-  cursor: pointer;
-  padding: 0;
-}
-
-.btn-secondary,
-.btn-primary {
-  display: inline-flex;
-  align-items: center;
-  height: 34px;
-  padding: 0 14px;
-  border-radius: var(--rl-radius);
-  font-family: var(--rl-font-ui);
-  font-size: 13px;
-  cursor: pointer;
-  border: none;
-}
-
-.btn-secondary {
-  background: transparent;
-  border: 0.5px solid var(--rl-border);
-  color: var(--rl-text-primary);
-}
-
-.btn-primary {
-  background: var(--rl-accent);
-  color: var(--rl-on-accent);
-  font-weight: 500;
-}
-
-.status-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 64px 16px;
-  text-align: center;
-  color: var(--rl-text-muted);
-}
-
-.status-icon-failed {
-  color: var(--rl-danger);
-}
-
-.status-text {
-  font-family: var(--rl-font-ui);
-  font-size: 14px;
-  margin: 0;
-}
-
-.status-detail {
-  font-family: var(--rl-font-mono);
-  font-size: 12px;
-  color: var(--rl-text-muted);
-  margin: 0;
-  max-width: 480px;
-}
-
-.retry-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 8px;
-  padding: 8px 14px;
-  border: 0.5px solid var(--rl-border);
-  border-radius: var(--rl-radius);
-  background: var(--rl-surface);
-  color: var(--rl-text-primary);
-  font-family: var(--rl-font-ui);
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.retry-btn:hover {
-  background: var(--rl-bg);
-}
-
-.icon-spin {
-  animation: rl-spin 1s linear infinite;
-}
-
-@keyframes rl-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-</style>
