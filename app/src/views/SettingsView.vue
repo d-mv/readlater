@@ -4,6 +4,9 @@ import { useRouter } from "vue-router";
 import { IconArrowLeft, IconDownload, IconUpload } from "@tabler/icons-vue";
 import { useDataTransferStore } from "../stores/dataTransfer";
 import type { SkippedRow } from "../utils/dataTransfer";
+import Button from "../shared/ui/Button.vue";
+import IconButton from "../shared/ui/IconButton.vue";
+import Message from "../shared/ui/Message.vue";
 
 const router = useRouter();
 const store = useDataTransferStore();
@@ -73,50 +76,58 @@ async function onFileSelected(event: Event) {
 </script>
 
 <template>
-  <main class="settings-view">
-    <div class="header-row">
-      <button class="icon-btn" type="button" aria-label="Back" @click="onBack">
+  <main class="mx-auto max-w-560 px-16 pt-24 pb-64">
+    <div class="mb-24 flex items-center gap-12">
+      <IconButton title="Back" @click="onBack">
         <IconArrowLeft :size="18" />
-      </button>
-      <h1>Settings</h1>
+      </IconButton>
+      <h1 class="m-0 text-xl font-bold">Settings</h1>
     </div>
 
-    <section class="panel">
-      <h2>Export</h2>
-      <p class="hint">
+    <section class="mb-16 rounded-md border-[0.5px] border-line bg-raised p-20">
+      <h2 class="m-0 mb-8 text-[1.5rem] font-bold">Export</h2>
+      <p class="m-0 mb-16 text-sm leading-[1.5] text-ink-muted">
         Download every bookmark and tag as a JSON file. Thumbnail and PDF files stay in this
         project's storage — only their paths/URLs are included, so they won't follow the export into
         a different Supabase project.
       </p>
-      <button class="btn btn-primary" type="button" :disabled="exporting" @click="onExport">
+      <Button test-id="export-btn" :disabled="exporting" @click="onExport">
         <IconDownload :size="16" />
         {{ exporting ? "Exporting…" : "Export bookmarks" }}
-      </button>
-      <p data-testid="error" v-if="exportError" class="error">{{ exportError }}</p>
+      </Button>
+      <Message v-if="exportError" tone="danger" test-id="error" class="mt-12">
+        {{ exportError }}
+      </Message>
     </section>
 
-    <section class="panel">
-      <h2>Import</h2>
-      <p class="hint">
+    <section class="mb-16 rounded-md border-[0.5px] border-line bg-raised p-20">
+      <h2 class="m-0 mb-8 text-[1.5rem] font-bold">Import</h2>
+      <p class="m-0 mb-16 text-sm leading-[1.5] text-ink-muted">
         Import a Read Later export file. Bookmarks whose URL already exists here are skipped.
       </p>
       <input
         ref="fileInput"
-        class="file-input"
+        class="hidden"
         type="file"
         accept="application/json"
         @change="onFileSelected"
       />
-      <button class="btn btn-secondary" type="button" :disabled="importing" @click="onPickFile">
+      <Button variant="secondary" :disabled="importing" @click="onPickFile">
         <IconUpload :size="16" />
         {{ importing ? "Importing…" : "Choose file to import" }}
-      </button>
-      <p data-testid="error" v-if="importError" class="error">{{ importError }}</p>
-      <p data-testid="result" v-if="importedCount !== null" class="result">
+      </Button>
+      <Message v-if="importError" tone="danger" test-id="error" class="mt-12">
+        {{ importError }}
+      </Message>
+      <p v-if="importedCount !== null" data-testid="result" class="m-0 mt-12 text-sm text-ink">
         Imported {{ importedCount }} bookmark{{ importedCount === 1 ? "" : "s" }}.
         <template v-if="skippedRows.length > 0"> Skipped {{ skippedRows.length }}: </template>
       </p>
-      <ul data-testid="skipped-list" v-if="skippedRows.length > 0" class="skipped-list">
+      <ul
+        v-if="skippedRows.length > 0"
+        data-testid="skipped-list"
+        class="m-0 mt-8 pl-18 text-sm text-ink-muted"
+      >
         <li v-for="(row, index) in skippedRows" :key="index">
           {{ row.title || row.url || "Untitled" }} — {{ row.reason }}
         </li>
@@ -124,104 +135,3 @@ async function onFileSelected(event: Event) {
     </section>
   </main>
 </template>
-
-<style scoped>
-.settings-view {
-  max-width: 560px;
-  margin: 0 auto;
-  padding: 24px 16px 64px;
-}
-
-.header-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 24px;
-}
-
-.header-row h1 {
-  font-size: 20px;
-  margin: 0;
-}
-
-.icon-btn {
-  display: inline-flex;
-  border: none;
-  background: transparent;
-  color: var(--rl-text-secondary);
-  cursor: pointer;
-  padding: 0;
-}
-
-.panel {
-  background: var(--rl-surface);
-  border: 0.5px solid var(--rl-border);
-  border-radius: var(--rl-radius);
-  padding: 20px;
-  margin-bottom: 16px;
-}
-
-.panel h2 {
-  font-size: 15px;
-  margin: 0 0 8px;
-}
-
-.hint {
-  font-size: 13px;
-  color: var(--rl-text-secondary);
-  margin: 0 0 16px;
-  line-height: 1.5;
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 34px;
-  padding: 0 14px;
-  border-radius: var(--rl-radius);
-  font-size: 13px;
-  cursor: pointer;
-  border: none;
-}
-
-.btn-secondary {
-  background: transparent;
-  border: 0.5px solid var(--rl-border);
-  color: var(--rl-text-primary);
-}
-
-.btn-primary {
-  background: var(--rl-accent);
-  color: var(--rl-on-accent);
-  font-weight: 500;
-}
-
-.btn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.file-input {
-  display: none;
-}
-
-.error {
-  color: var(--rl-danger);
-  font-size: 13px;
-  margin: 12px 0 0;
-}
-
-.result {
-  font-size: 13px;
-  color: var(--rl-text-primary);
-  margin: 12px 0 0;
-}
-
-.skipped-list {
-  margin: 8px 0 0;
-  padding-left: 18px;
-  font-size: 13px;
-  color: var(--rl-text-secondary);
-}
-</style>

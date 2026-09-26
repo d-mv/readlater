@@ -25,16 +25,28 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="public-reader">
-    <div data-testid="status-placeholder" v-if="loading" class="status-placeholder">
-      <p class="status-text">Loading…</p>
+  <main class="mx-auto max-w-680 bg-raised p-20">
+    <div
+      v-if="loading"
+      data-testid="status-placeholder"
+      class="flex flex-col items-center gap-12 px-16 py-64 text-center text-ink-faint"
+    >
+      <p class="m-0 font-sans text-base">Loading…</p>
     </div>
-    <div data-testid="status-placeholder" v-else-if="!bookmark" class="status-placeholder">
-      <p class="status-text">Not found</p>
+    <div
+      v-else-if="!bookmark"
+      data-testid="status-placeholder"
+      class="flex flex-col items-center gap-12 px-16 py-64 text-center text-ink-faint"
+    >
+      <p class="m-0 font-sans text-base">Not found</p>
     </div>
     <template v-else>
-      <h1 data-testid="title" class="title">{{ bookmark.title }}</h1>
-      <p v-if="readerByline(bookmark)" class="byline">{{ readerByline(bookmark) }}</p>
+      <h1 data-testid="title" class="m-0 mb-8 font-sans text-xl leading-[1.3] font-medium text-ink">
+        {{ bookmark.title }}
+      </h1>
+      <p v-if="readerByline(bookmark)" class="m-0 mb-20 font-mono text-xs text-ink-faint">
+        {{ readerByline(bookmark) }}
+      </p>
       <ArticleContent
         :content-md="bookmark.content_md"
         :type="bookmark.type"
@@ -44,44 +56,3 @@ onMounted(async () => {
     </template>
   </main>
 </template>
-
-<style scoped>
-.public-reader {
-  max-width: 680px;
-  margin: 0 auto;
-  padding: 20px;
-  background: var(--rl-surface);
-}
-
-.title {
-  font-family: var(--rl-font-ui);
-  font-size: 20px;
-  font-weight: 500;
-  color: var(--rl-text-primary);
-  line-height: 1.3;
-  margin: 0 0 8px;
-}
-
-.byline {
-  font-family: var(--rl-font-mono);
-  font-size: 12px;
-  color: var(--rl-text-muted);
-  margin: 0 0 20px;
-}
-
-.status-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 64px 16px;
-  text-align: center;
-  color: var(--rl-text-muted);
-}
-
-.status-text {
-  font-family: var(--rl-font-ui);
-  font-size: 14px;
-  margin: 0;
-}
-</style>

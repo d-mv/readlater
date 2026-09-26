@@ -453,7 +453,7 @@ more than it saves. Check that Tailwind's preflight doesn't break
 2. Tri-state theme (7.3) — independent of styling, can land first.
 3. ✅ *(done, app 0.2.3: Button, IconButton, Dialog, Input, Tabs, Pill, Message and Empty. `Menu` was skipped because only `ReaderMenu` would use it. Every component takes explicit `testId`/`class` props with `inheritAttrs: false`)* `shared/clsx.ts` and the `shared/ui` primitives, each with tests
    (red → green).
-4. Migrate components feature by feature: auth → list → reader → views.
+4. ✅ *(done, app 0.2.12: every SFC migrated, no `<style>` blocks left; each batch pixel-identical against a 48-shot light/dark screenshot baseline)* Migrate components feature by feature: auth → list → reader → views.
    Delete each `<style scoped>` block as its component is converted.
    Bug-fix items 2.5 (`AddBookmarkDialog`) and 2.7 (`ReaderView`) touch the
    same files: land them before this step, or combine them.

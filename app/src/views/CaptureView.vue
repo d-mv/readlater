@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { toCaptureOutcome, type CaptureOutcome } from "../utils/captureText";
+import Button from "../shared/ui/Button.vue";
 
 const route = useRoute();
 const store = useBookmarksStore();
@@ -43,105 +44,42 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="capture">
+  <main class="mx-auto flex min-h-screen max-w-480 items-center justify-center bg-canvas">
     <div
-      data-testid="status-placeholder"
       v-if="outcome.kind === 'working'"
-      class="status-placeholder"
+      data-testid="status-placeholder"
+      class="flex flex-col items-center gap-16 p-32 text-center text-ink-faint"
     >
-      <p class="status-text">Saving…</p>
+      <p class="m-0 font-sans text-base">Saving…</p>
     </div>
     <div
-      data-testid="status-placeholder"
       v-else-if="outcome.kind === 'saved'"
-      class="status-placeholder"
+      data-testid="status-placeholder"
+      class="flex flex-col items-center gap-16 p-32 text-center text-ink-faint"
     >
-      <p class="status-text">Saved</p>
-      <button class="btn btn-secondary" type="button" @click="close">Close</button>
+      <p class="m-0 font-sans text-base">Saved</p>
+      <Button variant="secondary" @click="close">Close</Button>
     </div>
     <div
-      data-testid="status-placeholder"
       v-else-if="outcome.kind === 'error'"
-      class="status-placeholder"
+      data-testid="status-placeholder"
+      class="flex flex-col items-center gap-16 p-32 text-center text-ink-faint"
     >
-      <p class="status-text">{{ outcome.message }}</p>
-      <button class="btn btn-secondary" type="button" @click="close">Close</button>
+      <p class="m-0 font-sans text-base">{{ outcome.message }}</p>
+      <Button variant="secondary" @click="close">Close</Button>
     </div>
     <div
-      data-testid="status-placeholder"
       v-else-if="outcome.kind === 'duplicate'"
-      class="status-placeholder"
+      data-testid="status-placeholder"
+      class="flex flex-col items-center gap-16 p-32 text-center text-ink-faint"
     >
-      <p class="status-text">
+      <p class="m-0 font-sans text-base">
         Already saved on {{ new Date(outcome.savedAt).toLocaleDateString() }}
       </p>
-      <div class="duplicate-actions">
-        <button class="btn btn-secondary" type="button" @click="close">Cancel</button>
-        <button
-          data-testid="continue-btn"
-          class="btn btn-primary"
-          type="button"
-          @click="onContinueRefresh"
-        >
-          Continue
-        </button>
+      <div class="flex gap-12">
+        <Button variant="secondary" @click="close">Cancel</Button>
+        <Button test-id="continue-btn" @click="onContinueRefresh">Continue</Button>
       </div>
     </div>
   </main>
 </template>
-
-<style scoped>
-.capture {
-  max-width: 480px;
-  margin: 0 auto;
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--rl-bg);
-}
-
-.status-placeholder {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 32px;
-  text-align: center;
-  color: var(--rl-text-muted);
-}
-
-.status-text {
-  font-family: var(--rl-font-ui);
-  font-size: 14px;
-  margin: 0;
-}
-
-.duplicate-actions {
-  display: flex;
-  gap: 12px;
-}
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  height: 34px;
-  padding: 0 14px;
-  border-radius: var(--rl-radius);
-  font-size: 13px;
-  cursor: pointer;
-  border: none;
-}
-
-.btn-secondary {
-  background: transparent;
-  border: 0.5px solid var(--rl-border);
-  color: var(--rl-text-primary);
-}
-
-.btn-primary {
-  background: var(--rl-accent);
-  color: var(--rl-on-accent);
-  font-weight: 500;
-}
-</style>

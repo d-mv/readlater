@@ -39,7 +39,7 @@ describe("SettingsView", () => {
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     const wrapper = mount(SettingsView);
-    await wrapper.get("button.btn-primary").trigger("click");
+    await wrapper.get('[data-testid="export-btn"]').trigger("click");
     await flushPromises();
 
     expect(clickSpy).toHaveBeenCalledOnce();
@@ -54,7 +54,7 @@ describe("SettingsView", () => {
     from.mockReturnValue({ select: () => ({ order }) });
 
     const wrapper = mount(SettingsView);
-    await wrapper.get("button.btn-primary").trigger("click");
+    await wrapper.get('[data-testid="export-btn"]').trigger("click");
     await flushPromises();
 
     expect(wrapper.get('[data-testid="error"]').text()).toBe("network down");
