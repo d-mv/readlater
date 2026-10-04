@@ -27,17 +27,17 @@ const emit = defineEmits<{ (e: "update:modelValue", value: T): void }>();
 
 const containerClasses: Record<TabsVariant, string> = {
   underline: "flex items-center gap-20",
-  segmented: "flex rounded-md border-[0.5px] border-line p-2",
+  segmented: "flex rounded-none border border-line p-2 bg-canvas",
 };
 
 const optionClasses: Record<TabsVariant, { base: string; active: string }> = {
   underline: {
-    base: "border-0 border-b-2 border-solid border-transparent bg-transparent px-0 pt-0 pb-8 text-ink-muted cursor-pointer [font-family:inherit] [font-size:inherit] [line-height:inherit]",
-    active: "font-medium text-ink border-b-accent",
+    base: "border-0 border-b-2 border-solid border-transparent bg-transparent px-0 pt-0 pb-8 text-ink-muted cursor-pointer [font-family:inherit] [font-size:inherit] [line-height:inherit] hover:text-ink transition-colors",
+    active: "font-semibold text-ink border-b-accent",
   },
   segmented: {
-    base: "flex-1 h-28 border-0 rounded-sm bg-transparent text-sm leading-[normal] text-ink-muted cursor-pointer",
-    active: "bg-accent text-accent-ink font-medium",
+    base: "flex-1 h-28 border-0 rounded-none bg-transparent text-sm leading-[normal] text-ink-muted cursor-pointer transition-colors",
+    active: "bg-accent text-accent-ink font-semibold",
   },
 };
 </script>

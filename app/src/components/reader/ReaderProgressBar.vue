@@ -9,7 +9,11 @@ const widthPercent = computed(() => `${Math.min(100, Math.max(0, props.progress 
 </script>
 
 <template>
-  <div class="h-2 bg-line">
-    <div data-testid="fill" class="h-full bg-accent" :style="{ width: widthPercent }" />
+  <div class="h-4 bg-line">
+    <div
+      data-testid="fill"
+      class="h-full bg-accent transition-[width] duration-75"
+      :style="{ width: widthPercent }"
+    />
   </div>
 </template>

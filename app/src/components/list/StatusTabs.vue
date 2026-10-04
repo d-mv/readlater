@@ -22,10 +22,10 @@ const options: TabOption<BookmarkFilter>[] = [
   <Tabs
     :options="options"
     :model-value="activeFilter"
-    class="border-b-[0.5px] border-line px-16 py-12"
+    class="border-b border-line px-16 py-12"
     @update:model-value="emit('change', $event)"
   >
-    <Pill v-if="unreadCount > 0" tone="wash" class="ml-auto px-10 py-4 text-2xs"
+    <Pill v-if="unreadCount > 0" tone="wash" class="ml-auto px-10 py-4 text-2xs font-semibold"
       >{{ unreadCount }} unread</Pill
     >
   </Tabs>

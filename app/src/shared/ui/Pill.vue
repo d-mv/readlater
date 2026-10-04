@@ -33,15 +33,19 @@ const props = withDefaults(defineProps<PillProps>(), {
 const emit = defineEmits<PillEmits>();
 
 const toneClasses: Record<PillTone, string> = {
-  outline: "border-[0.5px] border-line bg-transparent text-ink-muted",
+  outline: "border border-line bg-transparent text-ink-muted",
   solid:
-    "border-[0.5px] border-(--tag-color,var(--color-accent)) bg-(--tag-color,var(--color-accent)) text-accent-ink",
-  wash: "bg-accent-wash text-accent-wash-ink font-medium",
+    "border border-(--tag-color,var(--color-accent)) bg-(--tag-color,var(--color-accent)) text-accent-ink font-semibold",
+  wash: "border border-transparent bg-accent-wash text-accent-wash-ink font-semibold",
 };
 
 const style = computed(() => (props.color ? { "--tag-color": props.color } : undefined));
 const classes = computed(() =>
-  cn("inline-flex items-center rounded-full text-xs", toneClasses[props.tone], props.class),
+  cn(
+    "inline-flex items-center rounded-none text-xs font-sans",
+    toneClasses[props.tone],
+    props.class,
+  ),
 );
 </script>
 

@@ -27,7 +27,7 @@ const domain = computed(() => domainFromUrl(props.bookmark.url));
 </script>
 
 <template>
-  <div class="flex items-center justify-between border-b-[0.5px] border-line px-16 py-12">
+  <div class="flex items-center justify-between border-b border-line px-16 py-12">
     <IconButton title="Back" test-id="back-btn" @click="emit('back')">
       <IconChevronLeft :size="20" />
     </IconButton>

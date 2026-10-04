@@ -16,28 +16,29 @@
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 @theme {
-  /* Surfaces, lines and ink — kairos token names, read-later's palette. */
-  --color-canvas: #f5f4f2;
-  --color-raised: #fafaf8;
-  --color-recessed: #ecebe7;
-  --color-scrim: rgba(26, 26, 24, 0.35);
-  --color-line: #e3e1db;
-  --color-line-strong: #cbc8bf;
-  --color-ink: #1a1a18;
-  --color-ink-muted: #6b6963;
-  --color-ink-faint: #9b9990;
-  --color-ink-inverse: #fafaf8;
-  --color-accent: #d85a30;
-  --color-accent-hover: #c04d26;
-  --color-accent-wash: #faece7;
-  --color-accent-wash-ink: #993c1d;
-  --color-accent-ink: #ffffff;
-  --color-danger: #c23b3b;
-  --color-focus: #1a1a18;
+  /* Surfaces, lines and ink — Flat BeOS pixel palette. */
+  --color-canvas: #f2f1ee;
+  --color-raised: #e6e5e1;
+  --color-recessed: #ffffff;
+  --color-scrim: rgba(0, 0, 0, 0.45);
+  --color-line: #d3d1cb;
+  --color-line-strong: #111111;
+  --color-ink: #111111;
+  --color-ink-muted: #5a5955;
+  --color-ink-faint: #8a8880;
+  --color-ink-inverse: #ffffff;
+  --color-accent: #ffc400;
+  --color-accent-hover: #ffd133;
+  --color-accent-wash: #fff6d6;
+  --color-accent-wash-ink: #8a6a00;
+  --color-accent-ink: #111111;
+  --color-danger: #c82828;
+  --color-focus: #ffc400;
+  --color-beos-blue: #235487;
   /* Dropzone while a file is dragged over it: accent at 8% over canvas. */
-  --color-drop-target: #f3e8e2;
+  --color-drop-target: #fff4cc;
 
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sans: "JetBrains Mono", ui-monospace, Menlo, monospace;
   --font-serif: "Source Serif 4", Georgia, serif;
   --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
 
@@ -55,32 +56,33 @@
   --text-lg: 1.8rem;
   --text-xl: 2rem;
 
-  --radius-sm: 0.6rem;
-  --radius-md: 0.8rem;
+  --radius-sm: 0px;
+  --radius-md: 0px;
 
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  --duration: 140ms;
+  --duration: 100ms;
 }
 
 [data-theme="dark"] {
-  --color-canvas: #1c1b19;
-  --color-raised: #242320;
-  --color-recessed: #161513;
-  --color-scrim: rgba(0, 0, 0, 0.55);
-  --color-line: #38362f;
-  --color-line-strong: #4d4a41;
-  --color-ink: #f0eee8;
-  --color-ink-muted: #a8a69e;
-  --color-ink-faint: #726f66;
-  --color-ink-inverse: #1c1b19;
-  --color-accent: #f0997b;
-  --color-accent-hover: #f4ae95;
-  --color-accent-wash: #4a1b0c;
-  --color-accent-wash-ink: #f0997b;
-  --color-accent-ink: #2c1006;
-  --color-danger: #e2685f;
-  --color-focus: #f0eee8;
-  --color-drop-target: #2d2521;
+  --color-canvas: #17181b;
+  --color-raised: #212328;
+  --color-recessed: #121315;
+  --color-scrim: rgba(0, 0, 0, 0.65);
+  --color-line: #2e3138;
+  --color-line-strong: #f0f0ee;
+  --color-ink: #f0f0ee;
+  --color-ink-muted: #9c9da1;
+  --color-ink-faint: #68696e;
+  --color-ink-inverse: #111111;
+  --color-accent: #ffc400;
+  --color-accent-hover: #ffd133;
+  --color-accent-wash: #382b00;
+  --color-accent-wash-ink: #ffc400;
+  --color-accent-ink: #111111;
+  --color-danger: #e04545;
+  --color-focus: #ffc400;
+  --color-beos-blue: #4a8ec9;
+  --color-drop-target: #2d2614;
 }
 
 :root {
@@ -161,7 +163,7 @@
   }
 
   .prose a {
-    color: var(--color-accent);
+    color: var(--color-beos-blue);
     text-decoration: underline;
   }
 

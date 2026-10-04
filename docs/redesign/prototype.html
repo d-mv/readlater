@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Read Later — Flat BeOS Pixel Style</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      /* Flat BeOS Color Palette */
+      --color-canvas: #f2f1ee;          /* Light warm gray */
+      --color-raised: #e6e5e1;          /* Slightly deeper surface */
+      --color-recessed: #ffffff;        /* Flat clean white */
+      --color-ink: #111111;
+      --color-ink-muted: #5a5955;
+      --color-ink-faint: #8a8880;
+      --color-line: #d3d1cb;
+      --color-line-strong: #111111;
+      --color-accent: #ffc400;          /* Signature BeOS yellow */
+      --color-accent-hover: #ffd133;
+      --color-accent-ink: #111111;
+      --color-beos-blue: #235487;
+      --color-danger: #c82828;
+
+      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+      --font-serif: "Source Serif 4", Georgia, serif;
+    }
+
+    [data-theme="dark"] {
+      --color-canvas: #17181b;
+      --color-raised: #212328;
+      --color-recessed: #121315;
+      --color-ink: #f0f0ee;
+      --color-ink-muted: #9c9da1;
+      --color-ink-faint: #68696e;
+      --color-line: #2e3138;
+      --color-line-strong: #f0f0ee;
+      --color-accent: #ffc400;
+      --color-accent-hover: #ffd133;
+      --color-accent-ink: #111111;
+      --color-beos-blue: #4a8ec9;
+      --color-danger: #e04545;
+    }
+
+    * {
+      box-sizing: border-box;
+      border-radius: 0 !important; /* Strict 0px pixel geometry */
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: var(--color-canvas);
+      color: var(--color-ink);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.4;
+      display: flex;
+      justify-content: center;
+      min-height: 100vh;
+    }
+
+    .app-root {
+      width: 100%;
+      max-width: 640px;
+      min-height: 100vh;
+      background: var(--color-canvas);
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header Bar */
+    .app-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 16px 10px;
+    }
+
+    .app-title {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--color-ink);
+      margin: 0;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Flat Buttons with Crisp 1px Borders */
+    .btn {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      background: var(--color-raised);
+      color: var(--color-ink);
+      border: 1px solid var(--color-line-strong);
+      padding: 5px 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      user-select: none;
+      line-height: normal;
+      height: 30px;
+      transition: background 60ms;
+    }
+    .btn:hover {
+      background: var(--color-recessed);
+    }
+    .btn:active {
+      transform: translate(1px, 1px);
+    }
+
+    /* Flat Primary Button (BeOS Yellow) */
+    .btn-primary {
+      background: var(--color-accent);
+      color: var(--color-accent-ink);
+      border: 1px solid var(--color-line-strong);
+      font-weight: 700;
+    }
+    .btn-primary:hover {
+      background: var(--color-accent-hover);
+    }
+
+    /* Clean Ghost Icon Buttons */
+    .btn-icon-clean {
+      background: transparent;
+      border: 0;
+      color: var(--color-ink-muted);
+      cursor: pointer;
+      padding: 6px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      line-height: 1;
+      user-select: none;
+      transition: color 60ms;
+    }
+    .btn-icon-clean:hover {
+      color: var(--color-ink);
+    }
+    .btn-icon-clean:active {
+      transform: translate(1px, 1px);
+    }
+
+    /* Flat 1px Search Input */
+    .search-section {
+      padding: 6px 16px 10px;
+    }
+    .search-input {
+      width: 100%;
+      height: 34px;
+      background: var(--color-recessed);
+      color: var(--color-ink);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      border: 1px solid var(--color-line-strong);
+      padding: 6px 10px;
+      outline: none;
+    }
+    .search-input:focus {
+      outline: 2px solid var(--color-accent);
+      outline-offset: -1px;
+    }
+
+    /* Flat Tag Filter Pills */
+    .tag-section {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding: 4px 16px 12px;
+    }
+    .tag-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--color-ink-muted);
+      margin-right: 2px;
+    }
+    .tag-pill {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 2px 8px;
+      background: transparent;
+      color: var(--color-ink);
+      border: 1px solid var(--color-line);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      height: 22px;
+    }
+    .tag-pill:hover {
+      border-color: var(--color-line-strong);
+    }
+    .tag-pill.active {
+      background: var(--color-accent);
+      color: var(--color-accent-ink);
+      border-color: var(--color-line-strong);
+      font-weight: 700;
+    }
+
+    /* Flat Status Tabs */
+    .status-tabs {
+      display: flex;
+      gap: 0;
+      padding: 0 16px;
+      border-bottom: 1px solid var(--color-line);
+    }
+    .status-tab {
+      background: transparent;
+      color: var(--color-ink-muted);
+      border: 1px solid transparent;
+      border-bottom: 2px solid transparent;
+      padding: 8px 14px 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: -1px;
+    }
+    .status-tab:hover {
+      color: var(--color-ink);
+    }
+    .status-tab.active {
+      color: var(--color-ink);
+      border-bottom: 2px solid var(--color-accent);
+      font-weight: 700;
+    }
+    .tab-counter {
+      font-size: 10px;
+      background: var(--color-accent);
+      color: var(--color-accent-ink);
+      padding: 0 5px;
+      font-weight: 700;
+      border: 1px solid var(--color-line-strong);
+    }
+
+    /* Flat Reading List */
+    .list-section {
+      flex: 1;
+    }
+    .list-row {
+      display: flex;
+      align-items: center;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--color-line);
+      gap: 12px;
+      cursor: pointer;
+      background: transparent;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
+      color: inherit;
+      border-left: 0;
+      border-right: 0;
+      border-top: 0;
+      transition: background 60ms;
+    }
+    .list-row:hover {
+      background: rgba(0, 0, 0, 0.03);
+    }
+    [data-theme="dark"] .list-row:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+    .row-icon-clean {
+      font-size: 16px;
+      color: var(--color-ink-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      flex-shrink: 0;
+    }
+    .row-body {
+      flex: 1;
+      min-width: 0;
+    }
+    .row-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .row-title.read {
+      font-weight: 400;
+      color: var(--color-ink-muted);
+    }
+    .row-meta {
+      font-size: 11px;
+      color: var(--color-ink-faint);
+      margin-top: 2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .row-actions {
+      display: flex;
+      gap: 2px;
+    }
+
+    /* Flat Segmented Mode Switcher */
+    .segmented-switch {
+      display: flex;
+      border: 1px solid var(--color-line-strong);
+      background: var(--color-recessed);
+    }
+    .segmented-btn {
+      flex: 1;
+      height: 28px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 600;
+      border: 0;
+      border-right: 1px solid var(--color-line);
+      background: transparent;
+      color: var(--color-ink-muted);
+      cursor: pointer;
+    }
+    .segmented-btn:last-child {
+      border-right: 0;
+    }
+    .segmented-btn.active {
+      background: var(--color-accent);
+      color: var(--color-accent-ink);
+      font-weight: 700;
+    }
+
+    /* Flat Dialog Preview */
+    .dialog-preview-wrapper {
+      padding: 16px;
+      margin-top: 16px;
+      border-top: 1px solid var(--color-line);
+    }
+    .dialog-card {
+      background: var(--color-raised);
+      border: 1px solid var(--color-line-strong);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .dialog-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid var(--color-line);
+      padding-bottom: 8px;
+    }
+    .dialog-title {
+      font-size: 13px;
+      font-weight: 700;
+      margin: 0;
+    }
+
+    /* Flat Reader View Preview */
+    .reader-preview {
+      padding: 16px;
+      margin: 16px;
+      border-top: 1px solid var(--color-line);
+    }
+    .reader-progress {
+      height: 4px;
+      background: var(--color-line);
+      margin-bottom: 16px;
+    }
+    .reader-progress-fill {
+      height: 100%;
+      width: 45%;
+      background: var(--color-accent);
+    }
+    .reader-prose {
+      font-family: var(--font-serif);
+      font-size: 16px;
+      line-height: 1.7;
+      color: var(--color-ink);
+    }
+    .reader-prose h2 {
+      font-family: var(--font-mono);
+      font-size: 17px;
+      font-weight: 700;
+      margin: 0 0 8px;
+      color: var(--color-ink);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-root">
+
+    <!-- App Header -->
+    <header class="app-header">
+      <h1 class="app-title">Read Later</h1>
+      <div class="header-actions">
+        <!-- Flat Text Button with 1px border & BeOS Yellow -->
+        <button class="btn btn-primary" title="Add Bookmark">+ Add</button>
+        <!-- Clean Ghost Icon Buttons -->
+        <button class="btn-icon-clean" onclick="toggleTheme()" title="Toggle Light/Dark Theme">🌓</button>
+        <button class="btn-icon-clean" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <!-- Flat 1px Border Search Field -->
+    <div class="search-section">
+      <input class="search-input" type="search" placeholder="Search… (press Enter to query FTS)" />
+    </div>
+
+    <!-- Flat Tag Filter Pills -->
+    <div class="tag-section">
+      <span class="tag-label">TAGS:</span>
+      <button class="tag-pill active">All (42)</button>
+      <button class="tag-pill">engineering (18)</button>
+      <button class="tag-pill">systems (12)</button>
+      <button class="tag-pill">design (7)</button>
+    </div>
+
+    <!-- Flat Status Tabs (Clean line with BeOS Yellow active highlight) -->
+    <div class="status-tabs">
+      <div class="status-tab active">
+        <span>Unread</span>
+        <span class="tab-counter">14</span>
+      </div>
+      <div class="status-tab">
+        <span>All</span>
+      </div>
+      <div class="status-tab">
+        <span>Archived</span>
+      </div>
+    </div>
+
+    <!-- Flat Reading List Rows -->
+    <div class="list-section">
+
+      <!-- Row 1 -->
+      <button class="list-row">
+        <span class="row-icon-clean">📄</span>
+        <div class="row-body">
+          <div class="row-title">The Multithreaded Architecture of Modern Operating Systems</div>
+          <div class="row-meta">
+            <span>osnews.com</span>
+            <span>•</span>
+            <span>14 min read</span>
+            <span>•</span>
+            <span>2h ago</span>
+            <span class="tag-pill" style="font-size: 9px; padding: 0 4px; height: 16px;">systems</span>
+          </div>
+        </div>
+        <div class="row-actions">
+          <span class="btn-icon-clean" title="Save offline" onclick="event.stopPropagation()">💾</span>
+          <span class="btn-icon-clean" title="Archive" onclick="event.stopPropagation()">✓</span>
+        </div>
+      </button>
+
+      <!-- Row 2 -->
+      <button class="list-row">
+        <span class="row-icon-clean">▶️</span>
+        <div class="row-body">
+          <div class="row-title">Deep Dive: Real-Time Audio Buffer Pipeline in C++</div>
+          <div class="row-meta">
+            <span>youtube.com</span>
+            <span>•</span>
+            <span>22 min</span>
+            <span>•</span>
+            <span>Yesterday</span>
+            <span class="tag-pill" style="font-size: 9px; padding: 0 4px; height: 16px;">engineering</span>
+          </div>
+        </div>
+        <div class="row-actions">
+          <span class="btn-icon-clean" title="Save offline" onclick="event.stopPropagation()">💾</span>
+          <span class="btn-icon-clean" title="Archive" onclick="event.stopPropagation()">✓</span>
+        </div>
+      </button>
+
+      <!-- Row 3 (Read) -->
+      <button class="list-row">
+        <span class="row-icon-clean">📝</span>
+        <div class="row-body">
+          <div class="row-title read">Note: Pixel Typography Tokens and Color Values</div>
+          <div class="row-meta">
+            <span>Note</span>
+            <span>•</span>
+            <span>1 min read</span>
+            <span>•</span>
+            <span>Read</span>
+            <span class="tag-pill" style="font-size: 9px; padding: 0 4px; height: 16px;">design</span>
+          </div>
+        </div>
+        <div class="row-actions">
+          <span class="btn-icon-clean" title="Delete" onclick="event.stopPropagation()">✕</span>
+        </div>
+      </button>
+
+    </div>
+
+    <!-- Flat Dialog & Form Controls Preview -->
+    <div class="dialog-preview-wrapper">
+      <div style="font-size: 11px; font-weight: 700; color: var(--color-ink-muted); margin-bottom: 6px;">
+        FLAT DIALOG & FORM CONTROLS PREVIEW:
+      </div>
+      <div class="dialog-card">
+        <div class="dialog-header">
+          <span class="dialog-title">Add Bookmark</span>
+          <button class="btn-icon-clean" style="padding: 2px;">✕</button>
+        </div>
+        <!-- Flat Segmented Switch -->
+        <div class="segmented-switch">
+          <button class="segmented-btn active">Link</button>
+          <button class="segmented-btn">Note</button>
+          <button class="segmented-btn">File</button>
+        </div>
+        <input class="search-input" placeholder="https://example.com/article" />
+        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button class="btn">Cancel</button>
+          <button class="btn btn-primary">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Flat Long-Form Reader Typography Preview -->
+    <div class="reader-preview">
+      <div style="font-size: 11px; font-weight: 700; color: var(--color-ink-muted); margin-bottom: 8px;">
+        READER TYPOGRAPHY PREVIEW:
+      </div>
+      <div class="reader-progress">
+        <div class="reader-progress-fill"></div>
+      </div>
+      <div class="reader-prose">
+        <h2>High Performance Architecture</h2>
+        <p>
+          By isolating individual tasks across dedicated threads, latency remains predictable even under heavy I/O loads. Clean contrast, flat 1px borders, and disciplined typography preserve focus during long reading sessions.
+        </p>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+    }
+  </script>
+</body>
+</html>

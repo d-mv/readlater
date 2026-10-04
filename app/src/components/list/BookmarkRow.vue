@@ -50,13 +50,16 @@ const displayTitle = computed(() => {
 </script>
 
 <template>
-  <div data-testid="row" class="flex w-full items-center gap-4 border-t-[0.5px] border-line px-16">
+  <div
+    data-testid="row"
+    class="flex w-full items-center gap-4 border-t border-line px-16 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors"
+  >
     <button
       class="flex min-w-0 flex-1 cursor-pointer items-center gap-12 border-0 bg-transparent px-0 py-14 text-left [font:inherit]"
       type="button"
       @click="emit('open', bookmark.id)"
     >
-      <span class="flex size-32 shrink-0 items-center justify-center rounded-sm bg-raised">
+      <span class="flex size-20 shrink-0 items-center justify-center text-ink-muted">
         <IconLoader2 v-if="isPending" :size="16" class="animate-spin text-ink-muted" />
         <IconAlertTriangle v-else-if="isFailed" :size="16" class="text-danger" />
         <component :is="iconComponent" v-else :size="16" class="text-ink-muted" />
@@ -67,7 +70,7 @@ const displayTitle = computed(() => {
             data-testid="title"
             :class="
               cn(
-                'truncate text-base font-medium text-ink',
+                'truncate text-base font-semibold text-ink',
                 isRead && 'font-normal text-ink-faint',
                 isPending && 'italic text-ink-faint',
                 isFailed && 'text-danger',
@@ -101,7 +104,7 @@ const displayTitle = computed(() => {
       test-id="offline-toggle"
       :title="isCached ? 'Remove offline copy' : 'Save offline'"
       :pressed="isCached"
-      :class="cn('size-28 shrink-0 rounded-sm text-ink-faint', isCached && 'text-accent')"
+      :class="cn('size-28 shrink-0 text-ink-faint hover:text-ink', isCached && 'text-accent')"
       @click="emit('toggleOffline', bookmark.id)"
     >
       <IconCheck v-if="isCached" :size="16" />

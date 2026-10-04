@@ -32,8 +32,9 @@ const scrimClasses: Record<DialogPlacement, string> = {
 };
 
 const panelClasses: Record<DialogPlacement, string> = {
-  center: "m-auto rounded-md p-24 w-320 max-w-[calc(100vw-32px)]",
-  sheet: "static m-0 w-full max-w-480 rounded-t-md p-20 flex flex-col gap-16",
+  center: "m-auto rounded-none p-24 w-320 max-w-[calc(100vw-32px)] border border-line-strong",
+  sheet:
+    "static m-0 w-full max-w-480 rounded-none p-20 flex flex-col gap-16 border-t border-line-strong",
 };
 </script>
 
@@ -47,7 +48,7 @@ const panelClasses: Record<DialogPlacement, string> = {
       open
       :aria-label="props.ariaLabel"
       :data-testid="props.testId"
-      :class="cn('border-0 bg-raised text-ink', panelClasses[props.placement], props.class)"
+      :class="cn('bg-raised text-ink', panelClasses[props.placement], props.class)"
     >
       <slot />
     </dialog>

@@ -259,7 +259,7 @@ async function confirmDuplicate() {
           data-testid="dropzone"
           :class="
             cn(
-              'box-border flex min-h-140 w-full cursor-pointer flex-col items-center justify-center gap-4 rounded-md border border-dashed border-line bg-canvas px-16 py-20 text-center text-ink-muted transition-[border-color,background] duration-150 hover:border-accent focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
+              'box-border flex min-h-140 w-full cursor-pointer flex-col items-center justify-center gap-4 rounded-none border border-dashed border-line bg-canvas px-16 py-20 text-center text-ink-muted transition-[border-color,background] duration-150 hover:border-accent focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
               isDragging && 'border-solid border-accent bg-drop-target',
               selectedFile && 'border-solid border-accent',
             )

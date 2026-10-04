@@ -36,7 +36,7 @@ const emit = defineEmits<IconButtonEmits>();
     :data-testid="props.testId"
     :class="
       cn(
-        'inline-flex items-center justify-center border-0 bg-transparent p-0 text-ink-muted cursor-pointer',
+        'inline-flex items-center justify-center border-0 bg-transparent p-0 text-ink-muted cursor-pointer hover:text-ink active:translate-x-px active:translate-y-px transition-colors duration-100 disabled:opacity-50 disabled:cursor-default disabled:active:translate-x-0 disabled:active:translate-y-0',
         props.class,
       )
     "

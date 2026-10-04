@@ -61,7 +61,7 @@ function nativeShare() {
 <template>
   <Dialog placement="sheet" aria-label="Share bookmark" @close="emit('close')">
     <div class="flex items-center justify-between">
-      <h2 class="m-0 text-md font-medium text-ink">Share</h2>
+      <h2 class="m-0 text-md font-bold tracking-tight text-ink font-sans">Share</h2>
       <IconButton title="Close" test-id="close-btn" @click="emit('close')">
         <IconX :size="18" />
       </IconButton>
@@ -82,7 +82,7 @@ function nativeShare() {
       <div class="flex items-center gap-8">
         <input
           data-testid="link-field"
-          class="min-w-0 flex-1 rounded-md border-[0.5px] border-line bg-transparent px-10 py-8 font-mono text-xs leading-[normal] text-ink"
+          class="min-w-0 flex-1 rounded-none border border-line bg-recessed px-10 py-8 font-mono text-xs leading-[normal] text-ink"
           type="text"
           readonly
           :value="shareUrl"
