@@ -159,7 +159,7 @@ const safeHtml = computed(() =>
   <div data-testid="article" class="prose">
     <div
       v-if="isYoutube"
-      class="relative mb-16 aspect-video w-full overflow-hidden rounded-md bg-black"
+      class="relative mb-16 aspect-video w-full overflow-hidden rounded-none border border-line bg-black"
     >
       <iframe
         v-if="playing"
@@ -203,7 +203,7 @@ const safeHtml = computed(() =>
     <template v-else-if="showPdfOriginal">
       <iframe
         v-if="pdfUrl"
-        class="h-[80vh] w-full rounded-md border-0 bg-white"
+        class="h-[80vh] w-full rounded-none border border-line bg-white"
         :src="pdfUrl"
         title="PDF document"
       ></iframe>

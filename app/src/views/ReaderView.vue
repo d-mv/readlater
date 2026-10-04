@@ -370,7 +370,10 @@ watch(
 </script>
 
 <template>
-  <main v-if="bookmark" class="mx-auto flex h-full max-w-680 flex-col bg-raised">
+  <main
+    v-if="bookmark"
+    class="mx-auto flex h-full max-w-680 flex-col bg-recessed sm:border-x sm:border-line"
+  >
     <ReaderProgressBar :progress="progress" />
     <ReaderHeader
       :bookmark="bookmark"
@@ -402,7 +405,7 @@ watch(
           data-testid="title-input"
           v-else
           v-model="draftTitle"
-          class="m-0 mb-12 w-full rounded-md border-[0.5px] border-line bg-raised px-10 py-8 font-sans text-xl leading-[normal] font-medium text-ink"
+          class="m-0 mb-12 w-full rounded-none border border-line bg-recessed px-10 py-8 font-sans text-xl leading-[normal] font-medium text-ink focus:border-ink focus:outline-1 focus:outline-accent"
           type="text"
           placeholder="Title"
         />
@@ -418,7 +421,7 @@ watch(
         <div
           data-testid="translate-bar"
           v-if="!editing && (translating || translateError || bookmark.translated_content_md)"
-          class="m-0 mb-16 flex items-center gap-10 rounded-md bg-canvas px-10 py-8 font-sans text-sm"
+          class="m-0 mb-16 flex items-center gap-10 rounded-none border border-line bg-canvas px-10 py-8 font-sans text-sm"
         >
           <span v-if="translating" class="text-ink-muted">Translating…</span>
           <span v-else-if="translateError" class="text-danger">{{ translateError }}</span>
@@ -437,7 +440,7 @@ watch(
         <div
           data-testid="pdf-view-bar"
           v-if="!editing && canTogglePdfView"
-          class="m-0 mb-16 flex items-center gap-10 rounded-md bg-canvas px-10 py-8 font-sans text-sm"
+          class="m-0 mb-16 flex items-center gap-10 rounded-none border border-line bg-canvas px-10 py-8 font-sans text-sm"
         >
           <span class="text-ink-muted">{{
             pdfEffectiveViewMode === "original" ? "Original PDF" : "Markdown"
@@ -475,7 +478,7 @@ watch(
         </p>
         <button
           data-testid="retry-btn"
-          class="mt-8 inline-flex cursor-pointer items-center gap-8 rounded-md border-[0.5px] border-line bg-raised px-14 py-8 font-sans text-sm leading-[normal] text-ink hover:bg-canvas"
+          class="mt-8 inline-flex cursor-pointer items-center gap-8 rounded-none border border-line bg-raised px-14 py-8 font-sans text-sm leading-[normal] text-ink hover:bg-canvas active:translate-x-px active:translate-y-px"
           type="button"
           @click="onRetry"
         >

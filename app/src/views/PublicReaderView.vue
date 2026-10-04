@@ -25,7 +25,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="mx-auto max-w-680 bg-raised p-20">
+  <main class="mx-auto max-w-680 bg-recessed p-20 sm:border-x sm:border-line">
     <div
       v-if="loading"
       data-testid="status-placeholder"

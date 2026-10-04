@@ -16,7 +16,7 @@ import FontSizeControl from "./FontSizeControl.vue";
 import { cn } from "../../shared/clsx";
 
 const ITEM =
-  "flex items-center gap-10 rounded-sm border-0 bg-transparent px-10 py-8 text-left font-sans text-sm text-ink no-underline cursor-pointer hover:bg-canvas";
+  "flex items-center gap-10 rounded-none border-0 bg-transparent px-10 py-8 text-left font-sans text-sm text-ink no-underline cursor-pointer hover:bg-canvas";
 
 const props = defineProps<{
   bookmark: Bookmark;
@@ -128,7 +128,7 @@ onUnmounted(() => {
     <div
       v-if="open"
       data-testid="menu-panel"
-      class="absolute top-[calc(100%+8px)] right-0 z-50 flex min-w-200 flex-col rounded-md border-[0.5px] border-line bg-raised p-6 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
+      class="absolute top-[calc(100%+8px)] right-0 z-50 flex min-w-200 flex-col rounded-none border border-line-strong bg-raised p-6 shadow-[0_8px_24px_rgba(0,0,0,0.16)]"
       role="menu"
     >
       <div class="flex items-center justify-between px-10 py-8">
