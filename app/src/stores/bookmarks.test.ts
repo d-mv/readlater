@@ -581,6 +581,59 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks[0]?.title).toBe("New title");
   });
 
+  test("fetchOne falls back to offlineDb when network fails and bookmark is not in store", async () => {
+    const single = vi.fn().mockRejectedValue(new Error("NetworkError: Failed to fetch"));
+    from.mockReturnValue({ select: () => ({ eq: () => ({ single }) }) });
+
+    getBookmarksList.mockResolvedValue([
+      makeBookmark({ id: "offline-1", title: "Offline Title", content_md: undefined }),
+    ]);
+    getArticle.mockResolvedValue({
+      id: "offline-1",
+      content_md: "Cached offline content",
+      translated_content_md: null,
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+
+    const store = useBookmarksStore();
+    const result = await store.fetchOne("offline-1");
+
+    expect(result).not.toBeNull();
+    expect(result?.title).toBe("Offline Title");
+    expect(result?.content_md).toBe("Cached offline content");
+    expect(store.bookmarks.find((b) => b.id === "offline-1")?.content_md).toBe(
+      "Cached offline content",
+    );
+  });
+
+  test("fetchOne hydrates cached article body when row is already in store without body and network fails", async () => {
+    const single = vi.fn().mockRejectedValue(new Error("NetworkError: Failed to fetch"));
+    from.mockReturnValue({ select: () => ({ eq: () => ({ single }) }) });
+
+    const store = useBookmarksStore();
+    const listRow = makeBookmark({
+      id: "offline-2",
+      title: "Already In Store",
+      content_md: undefined,
+    });
+    store.bookmarks = [listRow];
+
+    getArticle.mockResolvedValue({
+      id: "offline-2",
+      content_md: "Hydrated offline markdown",
+      translated_content_md: null,
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+
+    const result = await store.fetchOne("offline-2");
+
+    expect(result).not.toBeNull();
+    expect(result?.content_md).toBe("Hydrated offline markdown");
+    expect(store.bookmarks[0]?.content_md).toBe("Hydrated offline markdown");
+  });
+
   test("fetch persists list metadata without article content to the offline store on success", async () => {
     const rows = [makeBookmark({ id: "1", content_md: "full text" })];
     from.mockReturnValue({

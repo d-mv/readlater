@@ -508,4 +508,31 @@ watch(
       @toggle-public="onTogglePublic"
     />
   </main>
+  <div
+    v-else-if="!awaitingBody"
+    data-testid="not-found"
+    class="mx-auto flex h-full min-h-screen max-w-680 flex-col items-center justify-center gap-16 bg-recessed px-16 text-center text-ink-faint sm:border-x sm:border-line"
+  >
+    <IconAlertTriangle :size="32" class="text-ink-muted" />
+    <p class="m-0 font-sans text-base font-semibold text-ink">Article not available offline</p>
+    <p class="m-0 max-w-360 font-mono text-xs text-ink-muted">
+      This bookmark is not cached locally. Connect to the internet to read it.
+    </p>
+    <button
+      data-testid="back-to-list-btn"
+      class="mt-8 inline-flex cursor-pointer items-center gap-8 rounded-none border border-line bg-raised px-14 py-8 font-sans text-sm leading-[normal] text-ink hover:bg-canvas active:translate-x-px active:translate-y-px"
+      type="button"
+      @click="onBack"
+    >
+      Back to reading list
+    </button>
+  </div>
+  <div
+    v-else
+    data-testid="loading-placeholder"
+    class="mx-auto flex h-full min-h-screen max-w-680 flex-col items-center justify-center gap-12 bg-recessed px-16 text-center text-ink-faint sm:border-x sm:border-line"
+  >
+    <IconLoader2 :size="28" class="animate-spin text-ink-muted" />
+    <p class="m-0 font-sans text-base">Loading…</p>
+  </div>
 </template>

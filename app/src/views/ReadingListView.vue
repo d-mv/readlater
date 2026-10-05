@@ -72,13 +72,18 @@ function onChangeFilter(filter: BookmarkFilter) {
   store.setFilter(filter);
 }
 
-function onToggleOffline(id: string) {
+async function onToggleOffline(id: string) {
   const bookmark = store.bookmarks.find((b) => b.id === id);
   if (!bookmark) return;
   if (offlineCache.isCached(id)) {
     offlineCache.removeCachedBookmark(id);
   } else {
-    offlineCache.cacheBookmark(bookmark);
+    let fullBookmark = bookmark;
+    if (fullBookmark.content_md === undefined) {
+      const loaded = await store.fetchOne(id);
+      if (loaded) fullBookmark = loaded;
+    }
+    offlineCache.cacheBookmark(fullBookmark);
   }
 }
 

@@ -97,4 +97,12 @@ describe("useAuthStore", () => {
 
     expect(store.isAuthenticated).toBe(false);
   });
+
+  test("init handles getSession throwing without rejecting the promise", async () => {
+    getSession.mockRejectedValue(new Error("Failed to fetch"));
+
+    const store = useAuthStore();
+    await expect(store.init()).resolves.toBeUndefined();
+    expect(store.isAuthenticated).toBe(false);
+  });
 });

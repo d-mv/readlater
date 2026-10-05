@@ -20,12 +20,16 @@ export const useAuthStore = defineStore("auth", () => {
   function init(): Promise<void> {
     if (!initPromise) {
       initPromise = (async () => {
-        const { data } = await supabase.auth.getSession();
-        session.value = data.session;
+        try {
+          const { data } = await supabase.auth.getSession();
+          session.value = data?.session ?? null;
 
-        supabase.auth.onAuthStateChange((_event, newSession) => {
-          session.value = newSession;
-        });
+          supabase.auth.onAuthStateChange((_event, newSession) => {
+            session.value = newSession;
+          });
+        } catch {
+          // Offline mode: keep session as null or previously loaded value
+        }
       })();
     }
     return initPromise;

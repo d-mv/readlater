@@ -527,16 +527,91 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   }
 
   async function fetchOne(id: string): Promise<Bookmark | null> {
-    const { data } = await supabase.from("bookmarks").select(DETAIL_SELECT).eq("id", id).single();
-    if (!data) return null;
-
-    const index = bookmarks.value.findIndex((b) => b.id === id);
-    if (index >= 0) {
-      bookmarks.value[index] = data;
-    } else {
-      bookmarks.value.push(data);
+    try {
+      const { data, error } = await supabase
+        .from("bookmarks")
+        .select(DETAIL_SELECT)
+        .eq("id", id)
+        .single();
+      if (!error && data) {
+        const index = bookmarks.value.findIndex((b) => b.id === id);
+        if (index >= 0) {
+          bookmarks.value[index] = data;
+        } else {
+          bookmarks.value.push(data);
+        }
+        return data;
+      }
+    } catch {
+      // Network failure, continue to offline fallback
     }
-    return data;
+
+    const cachedArticle = await offlineDb.getArticle(id).catch(() => undefined);
+    const existing = bookmarks.value.find((b) => b.id === id);
+    const metaList = !existing ? await offlineDb.getBookmarksList().catch(() => []) : [];
+    const meta = existing ?? metaList.find((m) => m.id === id);
+
+    if (meta) {
+      const hydrated: Bookmark = {
+        ...meta,
+        content_md: cachedArticle
+          ? offlineDb.hydrateArticleContent(cachedArticle)
+          : ((meta as Partial<Bookmark>).content_md ?? null),
+        translated_content_md: cachedArticle?.translated_content_md
+          ? offlineDb.hydrateArticleContent({
+              ...cachedArticle,
+              content_md: cachedArticle.translated_content_md,
+            })
+          : (meta.translated_content_md ?? null),
+      };
+      const index = bookmarks.value.findIndex((b) => b.id === id);
+      if (index >= 0) {
+        bookmarks.value[index] = hydrated;
+      } else {
+        bookmarks.value.push(hydrated);
+      }
+      return hydrated;
+    }
+
+    if (cachedArticle) {
+      const hydrated: Bookmark = {
+        id: cachedArticle.id,
+        url: null,
+        type: "article",
+        status: "ready",
+        title: "Offline Article",
+        author: null,
+        excerpt: null,
+        content_md: offlineDb.hydrateArticleContent(cachedArticle),
+        translated_content_md: cachedArticle.translated_content_md
+          ? offlineDb.hydrateArticleContent({
+              ...cachedArticle,
+              content_md: cachedArticle.translated_content_md,
+            })
+          : null,
+        translated_lang: null,
+        thumbnail_url: null,
+        youtube_video_id: null,
+        content_edited: false,
+        word_count: null,
+        reading_time: null,
+        tags: [],
+        is_public: false,
+        archived: false,
+        read_at: null,
+        error_message: null,
+        created_at: cachedArticle.cachedAt,
+        processed_at: cachedArticle.cachedAt,
+        pdf_path: null,
+        pdf_parsed: false,
+        view_mode: null,
+        progress: 0,
+      };
+      bookmarks.value.push(hydrated);
+      return hydrated;
+    }
+
+    return null;
   }
 
   async function updateContent(

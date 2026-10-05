@@ -133,6 +133,18 @@ describe("ReaderView", () => {
     );
   });
 
+  test("shows not found / offline unavailable state when bookmark cannot be loaded", async () => {
+    const store = useBookmarksStore();
+    store.bookmarks = [];
+    vi.spyOn(store, "fetchOne").mockResolvedValue(null);
+
+    const wrapper = mount(ReaderView, { props: { id: "missing-1" } });
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="not-found"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("Article not available offline");
+  });
+
   test("shows a Try again button for a failed article that resets it to pending", async () => {
     const failed = makeBookmark({ id: "1" });
     const single = vi.fn().mockResolvedValue({ data: failed, error: null });

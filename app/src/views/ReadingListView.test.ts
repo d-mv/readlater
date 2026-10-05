@@ -162,4 +162,33 @@ describe("ReadingListView", () => {
 
     expect(loadMoreSpy).not.toHaveBeenCalled();
   });
+
+  test("toggling offline on a bookmark without body fetches the body and caches it", async () => {
+    const { useOfflineCacheStore } = await import("../stores/offlineCache");
+    const wrapper = mount(ReadingListView);
+    await flushPromises();
+    const store = useBookmarksStore();
+    const offlineCache = useOfflineCacheStore();
+
+    const listRow = {
+      id: "bm-1",
+      title: "Test",
+      status: "ready",
+      archived: false,
+      read_at: null,
+      tags: [],
+    } as any;
+    store.bookmarks = [listRow];
+    await flushPromises();
+
+    const fullRow = { ...listRow, content_md: "Full article body" };
+    const fetchOneSpy = vi.spyOn(store, "fetchOne").mockResolvedValue(fullRow);
+    const cacheSpy = vi.spyOn(offlineCache, "cacheBookmark").mockResolvedValue(undefined);
+
+    wrapper.findComponent({ name: "BookmarkList" }).vm.$emit("toggleOffline", "bm-1");
+    await flushPromises();
+
+    expect(fetchOneSpy).toHaveBeenCalledWith("bm-1");
+    expect(cacheSpy).toHaveBeenCalledWith(fullRow);
+  });
 });
