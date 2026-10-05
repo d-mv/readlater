@@ -238,6 +238,14 @@ and is swallowed — the offline copy lacks images with no signal. Options:
 `mode: "no-cors"` opaque blobs (renderable via `blob:`? verify), proxy through
 the worker, or surface "images not cached". Needs a decision. Effort M.
 
+### 3.5 Offline mode broken: service worker registration crash & reader missing offline fallback
+**Status:** done (app 0.4.2).
+- `workbox.globPatterns` omitted `html`, breaking `navigateFallback: "index.html"` because Workbox's `createHandlerBoundToURL("index.html")` threw `non-precached-url`, preventing the SW from installing. Restored `html` to `globPatterns`.
+- `fetchOne(id)` threw on network error with no fallback to `offlineDb`. Added fallback to `offlineDb.getArticle(id)` and `offlineDb.getBookmarksList()`.
+- `onToggleOffline(id)` in `ReadingListView` attempted to cache list-projection rows where `content_md` was `undefined`, doing nothing. Updated to load the full body before caching.
+- `ReaderView` showed a blank screen when opening an un-cached bookmark while offline. Added explicit unavailable fallback view.
+- `auth.init()` wrapped in try/catch to prevent network failure from blocking app startup offline.
+
 ---
 
 ## 4. Follow-ups (Kairos)
