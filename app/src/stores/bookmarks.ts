@@ -54,26 +54,102 @@ const PDF_BUCKET = "bookmark-pdfs";
 const PDF_SIGNED_URL_TTL_SECONDS = 60;
 
 function stripContentMd(bookmark: Bookmark): offlineDb.OfflineBookmarkMeta {
-  const { content_md: _content_md, ...meta } = bookmark;
-  return meta;
+  return offlineDb.stripContentMd(bookmark);
 }
 
 async function loadOfflineBookmarks(): Promise<Bookmark[]> {
-  const metaList = await offlineDb.getBookmarksList();
-  return Promise.all(
-    metaList.map(async (meta) => {
-      const article = await offlineDb.getArticle(meta.id);
-      if (!article) return { ...meta, content_md: null };
-      const translated = article.translated_content_md;
-      return {
+  const [metaList, cachedArticles] = await Promise.all([
+    offlineDb.getBookmarksList().catch(() => []),
+    offlineDb.getAllArticles().catch(() => []),
+  ]);
+
+  const byId = new Map<string, Bookmark>();
+
+  for (const article of cachedArticles) {
+    const meta = article.bookmark;
+    const content_md = offlineDb.hydrateArticleContent(article);
+    const translated_content_md = article.translated_content_md
+      ? offlineDb.hydrateArticleContent({ ...article, content_md: article.translated_content_md })
+      : (meta?.translated_content_md ?? null);
+
+    if (meta) {
+      byId.set(article.id, {
         ...meta,
-        content_md: offlineDb.hydrateArticleContent(article),
-        translated_content_md: translated
-          ? offlineDb.hydrateArticleContent({ ...article, content_md: translated })
-          : (meta.translated_content_md ?? null),
-      };
+        content_md,
+        translated_content_md,
+      });
+    } else {
+      byId.set(article.id, {
+        id: article.id,
+        url: null,
+        type: "article",
+        status: "ready",
+        title: "Offline Article",
+        author: null,
+        excerpt: null,
+        content_md,
+        translated_content_md,
+        translated_lang: null,
+        thumbnail_url: null,
+        youtube_video_id: null,
+        content_edited: false,
+        word_count: null,
+        reading_time: null,
+        tags: [],
+        is_public: false,
+        archived: false,
+        read_at: null,
+        error_message: null,
+        created_at: article.cachedAt,
+        processed_at: article.cachedAt,
+        pdf_path: null,
+        pdf_parsed: false,
+        view_mode: null,
+        progress: 0,
+      });
+    }
+  }
+
+  await Promise.all(
+    metaList.map(async (meta) => {
+      const existing = byId.get(meta.id);
+      if (existing) {
+        byId.set(meta.id, {
+          ...meta,
+          content_md: existing.content_md,
+          translated_content_md:
+            existing.translated_content_md ?? meta.translated_content_md ?? null,
+        });
+      } else {
+        const article = await offlineDb.getArticle(meta.id).catch(() => undefined);
+        if (article) {
+          const content_md = offlineDb.hydrateArticleContent(article);
+          const translated_content_md = article.translated_content_md
+            ? offlineDb.hydrateArticleContent({
+                ...article,
+                content_md: article.translated_content_md,
+              })
+            : (meta.translated_content_md ?? null);
+          byId.set(meta.id, {
+            ...meta,
+            content_md,
+            translated_content_md,
+          });
+        } else {
+          byId.set(meta.id, {
+            ...meta,
+            content_md: null,
+          });
+        }
+      }
     }),
   );
+
+  return Array.from(byId.values()).sort((a, b) => {
+    const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+    const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+    return tb - ta;
+  });
 }
 
 export type BookmarkFilter = "all" | "archived";
@@ -171,6 +247,11 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const query = searchQuery.value.trim();
     loading.value = true;
     try {
+      const auth = useAuthStore();
+      const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
+      if (isOffline || !auth.userId || !auth.session) {
+        throw new Error("Offline or session unavailable");
+      }
       // A search result set is bounded and worth showing whole; only the
       // unfiltered list is paged.
       const page = await queryBookmarks(query ? { query } : { limit: PAGE_SIZE });
@@ -236,6 +317,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     // Only the unfiltered list is a true copy of "my recent bookmarks"; a
     // search result or an offline snapshot must never replace it.
     if (listSession.kind !== "recent") return;
+    if (bookmarks.value.length === 0) return;
     // Best-effort: private browsing / storage quota must not blank the list.
     offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
   }
@@ -528,6 +610,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
 
   async function fetchOne(id: string): Promise<Bookmark | null> {
     try {
+      const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
+      if (isOffline) {
+        throw new Error("Offline");
+      }
       const { data, error } = await supabase
         .from("bookmarks")
         .select(DETAIL_SELECT)
@@ -549,7 +635,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const cachedArticle = await offlineDb.getArticle(id).catch(() => undefined);
     const existing = bookmarks.value.find((b) => b.id === id);
     const metaList = !existing ? await offlineDb.getBookmarksList().catch(() => []) : [];
-    const meta = existing ?? metaList.find((m) => m.id === id);
+    const meta = existing ?? metaList.find((m) => m.id === id) ?? cachedArticle?.bookmark;
 
     if (meta) {
       const hydrated: Bookmark = {

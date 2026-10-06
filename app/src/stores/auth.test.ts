@@ -20,6 +20,7 @@ describe("useAuthStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    localStorage.clear();
     getSession.mockResolvedValue({ data: { session: null } });
   });
 
@@ -99,10 +100,42 @@ describe("useAuthStore", () => {
   });
 
   test("init handles getSession throwing without rejecting the promise", async () => {
+    localStorage.clear();
     getSession.mockRejectedValue(new Error("Failed to fetch"));
 
     const store = useAuthStore();
     await expect(store.init()).resolves.toBeUndefined();
     expect(store.isAuthenticated).toBe(false);
+  });
+
+  test("remains authenticated offline using stored user when getSession throws or returns null", async () => {
+    localStorage.setItem(
+      "rl-auth-user",
+      JSON.stringify({ id: "offline-user-1", email: "off@example.com" }),
+    );
+    getSession.mockRejectedValue(new Error("Failed to fetch"));
+
+    const store = useAuthStore();
+    await store.init();
+
+    expect(store.isAuthenticated).toBe(true);
+    expect(store.userId).toBe("offline-user-1");
+  });
+
+  test("signOut clears stored offline user so isAuthenticated becomes false", async () => {
+    localStorage.setItem(
+      "rl-auth-user",
+      JSON.stringify({ id: "offline-user-1", email: "off@example.com" }),
+    );
+    signOut.mockResolvedValue({ error: null });
+
+    const store = useAuthStore();
+    expect(store.isAuthenticated).toBe(true);
+
+    await store.signOut();
+
+    expect(store.isAuthenticated).toBe(false);
+    expect(store.userId).toBeNull();
+    expect(localStorage.getItem("rl-auth-user")).toBeNull();
   });
 });

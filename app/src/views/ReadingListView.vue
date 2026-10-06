@@ -29,12 +29,18 @@ function onScroll() {
 const loadMoreSentinel = useTemplateRef<HTMLDivElement>("loadMoreSentinel");
 let observer: IntersectionObserver | undefined;
 
+function onOnline() {
+  store.fetch();
+  store.subscribeToChanges();
+}
+
 onMounted(() => {
   store.fetch();
   // Live list updates via one Realtime subscription instead of a REST poll.
   store.subscribeToChanges();
   offlineCache.init();
   window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("online", onOnline);
   if (typeof IntersectionObserver !== "undefined") {
     observer = new IntersectionObserver(
       (entries) => {
@@ -59,6 +65,7 @@ watch(loadMoreSentinel, (el) => {
 
 onUnmounted(() => {
   window.removeEventListener("scroll", onScroll);
+  window.removeEventListener("online", onOnline);
   observer?.disconnect();
 });
 

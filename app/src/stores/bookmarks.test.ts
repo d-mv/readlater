@@ -28,7 +28,10 @@ const {
     channel: vi.fn(() => channelObj),
     removeChannel: vi.fn(),
     onSpy,
-    authState: { userId: "user-1" as string | null },
+    authState: {
+      userId: "user-1" as string | null,
+      session: { user: { id: "user-1" } } as unknown,
+    },
   };
 });
 vi.mock("../lib/supabase", () => ({
@@ -67,22 +70,32 @@ function listQuery(rows: unknown = [], error: unknown = null) {
 const {
   replaceBookmarksList,
   getBookmarksList,
+  getAllArticles,
   getArticle,
   deleteBookmarkMeta,
+  putBookmarkMeta,
   hydrateArticleContent,
 } = vi.hoisted(() => ({
   replaceBookmarksList: vi.fn(),
   getBookmarksList: vi.fn(),
+  getAllArticles: vi.fn(),
   getArticle: vi.fn(),
   deleteBookmarkMeta: vi.fn(),
+  putBookmarkMeta: vi.fn(),
   hydrateArticleContent: vi.fn((article: { content_md: string }) => article.content_md),
 }));
 vi.mock("../lib/offlineDb", () => ({
   replaceBookmarksList,
   getBookmarksList,
+  getAllArticles,
   getArticle,
   deleteBookmarkMeta,
+  putBookmarkMeta,
   hydrateArticleContent,
+  stripContentMd: (b: any) => {
+    const { content_md: _content_md, ...meta } = b;
+    return meta;
+  },
 }));
 
 const { removeCachedBookmark, refreshCached } = vi.hoisted(() => ({
@@ -132,10 +145,13 @@ describe("useBookmarksStore", () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     authState.userId = "user-1";
+    authState.session = { user: { id: "user-1" } };
     replaceBookmarksList.mockResolvedValue(undefined);
     getBookmarksList.mockResolvedValue([]);
+    getAllArticles.mockResolvedValue([]);
     getArticle.mockResolvedValue(undefined);
     deleteBookmarkMeta.mockResolvedValue(undefined);
+    putBookmarkMeta.mockResolvedValue(undefined);
     removeCachedBookmark.mockResolvedValue(undefined);
     refreshCached.mockResolvedValue(undefined);
     hydrateArticleContent.mockImplementation(
@@ -734,6 +750,78 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks).toHaveLength(1);
     expect(store.bookmarks[0]?.title).toBe("Offline title");
     expect(replaceBookmarksList).not.toHaveBeenCalled();
+  });
+
+  test("fetch discovers downloaded articles from getAllArticles even when getBookmarksList is empty", async () => {
+    from.mockReturnValue({ select: () => listQuery(null, { message: "fetch failed" }) });
+    getBookmarksList.mockResolvedValue([]);
+    getAllArticles.mockResolvedValue([
+      {
+        id: "offline-dl-1",
+        content_md: "offline content",
+        images: [],
+        cachedAt: "2026-01-01T00:00:00Z",
+        bookmark: makeBookmark({ id: "offline-dl-1", title: "Downloaded Bookmark" }),
+      },
+    ]);
+
+    const store = useBookmarksStore();
+    await store.fetch();
+
+    expect(store.bookmarks).toHaveLength(1);
+    expect(store.bookmarks[0]?.id).toBe("offline-dl-1");
+    expect(store.bookmarks[0]?.title).toBe("Downloaded Bookmark");
+    expect(store.bookmarks[0]?.content_md).toBe("offline content");
+  });
+
+  test("fetch falls back to offline cache immediately when navigator.onLine is false without calling supabase", async () => {
+    vi.stubGlobal("navigator", { onLine: false });
+    getAllArticles.mockResolvedValue([
+      {
+        id: "dl-1",
+        content_md: "dl",
+        images: [],
+        cachedAt: "2026-01-01T00:00:00Z",
+        bookmark: makeBookmark({ id: "dl-1", title: "Offline Instant" }),
+      },
+    ]);
+
+    const store = useBookmarksStore();
+    await store.fetch();
+
+    expect(from).not.toHaveBeenCalled();
+    expect(store.bookmarks).toHaveLength(1);
+    expect(store.bookmarks[0]?.title).toBe("Offline Instant");
+    vi.unstubAllGlobals();
+  });
+
+  test("persistOfflineList does not wipe offline bookmarks when fetched bookmarks list is empty", async () => {
+    from.mockReturnValue({ select: () => listQuery([]) });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+
+    expect(replaceBookmarksList).not.toHaveBeenCalled();
+  });
+
+  test("fetchOne offline fallback uses metadata attached to cached article when not in store or bookmarksList", async () => {
+    const single = vi.fn().mockRejectedValue(new Error("offline"));
+    from.mockReturnValue({ select: () => ({ eq: () => ({ single }) }) });
+    getBookmarksList.mockResolvedValue([]);
+    getArticle.mockResolvedValue({
+      id: "dl-2",
+      content_md: "cached md",
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+      bookmark: makeBookmark({ id: "dl-2", title: "Direct Cached Metadata" }),
+    });
+
+    const store = useBookmarksStore();
+    const result = await store.fetchOne("dl-2");
+
+    expect(result).not.toBeNull();
+    expect(result?.title).toBe("Direct Cached Metadata");
+    expect(result?.content_md).toBe("cached md");
   });
 
   test("archive evicts the bookmark from the offline article cache", async () => {

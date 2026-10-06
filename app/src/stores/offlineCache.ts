@@ -81,12 +81,17 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
     const save: Promise<void> = (async () => {
       const isCurrent = () => inFlight.get(id) === save;
       try {
-        // The reader auto-caches every article it opens; without this check
-        // that re-downloads every inline image and rewrites the record on
-        // each open of an article cached in a previous session.
-        if (opts.reuseExisting && (await offlineDb.getArticle(id))) {
-          if (isCurrent()) setEntry(id, "saved");
-          return;
+        const meta = offlineDb.stripContentMd(bookmark);
+        if (opts.reuseExisting) {
+          const existing = await offlineDb.getArticle(id);
+          if (existing) {
+            if (!existing.bookmark) {
+              await offlineDb.putArticle({ ...existing, bookmark: meta });
+              await offlineDb.putBookmarkMeta(meta);
+            }
+            if (isCurrent()) setEntry(id, "saved");
+            return;
+          }
         }
 
         const images = await downloadImages(extractImageUrls(contentMd, bookmark.thumbnail_url));
@@ -98,7 +103,9 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
           translated_content_md: bookmark.translated_content_md ?? null,
           images,
           cachedAt: new Date().toISOString(),
+          bookmark: meta,
         });
+        await offlineDb.putBookmarkMeta(meta);
         // Removed while the write was in progress: undo it.
         if (!isCurrent()) {
           if (!inFlight.has(id)) await offlineDb.deleteArticle(id);

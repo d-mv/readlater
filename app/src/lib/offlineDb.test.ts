@@ -87,12 +87,60 @@ describe("offlineDb", () => {
     expect(await offlineDb.listCachedArticleIds()).toEqual(expect.arrayContaining(["1", "2"]));
   });
 
-  test("replaceBookmarksList replaces the entire offline list on each call", async () => {
-    await offlineDb.replaceBookmarksList([makeMeta({ id: "1" }), makeMeta({ id: "2" })]);
-    await offlineDb.replaceBookmarksList([makeMeta({ id: "2" }), makeMeta({ id: "3" })]);
+  test("getAllArticles returns all cached articles including metadata", async () => {
+    const meta = makeMeta({ id: "1", title: "Article 1" });
+    await offlineDb.putArticle({
+      id: "1",
+      content_md: "content 1",
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+      bookmark: meta,
+    });
+    await offlineDb.putArticle({
+      id: "2",
+      content_md: "content 2",
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+    });
+
+    const articles = await offlineDb.getAllArticles();
+    expect(articles).toHaveLength(2);
+    const a1 = articles.find((a) => a.id === "1");
+    expect(a1?.bookmark?.title).toBe("Article 1");
+  });
+
+  test("putBookmarkMeta stores a bookmark meta item directly", async () => {
+    const meta = makeMeta({ id: "direct-1", title: "Direct Title" });
+    await offlineDb.putBookmarkMeta(meta);
 
     const list = await offlineDb.getBookmarksList();
-    expect(list.map((b) => b.id).sort()).toEqual(["2", "3"]);
+    expect(list.find((b) => b.id === "direct-1")?.title).toBe("Direct Title");
+  });
+
+  test("replaceBookmarksList does not wipe existing list if empty items array is passed", async () => {
+    await offlineDb.replaceBookmarksList([makeMeta({ id: "1" })]);
+    await offlineDb.replaceBookmarksList([]);
+
+    const list = await offlineDb.getBookmarksList();
+    expect(list.map((b) => b.id)).toEqual(["1"]);
+  });
+
+  test("replaceBookmarksList preserves bookmarks for cached articles even if omitted from new list", async () => {
+    const cachedMeta = makeMeta({ id: "cached-1", title: "Preserved Download" });
+    await offlineDb.putArticle({
+      id: "cached-1",
+      content_md: "downloaded",
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+      bookmark: cachedMeta,
+    });
+
+    await offlineDb.replaceBookmarksList([makeMeta({ id: "recent-1" })]);
+
+    const list = await offlineDb.getBookmarksList();
+    const ids = list.map((b) => b.id);
+    expect(ids).toContain("recent-1");
+    expect(ids).toContain("cached-1");
   });
 
   test("deleteBookmarkMeta removes a single entry from the offline list", async () => {

@@ -3,6 +3,11 @@ import type { Bookmark } from "./supabase";
 
 export type OfflineBookmarkMeta = Omit<Bookmark, "content_md">;
 
+export function stripContentMd(bookmark: Bookmark): OfflineBookmarkMeta {
+  const { content_md: _content_md, ...meta } = bookmark;
+  return meta;
+}
+
 export interface CachedImage {
   url: string;
   blob: Blob;
@@ -16,6 +21,7 @@ export interface CachedArticle {
   translated_content_md?: string | null;
   images: CachedImage[];
   cachedAt: string;
+  bookmark?: OfflineBookmarkMeta;
 }
 
 interface OfflineDbSchema extends DBSchema {
@@ -79,12 +85,33 @@ export async function listCachedArticleIds(): Promise<string[]> {
   return db.getAllKeys("articles");
 }
 
-export async function replaceBookmarksList(items: OfflineBookmarkMeta[]): Promise<void> {
+export async function getAllArticles(): Promise<CachedArticle[]> {
   const db = await getDb();
+  return db.getAll("articles");
+}
+
+export async function replaceBookmarksList(items: OfflineBookmarkMeta[]): Promise<void> {
+  if (items.length === 0) return;
+  const db = await getDb();
+  const articles = await db.getAll("articles");
+  const byId = new Map<string, OfflineBookmarkMeta>();
+  for (const item of items) {
+    byId.set(item.id, item);
+  }
+  for (const article of articles) {
+    if (article.bookmark && !byId.has(article.id)) {
+      byId.set(article.id, article.bookmark);
+    }
+  }
   const tx = db.transaction("bookmarksList", "readwrite");
   await tx.store.clear();
-  await Promise.all(items.map((item) => tx.store.put(item)));
+  await Promise.all(Array.from(byId.values()).map((item) => tx.store.put(item)));
   await tx.done;
+}
+
+export async function putBookmarkMeta(item: OfflineBookmarkMeta): Promise<void> {
+  const db = await getDb();
+  await db.put("bookmarksList", item);
 }
 
 export async function getBookmarksList(): Promise<OfflineBookmarkMeta[]> {

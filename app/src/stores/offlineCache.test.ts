@@ -2,17 +2,25 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Bookmark } from "../lib/supabase";
 
-const { putArticle, deleteArticle, listCachedArticleIds, getArticle } = vi.hoisted(() => ({
-  putArticle: vi.fn(),
-  deleteArticle: vi.fn(),
-  listCachedArticleIds: vi.fn(),
-  getArticle: vi.fn(),
-}));
+const { putArticle, deleteArticle, listCachedArticleIds, getArticle, putBookmarkMeta } = vi.hoisted(
+  () => ({
+    putArticle: vi.fn(),
+    deleteArticle: vi.fn(),
+    listCachedArticleIds: vi.fn(),
+    getArticle: vi.fn(),
+    putBookmarkMeta: vi.fn(),
+  }),
+);
 vi.mock("../lib/offlineDb", () => ({
   putArticle,
   deleteArticle,
   listCachedArticleIds,
   getArticle,
+  putBookmarkMeta,
+  stripContentMd: (b: any) => {
+    const { content_md: _content_md, ...meta } = b;
+    return meta;
+  },
 }));
 
 const { useOfflineCacheStore } = await import("./offlineCache");
@@ -79,18 +87,34 @@ describe("useOfflineCacheStore", () => {
     expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/a.png");
     expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/thumb.png");
     expect(putArticle).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "1", content_md: expect.stringContaining("body text") }),
+      expect.objectContaining({
+        id: "1",
+        content_md: expect.stringContaining("body text"),
+        bookmark: expect.objectContaining({ id: "1", title: "Title" }),
+      }),
+    );
+    expect(putBookmarkMeta).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "1", title: "Title" }),
     );
     expect(store.isCached("1")).toBe(true);
   });
 
-  test("cacheBookmark still caches the text when an image fetch fails", async () => {
+  test("cacheBookmark still caches the text and metadata when an image fetch fails", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
 
     const store = useOfflineCacheStore();
     await store.cacheBookmark(makeBookmark());
 
-    expect(putArticle).toHaveBeenCalledWith(expect.objectContaining({ id: "1", images: [] }));
+    expect(putArticle).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "1",
+        images: [],
+        bookmark: expect.objectContaining({ id: "1", title: "Title" }),
+      }),
+    );
+    expect(putBookmarkMeta).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "1", title: "Title" }),
+    );
     expect(store.isCached("1")).toBe(true);
   });
 
@@ -99,21 +123,28 @@ describe("useOfflineCacheStore", () => {
     await store.cacheBookmark(makeBookmark());
     vi.mocked(fetch).mockClear();
     putArticle.mockClear();
+    putBookmarkMeta.mockClear();
 
     await store.cacheBookmark(makeBookmark());
 
     expect(fetch).not.toHaveBeenCalled();
     expect(putArticle).not.toHaveBeenCalled();
+    expect(putBookmarkMeta).not.toHaveBeenCalled();
   });
 
-  test("cacheBookmark is a no-op when the article was cached in a prior session", async () => {
+  test("cacheBookmark updates missing bookmark metadata when the article was cached in a prior session without metadata", async () => {
     getArticle.mockResolvedValue({ id: "1", content_md: "x", images: [], cachedAt: "t" });
 
     const store = useOfflineCacheStore();
     await store.cacheBookmark(makeBookmark());
 
     expect(fetch).not.toHaveBeenCalled();
-    expect(putArticle).not.toHaveBeenCalled();
+    expect(putArticle).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "1", bookmark: expect.objectContaining({ title: "Title" }) }),
+    );
+    expect(putBookmarkMeta).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "1", title: "Title" }),
+    );
     expect(store.isCached("1")).toBe(true);
   });
 
