@@ -4,6 +4,17 @@ import type { Bookmark } from "../lib/supabase";
 import * as offlineDb from "../lib/offlineDb";
 
 const IMAGE_MARKDOWN_RE = /!\[[^\]]*\]\((https?:\/\/[^)\s]+)\)/g;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const EVICT_AFTER_DAYS = 30;
+const MAX_CACHED_ARTICLES = 200;
+
+// Asks the browser not to evict IndexedDB under storage pressure — the
+// offline copies are the point of having it. Only a request: browsers may
+// decide by engagement or ask the user, and some don't implement it.
+function requestPersistentStorage() {
+  if (typeof navigator === "undefined") return;
+  navigator.storage?.persist?.().catch(() => {});
+}
 
 function extractImageUrls(contentMd: string, thumbnailUrl: string | null): string[] {
   const urls = new Set<string>();
@@ -69,6 +80,10 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
     missing.value = next;
   }
 
+  // Housekeeping runs on the first init() of a session only; the list view
+  // calls init() on every mount.
+  let housekeepingDone = false;
+
   async function init() {
     const articles = await offlineDb.listCachedArticles();
     // Rebuild from IndexedDB, but keep saves that haven't been written yet.
@@ -78,6 +93,39 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
     missing.value = new Map(
       articles.filter((a) => a.missingImages > 0).map((a) => [a.id, a.missingImages]),
     );
+
+    if (housekeepingDone) return;
+    housekeepingDone = true;
+    requestPersistentStorage();
+    await evictStale(articles).catch(() => {});
+  }
+
+  // Every article the reader opens is cached, so without eviction the cache
+  // only ever grows. Unread items are what the offline copy is for and are
+  // always kept; a read or archived item's copy goes once it is older than
+  // EVICT_AFTER_DAYS, or — oldest first — while the cache holds more than
+  // MAX_CACHED_ARTICLES. Read state comes from the persisted list metadata
+  // (no article is loaded); an article with none there is treated as read.
+  async function evictStale(articles: offlineDb.CachedArticleInfo[]) {
+    const metas = await offlineDb.getBookmarksList();
+    const metaById = new Map(metas.map((m) => [m.id, m]));
+    const isUnread = (id: string) => {
+      const meta = metaById.get(id);
+      return meta !== undefined && !meta.archived && meta.read_at === null;
+    };
+    const cutoff = Date.now() - EVICT_AFTER_DAYS * DAY_MS;
+    const candidates = articles
+      .filter((a) => !isUnread(a.id))
+      .sort((a, b) => Date.parse(a.cachedAt) - Date.parse(b.cachedAt));
+
+    let excess = articles.length - MAX_CACHED_ARTICLES;
+    for (const article of candidates) {
+      if (excess <= 0 && Date.parse(article.cachedAt) >= cutoff) break;
+      // Being (re-)saved right now: the user is on it — leave it be.
+      if (inFlight.has(article.id)) continue;
+      await removeCachedBookmark(article.id);
+      excess -= 1;
+    }
   }
 
   function missingImageCount(id: string): number {

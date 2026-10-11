@@ -672,7 +672,12 @@ icon with the count in its title, and the reader notes it while offline — and 
 triggers: automatically after `ReaderView` successfully loads an article, or
 manually via a download icon on unread rows in `BookmarkRow.vue` (tapping
 again evicts it). `archive(id)` and `remove(id)` both evict the `articles`
-cache entry for that id. A `vite:preloadError` listener (`main.ts`) reloads
+cache entry for that id. On the session's first `offlineCache.init()` the
+store also asks for persistent storage (`navigator.storage.persist()`, if
+present) and evicts: copies of unread items are always kept; a read,
+archived or unlisted item's copy goes once it is more than 30 days old, or —
+oldest first — while more than 200 copies are cached (read state from the
+`bookmarksList` metadata, no article loaded). A `vite:preloadError` listener (`main.ts`) reloads
 the page when a lazy chunk from a previous deploy is gone. Manifest:
 `display: standalone`, icons in
 `public/icons/`, `apple-touch-icon` + `apple-mobile-web-app-capable` meta

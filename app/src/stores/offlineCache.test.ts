@@ -1,22 +1,29 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Bookmark } from "../lib/supabase";
 
-const { putArticle, deleteArticle, listCachedArticles, getArticle, putBookmarkMeta } = vi.hoisted(
-  () => ({
-    putArticle: vi.fn(),
-    deleteArticle: vi.fn(),
-    listCachedArticles: vi.fn(),
-    getArticle: vi.fn(),
-    putBookmarkMeta: vi.fn(),
-  }),
-);
+const {
+  putArticle,
+  deleteArticle,
+  listCachedArticles,
+  getArticle,
+  putBookmarkMeta,
+  getBookmarksList,
+} = vi.hoisted(() => ({
+  putArticle: vi.fn(),
+  deleteArticle: vi.fn(),
+  listCachedArticles: vi.fn(),
+  getArticle: vi.fn(),
+  putBookmarkMeta: vi.fn(),
+  getBookmarksList: vi.fn(),
+}));
 vi.mock("../lib/offlineDb", () => ({
   putArticle,
   deleteArticle,
   listCachedArticles,
   getArticle,
   putBookmarkMeta,
+  getBookmarksList,
   stripContentMd: (b: any) => {
     const { content_md: _content_md, ...meta } = b;
     return meta;
@@ -62,6 +69,7 @@ describe("useOfflineCacheStore", () => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     listCachedArticles.mockResolvedValue([]);
+    getBookmarksList.mockResolvedValue([]);
     putArticle.mockResolvedValue(undefined);
     deleteArticle.mockResolvedValue(undefined);
     getArticle.mockResolvedValue(undefined);
@@ -69,6 +77,97 @@ describe("useOfflineCacheStore", () => {
       "fetch",
       vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) }),
     );
+  });
+
+  describe("eviction on init", () => {
+    const NOW = Date.parse("2026-10-11T12:00:00Z");
+    const daysAgo = (days: number) => new Date(NOW - days * 24 * 60 * 60 * 1000).toISOString();
+    const cached = (id: string, days: number) => ({
+      id,
+      cachedAt: daysAgo(days),
+      missingImages: 0,
+    });
+    const read = (id: string) => makeBookmark({ id, read_at: "2026-10-01T00:00:00Z" });
+
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(NOW);
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    test("drops read, archived and unknown items' copies past 30 days, keeping unread ones", async () => {
+      listCachedArticles.mockResolvedValue([
+        cached("old-read", 40),
+        cached("old-archived", 40),
+        cached("old-unknown", 40),
+        cached("old-unread", 400),
+        cached("recent-read", 5),
+      ]);
+      getBookmarksList.mockResolvedValue([
+        read("old-read"),
+        makeBookmark({ id: "old-archived", archived: true }),
+        makeBookmark({ id: "old-unread" }),
+        read("recent-read"),
+      ]);
+
+      const store = useOfflineCacheStore();
+      await store.init();
+
+      expect(deleteArticle.mock.calls.map(([id]) => id).sort()).toEqual([
+        "old-archived",
+        "old-read",
+        "old-unknown",
+      ]);
+      expect(store.isCached("old-unread")).toBe(true);
+      expect(store.isCached("recent-read")).toBe(true);
+      expect(store.isCached("old-read")).toBe(false);
+    });
+
+    test("over 200 copies, drops the oldest read ones until 200 remain", async () => {
+      const articles = Array.from({ length: 205 }, (_, i) => cached(`r${i}`, i % 20));
+      listCachedArticles.mockResolvedValue([...articles, cached("unread", 25)]);
+      getBookmarksList.mockResolvedValue([
+        ...articles.map((a) => read(a.id)),
+        makeBookmark({ id: "unread" }),
+      ]);
+
+      const store = useOfflineCacheStore();
+      await store.init();
+
+      // 206 cached, 6 over: the six oldest read copies (19 days old) go.
+      expect(deleteArticle).toHaveBeenCalledTimes(6);
+      expect(deleteArticle.mock.calls.map(([id]) => id)).toEqual(
+        expect.arrayContaining(["r19", "r39", "r59", "r79", "r99", "r119"]),
+      );
+      expect(store.isCached("unread")).toBe(true);
+    });
+
+    test("runs once per session, asking for persistent storage once", async () => {
+      const persist = vi.fn().mockResolvedValue(true);
+      vi.stubGlobal("navigator", { ...navigator, storage: { persist } });
+      listCachedArticles.mockResolvedValue([cached("old-read", 40)]);
+      getBookmarksList.mockResolvedValue([read("old-read")]);
+
+      const store = useOfflineCacheStore();
+      await store.init();
+      await store.init();
+
+      expect(persist).toHaveBeenCalledOnce();
+      expect(deleteArticle).toHaveBeenCalledOnce();
+      vi.unstubAllGlobals();
+    });
+
+    test("a failing eviction doesn't fail init", async () => {
+      getBookmarksList.mockRejectedValue(new Error("IDB gone"));
+      listCachedArticles.mockResolvedValue([cached("a", 40)]);
+
+      const store = useOfflineCacheStore();
+      await expect(store.init()).resolves.toBeUndefined();
+      expect(store.isCached("a")).toBe(true);
+    });
   });
 
   describe("images that could not be saved", () => {
@@ -104,7 +203,9 @@ describe("useOfflineCacheStore", () => {
     });
 
     test("init restores missing-image counts from earlier sessions", async () => {
-      listCachedArticles.mockResolvedValue([{ id: "1", missingImages: 3 }]);
+      listCachedArticles.mockResolvedValue([
+        { id: "1", cachedAt: new Date().toISOString(), missingImages: 3 },
+      ]);
 
       const store = useOfflineCacheStore();
       await store.init();
@@ -125,8 +226,8 @@ describe("useOfflineCacheStore", () => {
 
   test("init loads already-cached ids so isCached reflects prior sessions", async () => {
     listCachedArticles.mockResolvedValue([
-      { id: "1", missingImages: 0 },
-      { id: "2", missingImages: 0 },
+      { id: "1", cachedAt: new Date().toISOString(), missingImages: 0 },
+      { id: "2", cachedAt: new Date().toISOString(), missingImages: 0 },
     ]);
 
     const store = useOfflineCacheStore();
@@ -267,7 +368,9 @@ describe("useOfflineCacheStore", () => {
     });
 
     test("reset forgets every entry, and a save in flight never commits after it", async () => {
-      listCachedArticles.mockResolvedValue([{ id: "1", missingImages: 2 }]);
+      listCachedArticles.mockResolvedValue([
+        { id: "1", cachedAt: new Date().toISOString(), missingImages: 2 },
+      ]);
       const store = useOfflineCacheStore();
       await store.init();
       expect(store.isCached("1")).toBe(true);
