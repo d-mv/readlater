@@ -6,6 +6,7 @@ const {
   from,
   invoke,
   storageRemove,
+  storageRemoveFrom,
   storageCreateSignedUrl,
   channel,
   removeChannel,
@@ -24,6 +25,7 @@ const {
     from: vi.fn(),
     invoke: vi.fn(),
     storageRemove: vi.fn(),
+    storageRemoveFrom: vi.fn(),
     storageCreateSignedUrl: vi.fn(),
     channel: vi.fn(() => channelObj),
     removeChannel: vi.fn(),
@@ -43,7 +45,18 @@ vi.mock("../lib/supabase", () => ({
     channel,
     removeChannel,
     storage: {
-      from: () => ({ remove: storageRemove, createSignedUrl: storageCreateSignedUrl }),
+      from: (bucket: string) => ({
+        remove: (paths: string[]) => {
+          storageRemoveFrom(bucket, paths);
+          return storageRemove(paths);
+        },
+        createSignedUrl: storageCreateSignedUrl,
+        getPublicUrl: (path: string) => ({
+          data: {
+            publicUrl: `https://proj.supabase.co/storage/v1/object/public/${bucket}/${path}`,
+          },
+        }),
+      }),
     },
   },
 }));
@@ -1638,6 +1651,54 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks).toHaveLength(0);
     expect(deleteBookmarkMeta).toHaveBeenCalledWith("1");
     expect(removeCachedBookmark).toHaveBeenCalledWith("1");
+  });
+
+  describe("remove cleans up the bookmark's Storage objects", () => {
+    async function removeLoaded(row: Bookmark, deleteError: unknown = null) {
+      from.mockReturnValue({
+        select: () => listQuery([row]),
+        delete: () => ({ eq: vi.fn().mockResolvedValue({ error: deleteError }) }),
+      });
+      const store = useBookmarksStore();
+      await store.fetch();
+      return store.remove(row.id);
+    }
+
+    test("the original PDF and a thumbnail in our assets bucket are removed", async () => {
+      storageRemove.mockResolvedValue({ error: null });
+      await removeLoaded(
+        makeBookmark({
+          id: "1",
+          pdf_path: "user-1/abc.pdf",
+          thumbnail_url:
+            "https://proj.supabase.co/storage/v1/object/public/bookmark-assets/youtube/f00.jpeg",
+        }),
+      );
+
+      expect(storageRemoveFrom).toHaveBeenCalledWith("bookmark-pdfs", ["user-1/abc.pdf"]);
+      expect(storageRemoveFrom).toHaveBeenCalledWith("bookmark-assets", ["youtube/f00.jpeg"]);
+    });
+
+    test("a hot-linked thumbnail is not ours to remove", async () => {
+      await removeLoaded(makeBookmark({ id: "1", thumbnail_url: "https://cdn.example.com/t.png" }));
+
+      expect(storageRemoveFrom).not.toHaveBeenCalled();
+    });
+
+    test("a failing Storage removal doesn't fail the delete", async () => {
+      storageRemove.mockRejectedValueOnce(new Error("network"));
+      const result = await removeLoaded(makeBookmark({ id: "1", pdf_path: "user-1/abc.pdf" }));
+
+      expect(result.error).toBeNull();
+    });
+
+    test("nothing is removed from Storage when the row delete fails", async () => {
+      await removeLoaded(makeBookmark({ id: "1", pdf_path: "user-1/abc.pdf" }), {
+        message: "network down",
+      });
+
+      expect(storageRemoveFrom).not.toHaveBeenCalled();
+    });
   });
 
   describe("failed writes leave local state as the server has it", () => {

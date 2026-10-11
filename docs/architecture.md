@@ -470,6 +470,12 @@ the click-to-play embed.
   60-second signed URLs generated on demand (`store.getPdfSignedUrl()`),
   never a bare public URL. Uploaded Markdown/Word files are read, converted,
   and discarded — they never touch Storage at all.
+- Deleting a bookmark (`store.remove()`), once the row delete succeeded,
+  fire-and-forgets removal of its `pdf_path` object and of a thumbnail whose
+  URL lies under the `bookmark-assets` public prefix (path derived via
+  `getPublicUrl("")`). Best-effort — not awaited, failures ignored; rows not
+  loaded on the device, failed removals, and a missing client delete policy
+  on `bookmark-assets` are left to the server-side orphan sweep.
 
 ## 6. Frontend — Vue 3 PWA
 

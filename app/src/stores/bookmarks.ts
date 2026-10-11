@@ -84,6 +84,8 @@ const DELTA_LIMIT = 200;
 const DELTA_OVERLAP_MS = 5 * 60_000;
 const PDF_BUCKET = "bookmark-pdfs";
 const PDF_SIGNED_URL_TTL_SECONDS = 60;
+// Public bucket the worker uploads YouTube thumbnails to (worker/src/storage.ts).
+const ASSETS_BUCKET = "bookmark-assets";
 
 function stripContentMd(bookmark: Bookmark): offlineDb.OfflineBookmarkMeta {
   return offlineDb.stripContentMd(bookmark);
@@ -1070,11 +1072,32 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       }
       return writeResult(error);
     }
+    if (removed) removeStorageObjects(removed);
     await offlineDb.deleteBookmarkMeta(id).catch(() => {});
     await useOfflineCacheStore()
       .removeCachedBookmark(id)
       .catch(() => {});
     return writeResult(null);
+  }
+
+  // Deleting the row leaves its Storage objects behind: the original PDF and
+  // a YouTube thumbnail the worker copied into our assets bucket (any other
+  // thumbnail is a hot link, not ours). Fire-and-forget, after the delete
+  // succeeded — nothing waits on it, and a failure (or a row that wasn't
+  // loaded here) is left to the server-side orphan sweep.
+  function removeStorageObjects(bookmark: Bookmark) {
+    const removals: PromiseLike<unknown>[] = [];
+    if (bookmark.pdf_path) {
+      removals.push(supabase.storage.from(PDF_BUCKET).remove([bookmark.pdf_path]));
+    }
+    const assets = supabase.storage.from(ASSETS_BUCKET);
+    const publicPrefix = assets.getPublicUrl("").data.publicUrl;
+    const thumbnail = bookmark.thumbnail_url;
+    if (thumbnail?.startsWith(publicPrefix)) {
+      const path = decodeURIComponent(thumbnail.slice(publicPrefix.length).split("?")[0] ?? "");
+      if (path) removals.push(assets.remove([path]));
+    }
+    void Promise.allSettled(removals);
   }
 
   async function updateProgress(id: string, progress: number) {
