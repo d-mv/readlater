@@ -23,10 +23,14 @@ export function truncateTitle(text: string, max = 100): string {
   return cut.trim() + "…";
 }
 
-// What a capture screen (bookmarklet popup, share target) shows after trying
-// to save a URL. A duplicate always carries the row it duplicates, so the
-// "save again" prompt can refresh it — never a silent "Saved".
+// What a capture screen (bookmarklet popup, share target) shows. "confirm"
+// waits for the user's Save click: both routes are plain GET URLs any website
+// can navigate to, so saving on load would let a third-party page put
+// arbitrary URLs in the list (and have the worker fetch them). A duplicate
+// always carries the row it duplicates, so the "save again" prompt can
+// refresh it — never a silent "Saved".
 export type CaptureOutcome =
+  | { kind: "confirm" }
   | { kind: "working" }
   | { kind: "saved" }
   | { kind: "error"; message: string }

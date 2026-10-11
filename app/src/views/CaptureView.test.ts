@@ -13,6 +13,30 @@ vi.mock("vue-router", () => ({ useRoute: () => ({ query }) }));
 const { default: CaptureView } = await import("./CaptureView.vue");
 const { useBookmarksStore } = await import("../stores/bookmarks");
 
+async function clickSave(wrapper: ReturnType<typeof mount>) {
+  await wrapper.get('[data-testid="save-btn"]').trigger("click");
+  await flushPromises();
+}
+
+/** Mocks the insert → unique violation → lookup sequence of a duplicate add. */
+function mockDuplicateInsert() {
+  const single = vi
+    .fn()
+    .mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });
+  const select = vi.fn(() => ({ single }));
+  const insert = vi.fn(() => ({ select }));
+  from.mockReturnValueOnce({ insert });
+
+  const existing = { id: "existing-1", title: "Already saved", created_at: "2026-01-01T00:00:00Z" };
+  const maybeSingle = vi.fn().mockResolvedValue({ data: existing, error: null });
+  const eq = vi.fn(() => ({ maybeSingle }));
+  from.mockReturnValueOnce({ select: vi.fn(() => ({ eq })) });
+
+  const contentEditedMaybeSingle = vi.fn().mockResolvedValue({ data: { content_edited: false } });
+  const contentEditedEq = vi.fn(() => ({ maybeSingle: contentEditedMaybeSingle }));
+  from.mockReturnValueOnce({ select: vi.fn(() => ({ eq: contentEditedEq })) });
+}
+
 describe("CaptureView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -27,7 +51,30 @@ describe("CaptureView", () => {
     vi.unstubAllGlobals();
   });
 
-  test("saves a pending bookmark with its title, then closes the window", async () => {
+  test("opening the page only shows what would be saved — nothing is written until Save", async () => {
+    query.url = "https://arc90.com/x";
+    query.title = "A great article";
+
+    const wrapper = mount(CaptureView);
+    await flushPromises();
+
+    expect(from).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("A great article");
+    expect(wrapper.text()).toContain("https://arc90.com/x");
+    expect(wrapper.find('[data-testid="save-btn"]').exists()).toBe(true);
+  });
+
+  test("focuses Save, so Enter saves straight away", async () => {
+    query.url = "https://arc90.com/x";
+
+    const wrapper = mount(CaptureView, { attachTo: document.body });
+    await flushPromises();
+
+    expect(document.activeElement).toBe(wrapper.get('[data-testid="save-btn"]').element);
+    wrapper.unmount();
+  });
+
+  test("Save stores a pending bookmark with its title, then closes the window", async () => {
     query.url = "https://arc90.com/x";
     query.title = "A great article";
     const inserted = { id: "new", url: "https://arc90.com/x", type: "article", status: "pending" };
@@ -38,6 +85,7 @@ describe("CaptureView", () => {
 
     const wrapper = mount(CaptureView);
     await flushPromises();
+    await clickSave(wrapper);
 
     expect(insert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -53,35 +101,26 @@ describe("CaptureView", () => {
     expect(window.close).toHaveBeenCalled();
   });
 
+  test("a non-http(s) url is refused without offering Save", async () => {
+    query.url = "javascript:alert(1)";
+
+    const wrapper = mount(CaptureView);
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="save-btn"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("Only http(s)");
+    expect(from).not.toHaveBeenCalled();
+  });
+
   test("shows a duplicate dialog, and Continue refreshes the existing row then closes", async () => {
     query.url = "https://arc90.com/x";
-    const single = vi
-      .fn()
-      .mockResolvedValue({ data: null, error: { code: "23505", message: "conflict" } });
-    const select = vi.fn(() => ({ single }));
-    const insert = vi.fn(() => ({ select }));
-    from.mockReturnValueOnce({ insert });
-
-    const existing = {
-      id: "existing-1",
-      title: "Already saved",
-      created_at: "2026-01-01T00:00:00Z",
-    };
-    const maybeSingle = vi.fn().mockResolvedValue({ data: existing, error: null });
-    const eq = vi.fn(() => ({ maybeSingle }));
-    const lookupSelect = vi.fn(() => ({ eq }));
-    from.mockReturnValueOnce({ select: lookupSelect });
-
-    const contentEditedMaybeSingle = vi.fn().mockResolvedValue({ data: { content_edited: false } });
-    const contentEditedEq = vi.fn(() => ({ maybeSingle: contentEditedMaybeSingle }));
-    const contentEditedSelect = vi.fn(() => ({ eq: contentEditedEq }));
-    from.mockReturnValueOnce({ select: contentEditedSelect });
-
-    const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({}) }));
+    mockDuplicateInsert();
+    const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
     from.mockReturnValueOnce({ update });
 
     const wrapper = mount(CaptureView);
     await flushPromises();
+    await clickSave(wrapper);
     expect(wrapper.text()).toContain("Already saved");
 
     await wrapper.find('[data-testid="continue-btn"]').trigger("click");
@@ -92,6 +131,26 @@ describe("CaptureView", () => {
 
     await vi.advanceTimersByTimeAsync(800);
     expect(window.close).toHaveBeenCalled();
+  });
+
+  test("a refresh the server rejects shows the error instead of Saved", async () => {
+    query.url = "https://arc90.com/x";
+    mockDuplicateInsert();
+    const update = vi.fn(() => ({
+      eq: vi.fn().mockResolvedValue({ error: { message: "network down" } }),
+    }));
+    from.mockReturnValueOnce({ update });
+
+    const wrapper = mount(CaptureView);
+    await flushPromises();
+    await clickSave(wrapper);
+    await wrapper.find('[data-testid="continue-btn"]').trigger("click");
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(800);
+
+    expect(wrapper.text()).toContain("Couldn't save the change");
+    expect(wrapper.text()).not.toContain("Saved");
+    expect(window.close).not.toHaveBeenCalled();
   });
 
   test("shows the duplicate prompt, not Saved, when the URL is already in the loaded list", async () => {
@@ -110,6 +169,7 @@ describe("CaptureView", () => {
 
     const wrapper = mount(CaptureView);
     await flushPromises();
+    await clickSave(wrapper);
     await vi.advanceTimersByTimeAsync(800);
 
     expect(from).not.toHaveBeenCalled();

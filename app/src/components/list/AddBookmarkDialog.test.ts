@@ -127,7 +127,7 @@ describe("AddBookmarkDialog", () => {
   test("confirming the duplicate prompt re-fetches the existing bookmark and closes", async () => {
     const store = useBookmarksStore();
     store.add = vi.fn().mockResolvedValue(DUPLICATE);
-    store.refresh = vi.fn().mockResolvedValue(undefined);
+    store.refresh = vi.fn().mockResolvedValue({ error: null });
 
     const wrapper = mount(AddBookmarkDialog);
     await wrapper.get('button[data-testid="add-btn"]').trigger("click");
@@ -141,6 +141,27 @@ describe("AddBookmarkDialog", () => {
     expect(store.refresh).toHaveBeenCalledWith("existing-1");
     expect(store.add).toHaveBeenCalledTimes(1);
     expect(wrapper.find("dialog").exists()).toBe(false);
+  });
+
+  test("a refresh the server rejects keeps the dialog open with the error", async () => {
+    const store = useBookmarksStore();
+    store.add = vi.fn().mockResolvedValue(DUPLICATE);
+    store.refresh = vi.fn().mockResolvedValue({ error: "Couldn't save the change." });
+
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
+    await wrapper.get("form").trigger("submit");
+    await flushPromises();
+
+    await wrapper.get('button[data-testid="confirm-btn"]').trigger("click");
+    await flushPromises();
+
+    expect(wrapper.find("dialog").exists()).toBe(true);
+    expect(wrapper.get('[data-testid="error"]').text()).toContain("Couldn't save the change.");
+    expect((wrapper.get("input[type=url]").element as HTMLInputElement).value).toBe(
+      "https://arc90.com/x",
+    );
   });
 
   test("a result arriving after the dialog was closed and reopened is ignored", async () => {

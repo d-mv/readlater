@@ -204,8 +204,12 @@ async function confirmDuplicate() {
   if (current.kind !== "confirmDuplicate" || current.submitting) return;
   const startedIn = epoch;
   phase.value = { ...current, submitting: true };
-  await store.refresh(current.existingId);
-  if (startedIn === epoch) close();
+  const { error } = await store.refresh(current.existingId);
+  if (startedIn !== epoch) return;
+  // Back to the form (URL still filled in) with the reason, rather than
+  // closing as if the bookmark had been re-queued.
+  if (error) showError(error);
+  else close();
 }
 </script>
 

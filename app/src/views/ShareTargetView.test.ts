@@ -19,6 +19,22 @@ vi.mock("vue-router", () => ({
 const { default: ShareTargetView } = await import("./ShareTargetView.vue");
 const { useBookmarksStore } = await import("../stores/bookmarks");
 
+async function mountAndSave() {
+  const wrapper = mount(ShareTargetView);
+  await flushPromises();
+  await wrapper.get('[data-testid="save-btn"]').trigger("click");
+  await flushPromises();
+  return wrapper;
+}
+
+function mockInsert(inserted: unknown) {
+  const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
+  const select = vi.fn(() => ({ single }));
+  const insert = vi.fn(() => ({ select }));
+  from.mockReturnValue({ insert });
+  return insert;
+}
+
 describe("ShareTargetView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -26,16 +42,31 @@ describe("ShareTargetView", () => {
     for (const key of Object.keys(query)) delete query[key];
   });
 
-  test("saves a pending bookmark and routes to the list when the url param is present", async () => {
+  // The share target is a GET route, so a cross-site link reaches it exactly
+  // like the OS share sheet does — nothing may be saved without a click.
+  test("opening the page only shows what would be saved — nothing is written until Save", async () => {
     query.url = "https://arc90.com/x";
-    const inserted = { id: "new", url: "https://arc90.com/x", type: "article", status: "pending" };
-    const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
-    const select = vi.fn(() => ({ single }));
-    const insert = vi.fn(() => ({ select }));
-    from.mockReturnValue({ insert });
 
-    mount(ShareTargetView);
+    const wrapper = mount(ShareTargetView, { attachTo: document.body });
     await flushPromises();
+
+    expect(from).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("https://arc90.com/x");
+    expect(document.activeElement).toBe(wrapper.get('[data-testid="save-btn"]').element);
+    wrapper.unmount();
+  });
+
+  test("Save stores a pending bookmark and routes to the list when the url param is present", async () => {
+    query.url = "https://arc90.com/x";
+    const insert = mockInsert({
+      id: "new",
+      url: "https://arc90.com/x",
+      type: "article",
+      status: "pending",
+    });
+
+    await mountAndSave();
 
     expect(insert).toHaveBeenCalledWith(
       expect.objectContaining({ url: "https://arc90.com/x", status: "pending" }),
@@ -45,14 +76,14 @@ describe("ShareTargetView", () => {
 
   test("treats shared text that is itself a bare URL the same as a url param", async () => {
     query.text = "https://arc90.com/y";
-    const inserted = { id: "new", url: "https://arc90.com/y", type: "article", status: "pending" };
-    const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
-    const select = vi.fn(() => ({ single }));
-    const insert = vi.fn(() => ({ select }));
-    from.mockReturnValue({ insert });
+    const insert = mockInsert({
+      id: "new",
+      url: "https://arc90.com/y",
+      type: "article",
+      status: "pending",
+    });
 
-    mount(ShareTargetView);
-    await flushPromises();
+    await mountAndSave();
 
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ url: "https://arc90.com/y" }));
     expect(replace).toHaveBeenCalledWith({ name: "list" });
@@ -60,13 +91,14 @@ describe("ShareTargetView", () => {
 
   test("saves free-form shared text as a ready note", async () => {
     query.text = "remember to read this later, it was a great point";
-    const inserted = { id: "note-1", type: "note", status: "ready" };
-    const single = vi.fn().mockResolvedValue({ data: inserted, error: null });
-    const select = vi.fn(() => ({ single }));
-    const insert = vi.fn(() => ({ select }));
-    from.mockReturnValue({ insert });
+    const insert = mockInsert({ id: "note-1", type: "note", status: "ready" });
 
-    mount(ShareTargetView);
+    const wrapper = mount(ShareTargetView);
+    await flushPromises();
+    expect(wrapper.text()).toContain("remember to read this later");
+    expect(from).not.toHaveBeenCalled();
+
+    await wrapper.get('[data-testid="save-btn"]').trigger("click");
     await flushPromises();
 
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ type: "note", status: "ready" }));
@@ -92,11 +124,38 @@ describe("ShareTargetView", () => {
     const lookupSelect = vi.fn(() => ({ eq }));
     from.mockReturnValueOnce({ select: lookupSelect });
 
-    const wrapper = mount(ShareTargetView);
-    await flushPromises();
+    const wrapper = await mountAndSave();
 
     expect(replace).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("Already saved");
+  });
+
+  test("a refresh the server rejects shows the error instead of routing away", async () => {
+    query.url = "https://arc90.com/x";
+    useBookmarksStore().bookmarks = [
+      {
+        id: "existing-1",
+        url: "https://arc90.com/x",
+        type: "article",
+        status: "ready",
+        title: "Loaded already",
+        content_edited: false,
+        created_at: "2026-01-01T00:00:00Z",
+        tags: [],
+      } as unknown as Bookmark,
+    ];
+    const update = vi.fn(() => ({
+      eq: vi.fn().mockResolvedValue({ error: { message: "network down" } }),
+    }));
+    from.mockReturnValueOnce({ update });
+
+    const wrapper = await mountAndSave();
+    await wrapper.get('[data-testid="continue-btn"]').trigger("click");
+    await flushPromises();
+
+    expect(update).toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+    expect(wrapper.text()).toContain("Couldn't save the change");
   });
 
   test("shows the duplicate prompt instead of routing away when the URL is already in the loaded list", async () => {
@@ -113,8 +172,7 @@ describe("ShareTargetView", () => {
       } as unknown as Bookmark,
     ];
 
-    const wrapper = mount(ShareTargetView);
-    await flushPromises();
+    const wrapper = await mountAndSave();
 
     expect(from).not.toHaveBeenCalled();
     expect(replace).not.toHaveBeenCalled();

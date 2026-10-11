@@ -226,10 +226,13 @@ Seven ways in, all funneling into the same `bookmarks` table:
   window.open('__APP_ORIGIN__/capture?' + params.toString(), 'readlater-capture', 'width=380,height=260');
 })();
 ```
-`CaptureView.vue` reads `url`/`title` from the query string and calls
+`CaptureView.vue` reads `url`/`title` from the query string, shows them with
+a focused **Save** button (Enter saves), and on that click calls
 `useBookmarksStore().add()` — the same client-side path the Add dialog uses —
 authenticated with whatever Supabase session is already active in that
-browser. Why a popup instead of a direct `fetch()` from the source page: a
+browser. It never saves on load: `/capture?url=…` is an ordinary URL any
+website can open, and an auto-save would let it plant arbitrary URLs in the
+list (which the worker then fetches). Why a popup instead of a direct `fetch()` from the source page: a
 page's CSP (`connect-src`/`script-src`) governs requests *that page's own
 script* makes, not where it navigates or opens a window to. Wikipedia is the
 concrete case that forced this — its CSP has no `connect-src` override for
@@ -245,7 +248,9 @@ or a one-tap iOS Shortcut POSTing to `capture` with the `CAPTURE_KEY` bearer,
 covers that case instead. `ShareTargetView.vue` reads `url`/`text`/`title`
 from the query string and saves through the store under the PWA's own
 session: a `url` (or `text` that `isBareUrl()` accepts) goes to `store.add()`,
-anything else to `store.addNote()`. The `capture` edge function is now only
+anything else to `store.addNote()` — again only after a Save click, since the
+manifest's share target is `method: "GET"` and so just as reachable from a
+cross-site link as `/capture`. The `capture` edge function is now only
 reached by non-browser callers (the iOS Shortcut).
 
 **Snippet paste.** `AddBookmarkDialog.vue` has a URL/Snippet mode switch.
