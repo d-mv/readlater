@@ -87,6 +87,16 @@ function latest(a: string | null, b: string): string {
   return a !== null && Date.parse(a) >= Date.parse(b) ? a : b;
 }
 
+// The snapshot's bodies come from the offline cache with images rewritten to
+// this session's blob: URLs. Online, the list must hold list-shaped rows (no
+// body) so the reader pulls the real body with fetchOne(); a hydrated body
+// left in place would be what an edit saves or a translation sends, writing
+// blob: URLs to the server.
+function withoutBody(bookmark: Bookmark): Bookmark {
+  const { content_md: _body, translated_content_md: _translation, ...row } = bookmark;
+  return row as Bookmark;
+}
+
 async function loadOfflineBookmarks(): Promise<Bookmark[]> {
   const [metaList, cachedArticles] = await Promise.all([
     offlineDb.getBookmarksList().catch(() => []),
@@ -321,7 +331,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       ({ cursor, watermark } = state);
       // Downloaded articles outside the window carry metadata of unknown age;
       // leave them for loadMore() rather than show them stale.
-      bookmarks.value = snapshot.filter((b) => inWindow(b.created_at, cursor, state.hasMore));
+      bookmarks.value = snapshot
+        .filter((b) => inWindow(b.created_at, cursor, state.hasMore))
+        .map(withoutBody);
       listSession = { kind: "recent", cursor, watermark };
       hasMore.value = state.hasMore;
     }

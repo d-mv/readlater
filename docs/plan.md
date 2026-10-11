@@ -505,9 +505,9 @@ Fix-first items:
 - H02 browser-fallback SSRF (JS runs, no WS/SW interception, root, no sandbox).
 - H03 confirm production signup is off; `tags`/`bookmark_tags` RLS is
   any-authenticated.
-- H04 hydrated `blob:` bodies can be saved back to `content_md`.
-- H05 store writes ignore Supabase errors (archive/delete/read/edit).
-- H06 export and import duplicate check capped at 1000 rows.
-- H07 `translateLogic.hardSplit` is quadratic → WORKER_LIMIT on PDFs.
-- H08 refresh keeps the old translation.
-- H09 Realtime UPDATE copies `updated_at` but not tags → delta skips the row.
+- **H04 done (0.7.5)** — online cold start drops hydrated `blob:` bodies from the list.
+- **H05 done (0.7.3)** — writes return `{ error }`, change state only on success; delete is optimistic with rollback. Capture/share-target/add-dialog still ignore a failed `refresh()`.
+- **H06 done** — export and import duplicate check page past 1000 rows.
+- **H07 done** — linear chunking that cuts on lines, then sentences, then spaces. Needs `supabase functions deploy translate`.
+- **H08 done (worker 0.0.3)** — processing→ready nulls the translation. Needs a worker deploy.
+- **H09 done (0.7.4)** — Realtime merge keeps the local `updated_at`.

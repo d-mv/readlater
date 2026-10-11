@@ -1651,6 +1651,34 @@ describe("useBookmarksStore", () => {
       expect(store.hasMore).toBe(true);
     });
 
+    test("a cold start online leaves downloaded bodies out of the list, so the reader fetches the real one", async () => {
+      getSyncState.mockResolvedValue({
+        watermark: "2026-10-09T00:00:00Z",
+        cursor: null,
+        hasMore: false,
+      });
+      const meta = row("a", "05", "05");
+      getBookmarksList.mockResolvedValue([meta]);
+      getAllArticles.mockResolvedValue([
+        {
+          id: "a",
+          bookmark: meta,
+          content_md: "![x](blob:http://app/1)",
+          translated_content_md: "![x](blob:http://app/2)",
+          images: [],
+          cachedAt: "2026-10-05T00:00:00Z",
+        },
+      ]);
+      tables(listQuery([]));
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["a"]);
+      expect(store.bookmarks[0]?.content_md).toBeUndefined();
+      expect(store.bookmarks[0]?.translated_content_md).toBeUndefined();
+    });
+
     test("a delta too large to replay falls back to a fresh first page", async () => {
       getSyncState.mockResolvedValue({
         watermark: "2026-10-09T00:00:00Z",
