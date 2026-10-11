@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1.0.19";
 import { detectType } from "./detectType.ts";
 
 Deno.test("detects youtube.com/watch URLs", () => {

@@ -1,10 +1,12 @@
-import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 import { Buffer } from "node:buffer";
-import mammoth from "npm:mammoth";
-import TurndownService from "npm:turndown";
+import mammoth from "npm:mammoth@1.12.0";
 import { detectKind, maxBytesFor } from "./fileImportLogic.ts";
 import { decodeBase64, titleFromFilename } from "../_shared/file.ts";
 import { readyNoteRow } from "../_shared/noteRow.ts";
+import { createTurndownService } from "../_shared/turndown.ts";
+import { jsonResponse, MAX_BODY_BYTES, readJsonBody, serverError } from "../_shared/http.ts";
+import { bumpRateLimit } from "../_shared/rateLimit.ts";
 
 // apikey and x-client-info are sent on every supabase-js request (including
 // functions.invoke), not just authorization/content-type — omitting them
@@ -16,15 +18,12 @@ export const corsHeaders = {
 };
 
 function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...corsHeaders, "content-type": "application/json" },
-  });
+  return jsonResponse(corsHeaders, body, status);
 }
 
 async function convertDocxToMarkdown(bytes: Uint8Array): Promise<string> {
   const { value: html } = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) });
-  return new TurndownService().turndown(html);
+  return createTurndownService().turndown(html);
 }
 
 export async function handleFileImport(
@@ -56,13 +55,18 @@ export async function handleFileImport(
     return json(`file exceeds the ${limit} limit for this file type`, 400);
   }
 
+  const limit = await bumpRateLimit(supabase, "file-import");
+  if (limit === "error") return json("internal error", 500);
+  if (limit === "limited") return json("rate limit exceeded, try again later", 429);
+
   let content: string;
   if (kind === "markdown") {
     content = new TextDecoder().decode(bytes).trim();
   } else {
     try {
       content = (await convertDocx(bytes)).trim();
-    } catch {
+    } catch (err) {
+      console.error("[file-import:docx]", err);
       return json("could not parse Word document", 400);
     }
   }
@@ -74,25 +78,33 @@ export async function handleFileImport(
     .select("*, tags(id, name, color)")
     .single();
 
-  if (error) return json(error.message, 500);
+  if (error) return serverError(corsHeaders, "file-import:insert", error);
   return json({ bookmark: data });
+}
+
+export async function handleRequest(
+  req: Request,
+  makeClient: (authorization: string) => SupabaseClient,
+): Promise<Response> {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
+  if (req.method !== "POST") return json("not found", 404);
+
+  const parsed = await readJsonBody(req, MAX_BODY_BYTES.fileImport, corsHeaders);
+  if (!parsed.ok) return parsed.response;
+
+  return handleFileImport(makeClient(req.headers.get("Authorization") ?? ""), parsed.body);
 }
 
 // import.meta.main is only true when this file is the process entry point
 // (the deployed edge function), not when index.test.ts imports handleFileImport
 // — so the test run never tries to bind a port.
 if (import.meta.main) {
-  Deno.serve(async (req) => {
-    if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
-    if (req.method !== "POST") return json("not found", 404);
-
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
-      { global: { headers: { Authorization: req.headers.get("Authorization") ?? "" } } },
-    );
-
-    const body = await req.json();
-    return handleFileImport(supabase, body);
-  });
+  Deno.serve((req) =>
+    handleRequest(req, (authorization) =>
+      createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_ANON_KEY")!,
+        { global: { headers: { Authorization: authorization } } },
+      ))
+  );
 }

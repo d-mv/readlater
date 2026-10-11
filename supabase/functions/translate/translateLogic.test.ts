@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1.0.19";
 import { chunkText, deeplApiBase, joinChunks, MAX_CHUNK_BYTES, normalizeTargetLang } from "./translateLogic.ts";
 
 Deno.test("deeplApiBase: uses the free-tier host for keys ending in :fx", () => {

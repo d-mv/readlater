@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1.0.19";
 import { readingTimeFromWordCount, readyNoteRow, truncateTitle, wordCount } from "./noteRow.ts";
 
 Deno.test("truncateTitle: leaves short text untouched", () => {

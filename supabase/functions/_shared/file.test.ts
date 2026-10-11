@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1.0.19";
 import { decodeBase64, titleFromFilename } from "./file.ts";
 
 Deno.test("titleFromFilename: strips the extension", () => {

@@ -1,3 +1,5 @@
+// Constant-time static bearer-token check, shared by capture (CAPTURE_KEY)
+// and storage-sweep (the service-role key).
 export function checkAuth(authHeader: string | null, expectedKey: string): boolean {
   if (!expectedKey) return false;
   if (!authHeader?.startsWith("Bearer ")) return false;

@@ -1,4 +1,4 @@
-import { assertEquals, assertMatch } from "jsr:@std/assert";
+import { assertEquals, assertMatch } from "jsr:@std/assert@1.0.19";
 import { isPdfFilename, normalizeExtractedText, pdfObjectPath } from "./pdfImportLogic.ts";
 
 Deno.test("isPdfFilename: accepts .pdf, case-insensitively", () => {

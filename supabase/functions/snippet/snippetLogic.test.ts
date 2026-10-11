@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1.0.19";
 import { resolveContent } from "./snippetLogic.ts";
 
 Deno.test("resolveContent: prefers the converted markdown when non-empty", () => {

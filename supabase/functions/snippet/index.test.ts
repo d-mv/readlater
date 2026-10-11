@@ -1,9 +1,10 @@
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
-import { corsHeaders, handleSnippet } from "./index.ts";
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.19";
+import { corsHeaders, handleRequest, handleSnippet } from "./index.ts";
 
 function fakeSupabase(opts: {
   user?: { id: string } | null;
   insertResult?: { data?: unknown; error?: { message: string } };
+  rateLimit?: { data: unknown; error?: { message: string } | null };
 }) {
   const single = () =>
     Promise.resolve(opts.insertResult ?? { data: { id: "b1" }, error: null });
@@ -14,9 +15,12 @@ function fakeSupabase(opts: {
   };
   let lastInsertedRow: Record<string, unknown> | undefined;
   const from = (_table: string) => ({ insert });
+  const rpc = (_fn: string, _args: Record<string, unknown>) =>
+    Promise.resolve(opts.rateLimit ?? { data: true, error: null });
   return {
     auth: { getUser: () => Promise.resolve({ data: { user: opts.user ?? null } }) },
     from,
+    rpc,
     get lastInsertedRow() {
       return lastInsertedRow;
     },
@@ -78,7 +82,7 @@ Deno.test("handleSnippet: returns 401 when unauthenticated", async () => {
   assertEquals(res.status, 401);
 });
 
-Deno.test("handleSnippet: returns 500 with the DB error message on insert failure", async () => {
+Deno.test("handleSnippet: returns a generic 500 (no DB error text) on insert failure", async () => {
   const supabase = fakeSupabase({
     user: { id: "user-1" },
     insertResult: { data: undefined, error: { message: "insert failed" } },
@@ -87,5 +91,42 @@ Deno.test("handleSnippet: returns 500 with the DB error message on insert failur
   const body = await res.json();
 
   assertEquals(res.status, 500);
-  assertEquals(body, "insert failed");
+  assertEquals(body, "internal error");
+});
+
+Deno.test("handleSnippet: returns 429 and inserts nothing when the rate limit refuses", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" }, rateLimit: { data: false, error: null } });
+  // deno-lint-ignore no-explicit-any
+  const res = await handleSnippet(supabase as any, { text: "hello" });
+  assertEquals(res.status, 429);
+  assertEquals(supabase.lastInsertedRow, undefined);
+});
+
+Deno.test("handleSnippet: unwraps a link around an image like the worker does", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const html = '<p><a href="https://x.test/a.png"><img src="https://x.test/a.png"></a></p>';
+  // deno-lint-ignore no-explicit-any
+  await handleSnippet(supabase as any, { html, text: "pic" });
+  assertEquals(supabase.lastInsertedRow?.content_md, "![](https://x.test/a.png)");
+});
+
+Deno.test("handleRequest: malformed JSON is a 400 with CORS headers", async () => {
+  const req = new Request("http://localhost/snippet", { method: "POST", body: "not json" });
+  // deno-lint-ignore no-explicit-any
+  const res = await handleRequest(req, () => fakeSupabase({ user: { id: "user-1" } }) as any);
+  assertEquals(res.status, 400);
+  assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+});
+
+Deno.test("handleRequest: a body over 1 MB is a 413 with CORS headers", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const req = new Request("http://localhost/snippet", {
+    method: "POST",
+    body: JSON.stringify({ text: "a".repeat(1024 * 1024) }),
+  });
+  // deno-lint-ignore no-explicit-any
+  const res = await handleRequest(req, () => supabase as any);
+  assertEquals(res.status, 413);
+  assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+  assertEquals(supabase.lastInsertedRow, undefined);
 });

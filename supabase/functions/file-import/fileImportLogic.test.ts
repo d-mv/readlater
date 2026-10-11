@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1.0.19";
 import { detectKind, MAX_DOCX_BYTES, MAX_MARKDOWN_BYTES, maxBytesFor } from "./fileImportLogic.ts";
 
 Deno.test("detectKind: recognizes markdown extensions", () => {

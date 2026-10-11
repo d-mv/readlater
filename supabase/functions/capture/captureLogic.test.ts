@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert";
+import { assertEquals } from "jsr:@std/assert@1.0.19";
 import { hasAllowedScheme, isBareUrl, normalizeUrl } from "./captureLogic.ts";
 
 Deno.test("hasAllowedScheme: accepts https", () => {

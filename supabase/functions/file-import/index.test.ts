@@ -1,9 +1,10 @@
-import { assertEquals, assertStringIncludes } from "jsr:@std/assert";
-import { corsHeaders, handleFileImport } from "./index.ts";
+import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.19";
+import { corsHeaders, handleFileImport, handleRequest } from "./index.ts";
 
 function fakeSupabase(opts: {
   user?: { id: string } | null;
   insertResult?: { data?: unknown; error?: { message: string } };
+  rateLimit?: { data: unknown; error?: { message: string } | null };
 }) {
   const single = () => Promise.resolve(opts.insertResult ?? { data: { id: "b1" }, error: null });
   const select = (_cols: string) => ({ single });
@@ -13,9 +14,12 @@ function fakeSupabase(opts: {
   };
   let lastInsertedRow: Record<string, unknown> | undefined;
   const from = (_table: string) => ({ insert });
+  const rpc = (_fn: string, _args: Record<string, unknown>) =>
+    Promise.resolve(opts.rateLimit ?? { data: true, error: null });
   return {
     auth: { getUser: () => Promise.resolve({ data: { user: opts.user ?? null } }) },
     from,
+    rpc,
     get lastInsertedRow() {
       return lastInsertedRow;
     },
@@ -114,7 +118,7 @@ Deno.test("handleFileImport: returns 401 when unauthenticated", async () => {
   assertEquals(res.status, 401);
 });
 
-Deno.test("handleFileImport: returns 500 with the DB error message on insert failure", async () => {
+Deno.test("handleFileImport: returns a generic 500 (no DB error text) on insert failure", async () => {
   const supabase = fakeSupabase({
     user: { id: "user-1" },
     insertResult: { data: undefined, error: { message: "insert failed" } },
@@ -127,7 +131,39 @@ Deno.test("handleFileImport: returns 500 with the DB error message on insert fai
   const body = await res.json();
 
   assertEquals(res.status, 500);
-  assertEquals(body, "insert failed");
+  assertEquals(body, "internal error");
+});
+
+Deno.test("handleFileImport: returns 429 and inserts nothing when the rate limit refuses", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" }, rateLimit: { data: false, error: null } });
+  const res = await handleFileImport(
+    // deno-lint-ignore no-explicit-any
+    supabase as any,
+    { filename: "notes.md", contentBase64: b64("hi") },
+  );
+  assertEquals(res.status, 429);
+  assertEquals(supabase.lastInsertedRow, undefined);
+});
+
+Deno.test("handleRequest: malformed JSON is a 400 with CORS headers", async () => {
+  const req = new Request("http://localhost/file-import", { method: "POST", body: "[1,2" });
+  // deno-lint-ignore no-explicit-any
+  const res = await handleRequest(req, () => fakeSupabase({ user: { id: "user-1" } }) as any);
+  assertEquals(res.status, 400);
+  assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+});
+
+Deno.test("handleRequest: a body over 10 MB is a 413 with CORS headers", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const req = new Request("http://localhost/file-import", {
+    method: "POST",
+    body: JSON.stringify({ filename: "big.md", contentBase64: "a".repeat(10 * 1024 * 1024) }),
+  });
+  // deno-lint-ignore no-explicit-any
+  const res = await handleRequest(req, () => supabase as any);
+  assertEquals(res.status, 413);
+  assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+  assertEquals(supabase.lastInsertedRow, undefined);
 });
 
 Deno.test("corsHeaders: allows the apikey header supabase-js attaches to functions.invoke calls", () => {
