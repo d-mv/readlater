@@ -1913,6 +1913,79 @@ describe("useBookmarksStore", () => {
       expect(store.bookmarks).toHaveLength(1);
     });
 
+    describe("an add whose Realtime INSERT arrives before its own response", () => {
+      const created = makeBookmark({
+        id: "new",
+        url: "https://arc90.com/new",
+        title: "From the response",
+        tags: [{ id: "t1", name: "tag", color: "#000000" }],
+      });
+      // The echo lands while the request is still awaiting its response.
+      const realtimeFirst = () =>
+        emitRealtime({ eventType: "INSERT", new: { ...created, title: "From Realtime" } });
+      const insertResponds = () => {
+        const single = vi.fn(async () => {
+          realtimeFirst();
+          return { data: created, error: null };
+        });
+        from.mockReturnValue({ insert: () => ({ select: () => ({ single }) }) });
+      };
+      const edgeFunctionResponds = () =>
+        invoke.mockImplementation(async () => {
+          realtimeFirst();
+          return { data: { bookmark: created }, error: null };
+        });
+
+      type Store = ReturnType<typeof useBookmarksStore>;
+      test.each<[string, (store: Store) => Promise<unknown>]>([
+        [
+          "add",
+          (store) => {
+            insertResponds();
+            return store.add("https://arc90.com/new");
+          },
+        ],
+        [
+          "addNote",
+          (store) => {
+            insertResponds();
+            return store.addNote("a note");
+          },
+        ],
+        [
+          "addSnippet",
+          (store) => {
+            edgeFunctionResponds();
+            return store.addSnippet("<b>x</b>", "x");
+          },
+        ],
+        [
+          "addFile",
+          (store) => {
+            edgeFunctionResponds();
+            return store.addFile(new File(["# hi"], "notes.md", { type: "text/markdown" }));
+          },
+        ],
+        [
+          "addPdf",
+          (store) => {
+            edgeFunctionResponds();
+            return store.addPdf(new File(["%PDF-1.4"], "a.pdf", { type: "application/pdf" }));
+          },
+        ],
+      ])("%s lists the row once, as the response has it", async (_name, run) => {
+        const store = useBookmarksStore();
+        store.bookmarks = [makeBookmark({ id: "old" })];
+        store.subscribeToChanges();
+
+        await run(store);
+
+        expect(store.bookmarks.map((b) => b.id)).toEqual(["new", "old"]);
+        expect(store.bookmarks[0]?.title).toBe("From the response");
+        expect(store.bookmarks[0]?.tags).toHaveLength(1);
+      });
+    });
+
     test("a DELETE event drops the row and its offline metadata", async () => {
       seedStore([makeBookmark({ id: "1" }), makeBookmark({ id: "2" })]);
       const store = useBookmarksStore();

@@ -578,6 +578,16 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     activeTagIds.value = [];
   }
 
+  // Puts a row the server just created at the top of the list. Its Realtime
+  // INSERT can arrive before the insert's own response, in which case the
+  // row is already listed: the response (the full row, tags included)
+  // replaces it in place rather than adding a second copy.
+  function addToList(row: Bookmark) {
+    const index = bookmarks.value.findIndex((b) => b.id === row.id);
+    if (index >= 0) bookmarks.value[index] = row;
+    else bookmarks.value.unshift(row);
+  }
+
   async function add(url: string, options?: { title?: string }): Promise<AddBookmarkResult> {
     let type: Bookmark["type"];
     try {
@@ -627,7 +637,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       return { error: error.message };
     }
 
-    bookmarks.value.unshift(data);
+    addToList(data);
     return { error: null };
   }
 
@@ -656,7 +666,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
 
     if (error) return { error: error.message };
 
-    bookmarks.value.unshift(data);
+    addToList(data);
     return { error: null };
   }
 
@@ -664,7 +674,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const { data, error } = await supabase.functions.invoke("snippet", { body: { html, text } });
     if (error) return { error: error.message };
 
-    bookmarks.value.unshift(data.bookmark);
+    addToList(data.bookmark);
     return { error: null };
   }
 
@@ -688,7 +698,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     });
     if (error) return { error: error.message };
 
-    bookmarks.value.unshift(data.bookmark);
+    addToList(data.bookmark);
     return { error: null };
   }
 
@@ -707,7 +717,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     });
     if (error) return { error: error.message };
 
-    bookmarks.value.unshift(data.bookmark);
+    addToList(data.bookmark);
     return { error: null };
   }
 
