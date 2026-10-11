@@ -923,12 +923,9 @@ describe("useBookmarksStore", () => {
         processed_at: null,
       },
     ]);
-    getArticle.mockResolvedValue({
-      id: "1",
-      content_md: "cached body",
-      images: [],
-      cachedAt: "2026-01-01T00:00:00Z",
-    });
+    getAllArticles.mockResolvedValue([
+      { id: "1", content_md: "cached body", images: [], cachedAt: "2026-01-01T00:00:00Z" },
+    ]);
 
     const store = useBookmarksStore();
     await store.fetch();
@@ -937,6 +934,8 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks[0]?.title).toBe("Cached title");
     expect(store.bookmarks[0]?.content_md).toBe("cached body");
     expect(replaceBookmarksList).not.toHaveBeenCalled();
+    // getAllArticles() already returned every downloaded copy — no per-row re-read.
+    expect(getArticle).not.toHaveBeenCalled();
   });
 
   test("fetch falls back to the offline cache when supabase returns an error object without throwing", async () => {
@@ -1326,13 +1325,9 @@ describe("useBookmarksStore", () => {
       getBookmarksList.mockResolvedValue([
         { ...makeBookmark({ id: "1" }), content_md: undefined, translated_content_md: undefined },
       ]);
-      getArticle.mockResolvedValue({
-        id: "1",
-        content_md: "Hola",
-        translated_content_md: "Hi",
-        images: [],
-        cachedAt: "t",
-      });
+      getAllArticles.mockResolvedValue([
+        { id: "1", content_md: "Hola", translated_content_md: "Hi", images: [], cachedAt: "t" },
+      ]);
       const store = useBookmarksStore();
 
       await store.fetch();

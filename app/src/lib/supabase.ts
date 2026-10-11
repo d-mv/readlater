@@ -50,7 +50,7 @@ export interface Bookmark {
   progress?: number | null;
 }
 
-export interface DuplicateBookmark {
+interface DuplicateBookmark {
   existingId: string;
   existingTitle: string | null;
   existingSavedAt: string;

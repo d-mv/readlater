@@ -87,10 +87,6 @@ const PDF_SIGNED_URL_TTL_SECONDS = 60;
 // Public bucket the worker uploads YouTube thumbnails to (worker/src/storage.ts).
 const ASSETS_BUCKET = "bookmark-assets";
 
-function stripContentMd(bookmark: Bookmark): offlineDb.OfflineBookmarkMeta {
-  return offlineDb.stripContentMd(bookmark);
-}
-
 // PostgREST returns created_at with microseconds, which Date.parse drops —
 // and rows an import stamped within the same millisecond differ only there.
 function microseconds(timestamp: string): number {
@@ -142,6 +138,54 @@ async function loadPersistedList(): Promise<Bookmark[]> {
   return metas.map(withoutBody).sort(byCreatedAtDesc);
 }
 
+// A downloaded article's body and translation, with its cached images
+// swapped for blob: URLs; `fallbackTranslation` when the copy has none.
+function hydratedBodies(
+  article: offlineDb.CachedArticle,
+  fallbackTranslation: string | null,
+): Pick<Bookmark, "content_md" | "translated_content_md"> {
+  return {
+    content_md: offlineDb.hydrateArticleContent(article),
+    translated_content_md: article.translated_content_md
+      ? offlineDb.hydrateArticleContent({ ...article, content_md: article.translated_content_md })
+      : fallbackTranslation,
+  };
+}
+
+// Stand-in row for a downloaded article whose metadata was never stored
+// (cached before the cache kept it): readable, with nothing to show but the
+// body.
+function placeholderBookmark(article: offlineDb.CachedArticle): Bookmark {
+  return {
+    id: article.id,
+    url: null,
+    type: "article",
+    status: "ready",
+    title: "Offline Article",
+    author: null,
+    excerpt: null,
+    ...hydratedBodies(article, null),
+    translated_lang: null,
+    thumbnail_url: null,
+    youtube_video_id: null,
+    content_edited: false,
+    word_count: null,
+    reading_time: null,
+    tags: [],
+    is_public: false,
+    archived: false,
+    read_at: null,
+    error_message: null,
+    created_at: article.cachedAt,
+    processed_at: article.cachedAt,
+    updated_at: article.cachedAt,
+    pdf_path: null,
+    pdf_parsed: false,
+    view_mode: null,
+    progress: 0,
+  };
+}
+
 async function loadOfflineBookmarks(): Promise<Bookmark[]> {
   const [metaList, cachedArticles] = await Promise.all([
     offlineDb.getBookmarksList().catch(() => []),
@@ -152,84 +196,31 @@ async function loadOfflineBookmarks(): Promise<Bookmark[]> {
 
   for (const article of cachedArticles) {
     const meta = article.bookmark;
-    const content_md = offlineDb.hydrateArticleContent(article);
-    const translated_content_md = article.translated_content_md
-      ? offlineDb.hydrateArticleContent({ ...article, content_md: article.translated_content_md })
-      : (meta?.translated_content_md ?? null);
-
-    if (meta) {
-      byId.set(article.id, {
-        ...meta,
-        content_md,
-        translated_content_md,
-      });
-    } else {
-      byId.set(article.id, {
-        id: article.id,
-        url: null,
-        type: "article",
-        status: "ready",
-        title: "Offline Article",
-        author: null,
-        excerpt: null,
-        content_md,
-        translated_content_md,
-        translated_lang: null,
-        thumbnail_url: null,
-        youtube_video_id: null,
-        content_edited: false,
-        word_count: null,
-        reading_time: null,
-        tags: [],
-        is_public: false,
-        archived: false,
-        read_at: null,
-        error_message: null,
-        created_at: article.cachedAt,
-        processed_at: article.cachedAt,
-        updated_at: article.cachedAt,
-        pdf_path: null,
-        pdf_parsed: false,
-        view_mode: null,
-        progress: 0,
-      });
-    }
+    byId.set(
+      article.id,
+      meta
+        ? { ...meta, ...hydratedBodies(article, meta.translated_content_md ?? null) }
+        : placeholderBookmark(article),
+    );
   }
 
-  await Promise.all(
-    metaList.map(async (meta) => {
-      const existing = byId.get(meta.id);
-      if (existing) {
-        byId.set(meta.id, {
-          ...meta,
-          content_md: existing.content_md,
-          translated_content_md:
-            existing.translated_content_md ?? meta.translated_content_md ?? null,
-        });
-      } else {
-        const article = await offlineDb.getArticle(meta.id).catch(() => undefined);
-        if (article) {
-          const content_md = offlineDb.hydrateArticleContent(article);
-          const translated_content_md = article.translated_content_md
-            ? offlineDb.hydrateArticleContent({
-                ...article,
-                content_md: article.translated_content_md,
-              })
-            : (meta.translated_content_md ?? null);
-          byId.set(meta.id, {
+  // The listed metadata is the fresher copy; a downloaded article keeps its
+  // body. getAllArticles() already returned every downloaded article, so a
+  // listed row not among them simply has no offline body.
+  for (const meta of metaList) {
+    const existing = byId.get(meta.id);
+    byId.set(
+      meta.id,
+      existing
+        ? {
             ...meta,
-            content_md,
-            translated_content_md,
-          });
-        } else {
-          byId.set(meta.id, {
-            ...meta,
-            content_md: null,
-          });
-        }
-      }
-    }),
-  );
+            content_md: existing.content_md,
+            translated_content_md:
+              existing.translated_content_md ?? meta.translated_content_md ?? null,
+          }
+        : { ...meta, content_md: null },
+    );
+  }
 
   return Array.from(byId.values()).sort((a, b) => {
     const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -530,7 +521,12 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const { cursor, watermark } = listSession;
     const syncState = watermark ? { watermark, cursor, hasMore: hasMore.value } : undefined;
     // Best-effort: private browsing / storage quota must not blank the list.
-    offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd), syncState).catch(() => {});
+    offlineDb
+      .replaceBookmarksList(
+        bookmarks.value.map((b) => offlineDb.stripContentMd(b)),
+        syncState,
+      )
+      .catch(() => {});
   }
 
   // A single postgres_changes subscription keeps `bookmarks` live without the
@@ -895,15 +891,12 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (meta) {
       const hydrated: Bookmark = {
         ...meta,
-        content_md: cachedArticle
-          ? offlineDb.hydrateArticleContent(cachedArticle)
-          : ((meta as Partial<Bookmark>).content_md ?? null),
-        translated_content_md: cachedArticle?.translated_content_md
-          ? offlineDb.hydrateArticleContent({
-              ...cachedArticle,
-              content_md: cachedArticle.translated_content_md,
-            })
-          : (meta.translated_content_md ?? null),
+        ...(cachedArticle
+          ? hydratedBodies(cachedArticle, meta.translated_content_md ?? null)
+          : {
+              content_md: (meta as Partial<Bookmark>).content_md ?? null,
+              translated_content_md: meta.translated_content_md ?? null,
+            }),
       };
       const index = bookmarks.value.findIndex((b) => b.id === id);
       if (index >= 0) {
@@ -915,40 +908,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     }
 
     if (cachedArticle) {
-      const hydrated: Bookmark = {
-        id: cachedArticle.id,
-        url: null,
-        type: "article",
-        status: "ready",
-        title: "Offline Article",
-        author: null,
-        excerpt: null,
-        content_md: offlineDb.hydrateArticleContent(cachedArticle),
-        translated_content_md: cachedArticle.translated_content_md
-          ? offlineDb.hydrateArticleContent({
-              ...cachedArticle,
-              content_md: cachedArticle.translated_content_md,
-            })
-          : null,
-        translated_lang: null,
-        thumbnail_url: null,
-        youtube_video_id: null,
-        content_edited: false,
-        word_count: null,
-        reading_time: null,
-        tags: [],
-        is_public: false,
-        archived: false,
-        read_at: null,
-        error_message: null,
-        created_at: cachedArticle.cachedAt,
-        processed_at: cachedArticle.cachedAt,
-        updated_at: cachedArticle.cachedAt,
-        pdf_path: null,
-        pdf_parsed: false,
-        view_mode: null,
-        progress: 0,
-      };
+      const hydrated = placeholderBookmark(cachedArticle);
       bookmarks.value.push(hydrated);
       return hydrated;
     }

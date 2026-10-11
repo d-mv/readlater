@@ -4,7 +4,7 @@ import { isHttpUrl } from "./bookmarkType";
 
 export const EXPORT_VERSION = 1;
 
-export interface ExportTag {
+interface ExportTag {
   name: string;
   color: string;
 }
