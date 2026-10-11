@@ -11,7 +11,7 @@ import {
 } from "vue";
 import { useRouter } from "vue-router";
 import { IconLoader2, IconAlertTriangle, IconRefresh } from "@tabler/icons-vue";
-import { useBookmarksStore } from "../stores/bookmarks";
+import { useBookmarksStore, type WriteResult } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
 import { useScrollProgress } from "../composables/useScrollProgress";
 import { useDebouncedFn } from "../composables/useDebouncedFn";
@@ -23,6 +23,7 @@ import ArticleContent from "../components/reader/ArticleContent.vue";
 import ShareDialog from "../components/reader/ShareDialog.vue";
 import TagInput from "../components/reader/TagInput.vue";
 import Button from "../shared/ui/Button.vue";
+import Message from "../shared/ui/Message.vue";
 
 const props = defineProps<{
   id: string;
@@ -195,8 +196,19 @@ watch(
   },
 );
 
+// The last failed write (archive, delete, mark read, tag, share, edit…). The
+// store leaves local state untouched on failure, so the screen still shows
+// what the server has; this tells the user the action didn't happen.
+const actionError = ref<string | null>(null);
+
+async function run(write: Promise<WriteResult>): Promise<boolean> {
+  const { error } = await write;
+  actionError.value = error;
+  return error === null;
+}
+
 async function onRetry() {
-  await store.refresh(props.id);
+  await run(store.refresh(props.id));
 }
 
 function onBack() {
@@ -204,35 +216,36 @@ function onBack() {
 }
 
 async function onArchive() {
-  await store.archive(props.id);
-  router.push({ name: "list" });
+  if (await run(store.archive(props.id))) router.push({ name: "list" });
 }
 
+// Doesn't wait for the server: the row leaves the list at once and comes back
+// if the delete fails (see store.remove).
 function onDelete() {
   store.remove(props.id);
   router.push({ name: "list" });
 }
 
 function onMarkRead() {
-  store.markRead(props.id);
+  run(store.markRead(props.id));
 }
 
 function onMarkUnread() {
-  store.markUnread(props.id);
+  run(store.markUnread(props.id));
 }
 
 const showShareDialog = ref(false);
 
 function onTogglePublic(isPublic: boolean) {
-  if (bookmark.value) store.setPublic(bookmark.value.id, isPublic);
+  if (bookmark.value) run(store.setPublic(bookmark.value.id, isPublic));
 }
 
 function onAddTag(name: string) {
-  if (bookmark.value) store.addTag(bookmark.value.id, name);
+  if (bookmark.value) run(store.addTag(bookmark.value.id, name));
 }
 
 function onRemoveTag(tagId: string) {
-  if (bookmark.value) store.removeTag(bookmark.value.id, tagId);
+  if (bookmark.value) run(store.removeTag(bookmark.value.id, tagId));
 }
 
 // What the content area is doing, as one value — so it can't be editing and
@@ -290,13 +303,16 @@ async function onSaveEdit() {
   const current = mode.value;
   if (!bookmark.value || current.kind !== "editing") return;
   const words = wordCount(current.content);
-  await store.updateContent(bookmark.value.id, {
-    title: current.title,
-    content_md: current.content,
-    word_count: words,
-    reading_time: readingTimeFromWordCount(words),
-  });
-  mode.value = READING;
+  const saved = await run(
+    store.updateContent(bookmark.value.id, {
+      title: current.title,
+      content_md: current.content,
+      word_count: words,
+      reading_time: readingTimeFromWordCount(words),
+    }),
+  );
+  // Keep the editor (and the draft) open when the save failed.
+  if (saved) mode.value = READING;
 }
 
 const displayContentMd = computed(() => {
@@ -366,7 +382,7 @@ watch(
 function onTogglePdfView() {
   if (!bookmark.value) return;
   const next = pdfEffectiveViewMode.value === "markdown" ? "original" : "markdown";
-  store.setViewMode(bookmark.value.id, next);
+  run(store.setViewMode(bookmark.value.id, next));
 }
 
 async function onOpenOriginalPdf() {
@@ -413,6 +429,14 @@ watch(
       ref="scrollContainer"
       class="flex-1 overflow-y-auto px-20 pt-20 pb-8"
     >
+      <Message
+        v-if="actionError"
+        tone="danger"
+        test-id="action-error"
+        class="mb-16 rounded-sm border border-line bg-canvas px-10 py-8"
+      >
+        {{ actionError }}
+      </Message>
       <template v-if="bookmark.status === 'ready' && bodyLoaded">
         <h1
           data-testid="title"

@@ -50,6 +50,20 @@ const LIST_COLUMNS = [
 ].join(", ");
 const LIST_SELECT = `${LIST_COLUMNS}, tags(id, name, color)`;
 const UNIQUE_VIOLATION = "23505";
+
+// What a store write reports back: null on success, otherwise a message for
+// the user. Local state only changes once the server accepted the write, so a
+// failed write can't leave this device showing a state the server never had
+// (delta sync would never correct it — the row's updated_at didn't move).
+export interface WriteResult {
+  error: string | null;
+}
+
+const WRITE_FAILED = "Couldn't save the change. Check your connection and try again.";
+
+function writeResult(error: unknown): WriteResult {
+  return { error: error ? WRITE_FAILED : null };
+}
 const PAGE_SIZE = 50;
 // A delta larger than this means the local copy is far behind; a fresh first
 // page is cheaper than replaying it.
@@ -626,10 +640,12 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return { error: null };
   }
 
-  async function setViewMode(id: string, mode: "markdown" | "original"): Promise<void> {
-    await supabase.from("bookmarks").update({ view_mode: mode }).eq("id", id);
+  async function setViewMode(id: string, mode: "markdown" | "original"): Promise<WriteResult> {
+    const { error } = await supabase.from("bookmarks").update({ view_mode: mode }).eq("id", id);
+    if (error) return writeResult(error);
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) bookmark.view_mode = mode;
+    return writeResult(null);
   }
 
   async function getPdfSignedUrl(
@@ -698,7 +714,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return data;
   }
 
-  async function refresh(id: string) {
+  async function refresh(id: string): Promise<WriteResult> {
     const bookmark = bookmarks.value.find((b) => b.id === id);
     // The duplicate-resave flow (share target / bookmarklet "already saved" prompt)
     // can target a bookmark that was never loaded into this session's list, so the
@@ -716,18 +732,20 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         "This was manually edited — refreshing will overwrite your changes. Continue?",
       )
     ) {
-      return;
+      return writeResult(null);
     }
 
-    await supabase
+    const { error } = await supabase
       .from("bookmarks")
       .update({ status: "pending", error_message: null, content_edited: false })
       .eq("id", id);
+    if (error) return writeResult(error);
     if (bookmark) {
       bookmark.status = "pending";
       bookmark.error_message = null;
       bookmark.content_edited = false;
     }
+    return writeResult(null);
   }
 
   async function fetchOne(id: string): Promise<Bookmark | null> {
@@ -826,7 +844,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   async function updateContent(
     id: string,
     fields: { title: string; content_md: string; word_count: number; reading_time: number },
-  ) {
+  ): Promise<WriteResult> {
     // Editing content invalidates any cached translation — it was translated
     // from text that no longer matches, so keeping it would silently show a
     // stale translation on next open.
@@ -836,12 +854,14 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       translated_content_md: null,
       translated_lang: null,
     };
-    await supabase.from("bookmarks").update(update).eq("id", id);
+    const { error } = await supabase.from("bookmarks").update(update).eq("id", id);
+    if (error) return writeResult(error);
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) {
       Object.assign(bookmark, update);
       refreshOfflineCopy(bookmark);
     }
+    return writeResult(null);
   }
 
   // Best-effort: keeps an offline copy in step with an edited body or a new
@@ -852,69 +872,96 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       .catch(() => {});
   }
 
-  async function setPublic(id: string, isPublic: boolean) {
-    await supabase.from("bookmarks").update({ is_public: isPublic }).eq("id", id);
+  async function setPublic(id: string, isPublic: boolean): Promise<WriteResult> {
+    const { error } = await supabase.from("bookmarks").update({ is_public: isPublic }).eq("id", id);
+    if (error) return writeResult(error);
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) bookmark.is_public = isPublic;
+    return writeResult(null);
   }
 
-  async function addTag(bookmarkId: string, name: string) {
+  async function addTag(bookmarkId: string, name: string): Promise<WriteResult> {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    if (!trimmed) return writeResult(null);
 
     const { data: tag, error: tagError } = await supabase
       .from("tags")
       .upsert({ name: trimmed }, { onConflict: "name", ignoreDuplicates: false })
       .select("id, name, color")
       .single();
-    if (tagError || !tag) return;
+    if (tagError || !tag) return writeResult(tagError ?? "no tag");
 
     const { error: joinError } = await supabase
       .from("bookmark_tags")
       .upsert({ bookmark_id: bookmarkId, tag_id: tag.id }, { onConflict: "bookmark_id,tag_id" });
-    if (joinError) return;
+    if (joinError) return writeResult(joinError);
 
     const bookmark = bookmarks.value.find((b) => b.id === bookmarkId);
     if (bookmark && !bookmark.tags.some((t) => t.id === tag.id)) {
       bookmark.tags.push(tag);
     }
+    return writeResult(null);
   }
 
-  async function removeTag(bookmarkId: string, tagId: string) {
-    await supabase.from("bookmark_tags").delete().eq("bookmark_id", bookmarkId).eq("tag_id", tagId);
+  async function removeTag(bookmarkId: string, tagId: string): Promise<WriteResult> {
+    const { error } = await supabase
+      .from("bookmark_tags")
+      .delete()
+      .eq("bookmark_id", bookmarkId)
+      .eq("tag_id", tagId);
+    if (error) return writeResult(error);
     const bookmark = bookmarks.value.find((b) => b.id === bookmarkId);
     if (bookmark) bookmark.tags = bookmark.tags.filter((t) => t.id !== tagId);
+    return writeResult(null);
   }
 
-  async function markRead(id: string) {
+  async function markRead(id: string): Promise<WriteResult> {
     const read_at = new Date().toISOString();
-    await supabase.from("bookmarks").update({ read_at }).eq("id", id);
+    const { error } = await supabase.from("bookmarks").update({ read_at }).eq("id", id);
+    if (error) return writeResult(error);
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) bookmark.read_at = read_at;
+    return writeResult(null);
   }
 
-  async function markUnread(id: string) {
-    await supabase.from("bookmarks").update({ read_at: null }).eq("id", id);
+  async function markUnread(id: string): Promise<WriteResult> {
+    const { error } = await supabase.from("bookmarks").update({ read_at: null }).eq("id", id);
+    if (error) return writeResult(error);
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) bookmark.read_at = null;
+    return writeResult(null);
   }
 
-  async function archive(id: string) {
-    await supabase.from("bookmarks").update({ archived: true }).eq("id", id);
+  async function archive(id: string): Promise<WriteResult> {
+    const { error } = await supabase.from("bookmarks").update({ archived: true }).eq("id", id);
+    if (error) return writeResult(error);
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) bookmark.archived = true;
     await useOfflineCacheStore()
       .removeCachedBookmark(id)
       .catch(() => {});
+    return writeResult(null);
   }
 
-  async function remove(id: string) {
-    await supabase.from("bookmarks").delete().eq("id", id);
+  // Optimistic, unlike the other writes: the reader navigates back to the
+  // list without waiting, so the row leaves the list at once and is put back
+  // where it was if the server refuses the delete.
+  async function remove(id: string): Promise<WriteResult> {
+    const index = bookmarks.value.findIndex((b) => b.id === id);
+    const removed = index === -1 ? undefined : bookmarks.value[index];
     bookmarks.value = bookmarks.value.filter((b) => b.id !== id);
+    const { error } = await supabase.from("bookmarks").delete().eq("id", id);
+    if (error) {
+      if (removed && !bookmarks.value.some((b) => b.id === id)) {
+        bookmarks.value.splice(Math.min(index, bookmarks.value.length), 0, removed);
+      }
+      return writeResult(error);
+    }
     await offlineDb.deleteBookmarkMeta(id).catch(() => {});
     await useOfflineCacheStore()
       .removeCachedBookmark(id)
       .catch(() => {});
+    return writeResult(null);
   }
 
   async function updateProgress(id: string, progress: number) {

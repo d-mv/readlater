@@ -1449,6 +1449,70 @@ describe("useBookmarksStore", () => {
     expect(removeCachedBookmark).toHaveBeenCalledWith("1");
   });
 
+  describe("failed writes leave local state as the server has it", () => {
+    const failing = () => vi.fn().mockResolvedValue({ error: { message: "network down" } });
+
+    test("markRead reports the error and keeps read_at", async () => {
+      const rows = [makeBookmark({ id: "1", read_at: null })];
+      from.mockReturnValue({ select: () => listQuery(rows), update: () => ({ eq: failing() }) });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+      const result = await store.markRead("1");
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks[0]?.read_at).toBeNull();
+    });
+
+    test("archive reports the error, keeps the row unarchived and its offline copy", async () => {
+      const rows = [makeBookmark({ id: "1", archived: false })];
+      from.mockReturnValue({ select: () => listQuery(rows), update: () => ({ eq: failing() }) });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+      const result = await store.archive("1");
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks[0]?.archived).toBe(false);
+      expect(removeCachedBookmark).not.toHaveBeenCalled();
+    });
+
+    test("updateContent reports the error and keeps the old body", async () => {
+      const rows = [makeBookmark({ id: "1", title: "Old", content_md: "old" })];
+      from.mockReturnValue({ select: () => listQuery(rows), update: () => ({ eq: failing() }) });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+      const result = await store.updateContent("1", {
+        title: "New",
+        content_md: "new",
+        word_count: 1,
+        reading_time: 1,
+      });
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks[0]).toMatchObject({ title: "Old", content_md: "old" });
+    });
+
+    test("remove puts the row back where it was and keeps offline data", async () => {
+      const rows = [
+        makeBookmark({ id: "1" }),
+        makeBookmark({ id: "2" }),
+        makeBookmark({ id: "3" }),
+      ];
+      from.mockReturnValue({ select: () => listQuery(rows), delete: () => ({ eq: failing() }) });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+      const result = await store.remove("2");
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["1", "2", "3"]);
+      expect(deleteBookmarkMeta).not.toHaveBeenCalled();
+      expect(removeCachedBookmark).not.toHaveBeenCalled();
+    });
+  });
+
   describe("delta sync", () => {
     const row = (id: string, created: string, updated: string, extra: Partial<Bookmark> = {}) =>
       makeBookmark({

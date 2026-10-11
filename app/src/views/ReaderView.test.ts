@@ -621,6 +621,26 @@ describe("ReaderView", () => {
     });
   });
 
+  describe("failed writes", () => {
+    test("archiving that fails shows an error and stays in the reader", async () => {
+      const ready = makeBookmark({ id: "1", status: "ready", archived: false });
+      const single = vi.fn().mockResolvedValue({ data: ready, error: null });
+      const select = vi.fn(() => ({ eq: vi.fn(() => ({ single })) }));
+      const eqUpdate = vi.fn().mockResolvedValue({ error: { message: "offline" } });
+      from.mockReturnValue({ select, update: vi.fn(() => ({ eq: eqUpdate })) });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await wrapper.find('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.find('[data-testid="archive-item"]').trigger("click");
+      await flushPromises();
+
+      expect(pushMock).not.toHaveBeenCalled();
+      expect(wrapper.find('[data-testid="action-error"]').text()).toMatch(/Couldn't save/);
+    });
+  });
+
   describe("deleting", () => {
     test("navigates back to the list immediately without awaiting deletion response from store", async () => {
       let resolveRemove: (val?: unknown) => void = () => {};
@@ -644,7 +664,7 @@ describe("ReaderView", () => {
 
       expect(pushMock).toHaveBeenCalledWith({ name: "list" });
 
-      resolveRemove();
+      resolveRemove({ error: null });
       await flushPromises();
     });
   });
