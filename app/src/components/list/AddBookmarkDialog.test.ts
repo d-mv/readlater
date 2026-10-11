@@ -154,7 +154,7 @@ describe("AddBookmarkDialog", () => {
     await wrapper.get("form").trigger("submit");
 
     // Close via the backdrop while the save is in flight, then reopen.
-    await wrapper.get('[data-testid="backdrop"]').trigger("click");
+    await wrapper.get("dialog").trigger("click");
     await wrapper.get('button[data-testid="add-btn"]').trigger("click");
 
     pending.resolve(DUPLICATE);
@@ -174,7 +174,7 @@ describe("AddBookmarkDialog", () => {
     await wrapper.get('button[data-testid="add-btn"]').trigger("click");
     await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
     await wrapper.get("form").trigger("submit");
-    await wrapper.get('[data-testid="backdrop"]').trigger("click");
+    await wrapper.get("dialog").trigger("click");
     await wrapper.get('button[data-testid="add-btn"]').trigger("click");
 
     pending.resolve({ error: null });
