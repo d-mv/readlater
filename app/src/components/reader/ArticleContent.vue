@@ -67,16 +67,38 @@ onUnmounted(() => window.removeEventListener("resize", onResize));
 // literal text regardless of this option.
 const md = new MarkdownIt({ html: true });
 
-const defaultLinkOpen =
-  md.renderer.rules.link_open ??
-  ((tokens, idx, options, _env, self) => self.renderToken(tokens, idx, options));
+// A private DOMPurify instance, so the hook below doesn't leak into any other
+// DOMPurify user. Its output is the last thing touched before v-html: anything
+// that edits the DOM has to happen in a hook (or before sanitizing), never by
+// re-parsing sanitized HTML, which reopens the door to mutation XSS.
+const purify = DOMPurify(window);
 
-md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
-  const token = tokens[idx];
-  token.attrSet("target", "_blank");
-  token.attrSet("rel", "noopener noreferrer");
-  return defaultLinkOpen(tokens, idx, options, env, self);
+purify.addHook("afterSanitizeAttributes", (node) => {
+  if (node.tagName === "A") {
+    const href = node.getAttribute("href");
+    // In-page anchors (footnotes) stay in the reader; everything else is an
+    // external page, opened in a tab that gets no handle back to this one.
+    if (href && !href.startsWith("#")) {
+      node.setAttribute("target", "_blank");
+      node.setAttribute("rel", "noopener noreferrer");
+    }
+  } else if (node.tagName === "IMG") {
+    // Long articles carry dozens of hot-linked images: fetch them as they
+    // scroll into view, and decode off the main thread.
+    node.setAttribute("loading", "lazy");
+    node.setAttribute("decoding", "async");
+  }
+});
+
+// Articles are read, not submitted: forms and their controls only serve
+// phishing-style overlays, and a <style> could restyle the whole app.
+const PURIFY_CONFIG = {
+  FORBID_TAGS: ["form", "style", "input", "button", "textarea", "select"],
 };
+
+function sanitizeHtml(html: string): string {
+  return purify.sanitize(html, PURIFY_CONFIG);
+}
 
 const isYoutube = computed(
   () => props.type === "youtube" && !!props.youtubeVideoId && !props.editing,
@@ -125,8 +147,11 @@ const displayContentMd = computed(() => {
 
 const embedUrl = computed(() => `https://www.youtube-nocookie.com/embed/${props.youtubeVideoId}`);
 
+// Runs on the raw rendered HTML, before sanitizing: DOMParser builds an inert
+// document (no scripts run, no images load), and DOMPurify still has the last
+// word on whatever this serializes.
 function removeSelfImageLinks(html: string): string {
-  if (typeof window === "undefined" || !html) return html;
+  if (!html) return html;
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
   const links = doc.querySelectorAll("a");
@@ -149,9 +174,7 @@ function removeSelfImageLinks(html: string): string {
 }
 
 const safeHtml = computed(() =>
-  removeSelfImageLinks(
-    DOMPurify.sanitize(md.render(displayContentMd.value), { ADD_ATTR: ["target"] }),
-  ),
+  sanitizeHtml(removeSelfImageLinks(md.render(displayContentMd.value))),
 );
 </script>
 
@@ -185,6 +208,8 @@ const safeHtml = computed(() =>
         />
       </button>
     </div>
+    <!-- no-prettier / no-highlight: otherwise md-editor injects prettier and
+         highlight.js from unpkg.com, which the CSP (nginx.conf) blocks. -->
     <MdEditor
       v-if="editing"
       :model-value="modelValue ?? ''"
@@ -192,8 +217,10 @@ const safeHtml = computed(() =>
       :theme="themeStore.theme"
       :toolbars="editorToolbars"
       :preview="!isNarrowViewport"
-      :sanitize="(html: string) => DOMPurify.sanitize(html)"
+      :sanitize="sanitizeHtml"
       :no-upload-img="true"
+      :no-prettier="true"
+      :no-highlight="true"
       :no-mermaid="true"
       :no-katex="true"
       :no-echarts="true"

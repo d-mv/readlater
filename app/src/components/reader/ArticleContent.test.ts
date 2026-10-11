@@ -72,6 +72,42 @@ describe("ArticleContent", () => {
     expect(link.attributes("rel")).toBe("noopener noreferrer");
   });
 
+  test("raw-HTML links get target=_blank and rel=noopener noreferrer, overriding their own", () => {
+    const wrapper = mount(ArticleContent, {
+      props: { contentMd: '<a href="https://example.com/a" target="_top" rel="opener">x</a>' },
+    });
+    const link = wrapper.get("a");
+    expect(link.attributes("target")).toBe("_blank");
+    expect(link.attributes("rel")).toBe("noopener noreferrer");
+  });
+
+  test("in-page anchors (footnotes) stay in the same tab", () => {
+    const wrapper = mount(ArticleContent, { props: { contentMd: "[1](#fn1)" } });
+    expect(wrapper.get("a").attributes("target")).toBeUndefined();
+  });
+
+  test("strips forms, form controls and <style> from article HTML", () => {
+    const wrapper = mount(ArticleContent, {
+      props: {
+        contentMd:
+          '<style>body{display:none}</style><form action="https://evil.example"><input name="p"><select></select><textarea></textarea><button>Go</button></form><p>Body</p>',
+      },
+    });
+    for (const tag of ["style", "form", "input", "select", "textarea", "button"]) {
+      expect(wrapper.find(`[data-testid="article"] ${tag}`).exists()).toBe(false);
+    }
+    expect(wrapper.find("p").text()).toBe("Body");
+  });
+
+  test("article images load lazily and decode asynchronously", () => {
+    const wrapper = mount(ArticleContent, {
+      props: { contentMd: "![a](https://example.com/a.png)" },
+    });
+    const img = wrapper.get("img");
+    expect(img.attributes("loading")).toBe("lazy");
+    expect(img.attributes("decoding")).toBe("async");
+  });
+
   test("removes markdown link around image when link target matches image src", () => {
     const wrapper = mount(ArticleContent, {
       props: {
@@ -300,6 +336,16 @@ describe("ArticleContent", () => {
       expect(editor.props("noMermaid")).toBe(true);
       expect(editor.props("noKatex")).toBe(true);
       expect(editor.props("noEcharts")).toBe(true);
+    });
+
+    test("doesn't let the editor pull prettier/highlight.js from a CDN the CSP blocks", async () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
+      await flushPromises();
+      const editor = wrapper.findComponent(MdEditor);
+      expect(editor.props("noPrettier")).toBe(true);
+      expect(editor.props("noHighlight")).toBe(true);
     });
 
     test("binds the editor's theme to the app's resolved theme", async () => {
