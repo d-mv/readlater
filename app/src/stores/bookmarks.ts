@@ -498,7 +498,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     try {
       type = detectBookmarkType(url);
     } catch {
-      return { error: "Enter a valid URL." };
+      return { error: "Enter a valid http(s) URL." };
     }
 
     // The signed-in user is already held in memory by the auth store (kept

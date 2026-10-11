@@ -12,6 +12,7 @@ import {
   IconWorld,
 } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
+import { isHttpUrl } from "../../utils/bookmarkType";
 import FontSizeControl from "./FontSizeControl.vue";
 import { cn } from "../../shared/clsx";
 
@@ -44,10 +45,16 @@ const canMarkUnread = computed(
 // Anything with a body is translated in-app (DeepL via the translate edge
 // function, cached on the row). Bookmarks with a URL additionally offer
 // Google Translate's page proxy, which translates the live page instead.
+// Rows saved before the scheme check (or written around it) must never put a
+// javascript: URL into an href.
+const originalUrl = computed(() =>
+  props.bookmark.url && isHttpUrl(props.bookmark.url) ? props.bookmark.url : null,
+);
+
 const translatePageUrl = computed(() => {
-  if (!props.bookmark.url) return null;
+  if (!originalUrl.value) return null;
   const targetLang = navigator.language.split("-")[0] || "en";
-  return `https://translate.google.com/translate?sl=auto&tl=${targetLang}&u=${encodeURIComponent(props.bookmark.url)}`;
+  return `https://translate.google.com/translate?sl=auto&tl=${targetLang}&u=${encodeURIComponent(originalUrl.value)}`;
 });
 
 const canTranslateInline = computed(() => !!props.bookmark.content_md);
@@ -137,9 +144,9 @@ onUnmounted(() => {
       </div>
       <a
         data-testid="open-original"
-        v-if="bookmark.url"
+        v-if="originalUrl"
         :class="ITEM"
-        :href="bookmark.url"
+        :href="originalUrl"
         target="_blank"
         rel="noopener"
         role="menuitem"

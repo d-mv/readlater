@@ -488,3 +488,26 @@ Replaced the Flat BeOS pixel style with the Braun / Dieter Rams language of
 kairos-v2, drive_read and forth-circle-ims. Spec and deviations:
 [`redesign/README.md`](redesign/README.md).
 
+
+---
+
+## 8. 2026-10-11 audit (app 0.7.1)
+
+Three-way review (security, frontend, worker/backend). Full list with fix notes
+and live status: https://claude.ai/artifact/JJRcfoQm8CHYoimbZ5RTgz (private).
+Fix-first items:
+
+- **H01 javascript: URL → XSS — done (app 0.7.2).** `isHttpUrl` gates `add()`,
+  import rows and the reader's "Open original" / page-translate links;
+  migration `20261011160000_bookmarks_url_http_only` adds a `NOT VALID` check
+  constraint (new writes only). Still open: `/capture` saves without a click,
+  so any site can queue http(s) URLs for the worker (feeds H02).
+- H02 browser-fallback SSRF (JS runs, no WS/SW interception, root, no sandbox).
+- H03 confirm production signup is off; `tags`/`bookmark_tags` RLS is
+  any-authenticated.
+- H04 hydrated `blob:` bodies can be saved back to `content_md`.
+- H05 store writes ignore Supabase errors (archive/delete/read/edit).
+- H06 export and import duplicate check capped at 1000 rows.
+- H07 `translateLogic.hardSplit` is quadratic → WORKER_LIMIT on PDFs.
+- H08 refresh keeps the old translation.
+- H09 Realtime UPDATE copies `updated_at` but not tags → delta skips the row.

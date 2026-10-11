@@ -16,10 +16,14 @@ describe("SettingsView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
-    vi.stubGlobal("URL", {
-      createObjectURL: vi.fn(() => "blob:mock"),
-      revokeObjectURL: vi.fn(),
-    });
+    // Keep the real URL constructor: import validates URLs with it.
+    vi.stubGlobal(
+      "URL",
+      Object.assign(class extends URL {}, {
+        createObjectURL: vi.fn(() => "blob:mock"),
+        revokeObjectURL: vi.fn(),
+      }),
+    );
   });
 
   afterEach(() => {

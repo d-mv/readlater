@@ -1,5 +1,6 @@
 import type { Bookmark } from "../lib/supabase";
 import { normalizeUrl } from "./normalizeUrl";
+import { isHttpUrl } from "./bookmarkType";
 
 export const EXPORT_VERSION = 1;
 
@@ -162,6 +163,7 @@ function parseExportBookmark(raw: unknown): ExportBookmark {
   const type = oneOf(row.type, BOOKMARK_TYPES, "type");
   const url = nullableString(row, "url");
   if (url === null && type !== "note" && type !== "pdf") throw new InvalidRow("missing url");
+  if (url !== null && !isHttpUrl(url)) throw new InvalidRow("url must be http(s)");
 
   const strings = Object.fromEntries(
     NULLABLE_STRING_FIELDS.map((key) => [key, nullableString(row, key)]),

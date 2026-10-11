@@ -114,6 +114,16 @@ describe("ReaderMenu", () => {
     expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
   });
 
+  test("hides 'Open original' and the page translation for a non-http(s) URL", async () => {
+    const wrapper = mount(ReaderMenu, {
+      props: { bookmark: makeBookmark({ url: "javascript:alert(document.domain)" }) },
+    });
+    await openMenu(wrapper);
+    expect(wrapper.find('[data-testid="open-original"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="translate-page-item"]').exists()).toBe(false);
+    expect(wrapper.html()).not.toContain("javascript:");
+  });
+
   test("hides 'Open original' for a PDF once the original has been trashed", async () => {
     const wrapper = mount(ReaderMenu, {
       props: { bookmark: makeBookmark({ url: null, type: "pdf", pdf_path: null }) },

@@ -115,6 +115,17 @@ describe("parseExportPayload", () => {
       expect(bookmarks[0].url).toBe("https://arc90.com/x");
     });
 
+    test("rejects non-http(s) URLs such as javascript:", () => {
+      const row = { ...validRow(), url: "javascript:alert(1)", title: "Script" };
+
+      const { bookmarks, invalid } = parseRows([row]);
+
+      expect(bookmarks).toEqual([]);
+      expect(invalid).toEqual([
+        { url: "javascript:alert(1)", title: "Script", reason: "invalid row: url must be http(s)" },
+      ]);
+    });
+
     test("reports malformed rows as invalid and keeps the well-formed ones", () => {
       const good = validRow();
       const badUrl = { ...validRow(), url: 42, title: "Bad url" };

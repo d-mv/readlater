@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { detectBookmarkType } from "./bookmarkType";
+import { detectBookmarkType, isHttpUrl } from "./bookmarkType";
 
 describe("detectBookmarkType", () => {
   test("detects youtube.com URLs", () => {
@@ -16,5 +16,28 @@ describe("detectBookmarkType", () => {
 
   test("throws on an unparseable URL", () => {
     expect(() => detectBookmarkType("not a url")).toThrow();
+  });
+});
+
+describe("isHttpUrl", () => {
+  test.each(["https://example.com/a", "http://example.com", "HTTPS://EXAMPLE.COM"])(
+    "accepts %s",
+    (url) => expect(isHttpUrl(url)).toBe(true),
+  );
+
+  test.each([
+    "javascript:alert(1)",
+    "JavaScript://example.com/%0Aalert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+    "file:///etc/passwd",
+    "not a url",
+    "",
+  ])("rejects %s", (url) => expect(isHttpUrl(url)).toBe(false));
+});
+
+describe("detectBookmarkType scheme check", () => {
+  test("throws on a javascript: URL", () => {
+    expect(() => detectBookmarkType("javascript:alert(1)")).toThrow();
   });
 });

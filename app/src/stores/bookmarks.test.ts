@@ -540,6 +540,15 @@ describe("useBookmarksStore", () => {
     expect(from).not.toHaveBeenCalled();
   });
 
+  test("add rejects a javascript: URL without touching the network", async () => {
+    const store = useBookmarksStore();
+    const result = await store.add("javascript:alert(document.domain)");
+
+    expect(result.error).toBeTruthy();
+    expect(from).not.toHaveBeenCalled();
+    expect(store.bookmarks).toEqual([]);
+  });
+
   test("add reports a duplicate with the existing row and skips inserting when the URL is already loaded", async () => {
     const rows = [
       makeBookmark({
