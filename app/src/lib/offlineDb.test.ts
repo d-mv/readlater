@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { openDB } from "idb";
 import * as offlineDb from "./offlineDb";
 import type { OfflineBookmarkMeta } from "./offlineDb";
@@ -90,10 +90,98 @@ describe("offlineDb", () => {
     // Records cached before missingImages existed count as none missing.
     expect(await offlineDb.listCachedArticles()).toEqual(
       expect.arrayContaining([
-        { id: "1", missingImages: 1 },
-        { id: "2", missingImages: 0 },
+        { id: "1", cachedAt: "2026-01-01T00:00:00Z", missingImages: 1 },
+        { id: "2", cachedAt: "2026-01-01T00:00:00Z", missingImages: 0 },
       ]),
     );
+  });
+
+  describe("reading without loading article records", () => {
+    // Every read of an `articles` record (which carries the image blobs),
+    // by store or by index; key reads and key cursors aren't recorded.
+    let articleReads: string[];
+
+    beforeEach(() => {
+      articleReads = [];
+      for (const proto of [IDBObjectStore.prototype, IDBIndex.prototype]) {
+        for (const method of ["get", "getAll", "openCursor"] as const) {
+          const original = proto[method] as (...args: unknown[]) => unknown;
+          vi.spyOn(proto, method).mockImplementation(function (
+            this: IDBObjectStore | IDBIndex,
+            ...args: unknown[]
+          ) {
+            const store = "objectStore" in this ? this.objectStore : this;
+            if (store.name === "articles") articleReads.push(method);
+            return original.apply(this, args);
+          } as never);
+        }
+      }
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    test("(control) reading an article record is recorded", async () => {
+      await offlineDb.getArticle("1");
+      expect(articleReads).toEqual(["get"]);
+    });
+
+    test("listCachedArticles reads no article record", async () => {
+      await offlineDb.putArticle({
+        id: "1",
+        content_md: "x",
+        images: [{ url: "https://cdn/a.png", blob: new Blob(["a"]) }],
+        missingImages: ["https://cdn/b.png", "https://cdn/c.png"],
+        cachedAt: "2026-02-01T00:00:00Z",
+      });
+
+      expect(await offlineDb.listCachedArticles()).toEqual([
+        { id: "1", cachedAt: "2026-02-01T00:00:00Z", missingImages: 2 },
+      ]);
+      expect(articleReads).toEqual([]);
+    });
+
+    test("replaceBookmarksList keeps a downloaded article's listed metadata without reading the article", async () => {
+      await offlineDb.putArticle({
+        id: "cached-1",
+        content_md: "downloaded",
+        images: [{ url: "https://cdn/a.png", blob: new Blob(["a"]) }],
+        cachedAt: "2026-01-01T00:00:00Z",
+        bookmark: makeMeta({ id: "cached-1", title: "Old copy on the article" }),
+      });
+      await offlineDb.putBookmarkMeta(makeMeta({ id: "cached-1", title: "Listed" }));
+
+      await offlineDb.replaceBookmarksList([makeMeta({ id: "recent-1" })]);
+
+      const list = await offlineDb.getBookmarksList();
+      expect(list.find((b) => b.id === "cached-1")?.title).toBe("Listed");
+      expect(list.map((b) => b.id).sort()).toEqual(["cached-1", "recent-1"]);
+      expect(articleReads).toEqual([]);
+    });
+  });
+
+  test("upgrading a version-2 database indexes its existing articles", async () => {
+    await offlineDb._resetForTests();
+    const v2 = await openDB("read-later-offline", 2, {
+      upgrade(db) {
+        db.createObjectStore("articles", { keyPath: "id" });
+        db.createObjectStore("bookmarksList", { keyPath: "id" });
+        db.createObjectStore("syncState");
+      },
+    });
+    await v2.put("articles", {
+      id: "a",
+      content_md: "x",
+      images: [],
+      missingImages: ["https://cdn/x.png"],
+      cachedAt: "2026-03-01T00:00:00Z",
+    });
+    v2.close();
+
+    expect(await offlineDb.listCachedArticles()).toEqual([
+      { id: "a", cachedAt: "2026-03-01T00:00:00Z", missingImages: 1 },
+    ]);
   });
 
   test("getAllArticles returns all cached articles including metadata", async () => {

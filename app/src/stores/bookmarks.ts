@@ -97,14 +97,23 @@ function latest(a: string | null, b: string): string {
   return a !== null && Date.parse(a) >= Date.parse(b) ? a : b;
 }
 
-// The snapshot's bodies come from the offline cache with images rewritten to
-// this session's blob: URLs. Online, the list must hold list-shaped rows (no
-// body) so the reader pulls the real body with fetchOne(); a hydrated body
-// left in place would be what an edit saves or a translation sends, writing
-// blob: URLs to the server.
-function withoutBody(bookmark: Bookmark): Bookmark {
-  const { content_md: _body, translated_content_md: _translation, ...row } = bookmark;
-  return row as Bookmark;
+// Online, the list must hold list-shaped rows (no body) so the reader pulls
+// the real body with fetchOne(). Persisted metadata can still carry a
+// translation (rows fetchOne() loaded are persisted whole but for
+// content_md), and a stale body left in place would be what an edit saves or
+// a translation sends.
+function withoutBody(bookmark: offlineDb.OfflineBookmarkMeta): Bookmark {
+  const { translated_content_md: _translation, ...row } = bookmark;
+  const { content_md: _body, ...rest } = row as Partial<Bookmark>;
+  return rest as Bookmark;
+}
+
+// The persisted list window for an online cold start: metadata only. Unlike
+// loadOfflineBookmarks() it never opens the downloaded articles — their
+// bodies and image blobs aren't wanted online.
+async function loadPersistedList(): Promise<Bookmark[]> {
+  const metas = await offlineDb.getBookmarksList().catch(() => []);
+  return metas.map(withoutBody).sort(byCreatedAtDesc);
 }
 
 async function loadOfflineBookmarks(): Promise<Bookmark[]> {
@@ -340,14 +349,12 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     } else {
       const state = await offlineDb.getSyncState().catch(() => undefined);
       if (!state) return false;
-      const snapshot = await loadOfflineBookmarks();
+      const snapshot = await loadPersistedList();
       if (!isCurrent()) return true;
       ({ cursor, watermark } = state);
       // Downloaded articles outside the window carry metadata of unknown age;
       // leave them for loadMore() rather than show them stale.
-      bookmarks.value = snapshot
-        .filter((b) => inWindow(b.created_at, cursor, state.hasMore))
-        .map(withoutBody);
+      bookmarks.value = snapshot.filter((b) => inWindow(b.created_at, cursor, state.hasMore));
       listSession = { kind: "recent", cursor, watermark };
       hasMore.value = state.hasMore;
     }
@@ -520,10 +527,17 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // carry stale tags (attach/detach bumps updated_at) or a stale body, and
       // keeping the old stamp makes the next delta sync see a change and
       // replace the row with the server's full projection.
-      if (existing) {
-        const { updated_at: _changedAt, ...fields } = row;
-        Object.assign(existing, fields);
-      }
+      if (!existing) return;
+      const { updated_at: _changedAt, ...fields } = row;
+      // The reader saves progress every couple of seconds and each save
+      // echoes back here. Rewriting the persisted list for that alone is
+      // pure IndexedDB churn — progress isn't worth a write; the next real
+      // change (or page load) persists it along with everything else.
+      const progressOnly = Object.entries(fields).every(
+        ([key, value]) => key === "progress" || existing[key as keyof Bookmark] === value,
+      );
+      Object.assign(existing, fields);
+      if (progressOnly) return;
     } else if (payload.eventType === "DELETE") {
       const id = (payload.old as { id?: string }).id;
       if (id) bookmarks.value = bookmarks.value.filter((b) => b.id !== id);

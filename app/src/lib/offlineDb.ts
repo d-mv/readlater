@@ -32,6 +32,10 @@ interface OfflineDbSchema extends DBSchema {
   articles: {
     key: string;
     value: CachedArticle;
+    // Read with key cursors only: an index key cursor yields (index key,
+    // primary key) without loading the record, so listing what is cached
+    // never pulls the image blobs into memory.
+    indexes: { cachedAt: string; missingImages: string[] };
   };
   bookmarksList: {
     key: string;
@@ -53,19 +57,27 @@ export interface ListSyncState {
 }
 
 const DB_NAME = "read-later-offline";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const SYNC_STATE_KEY = "list";
 
 let dbPromise: Promise<IDBPDatabase<OfflineDbSchema>> | null = null;
 
 function getDb() {
   dbPromise ??= openDB<OfflineDbSchema>(DB_NAME, DB_VERSION, {
-    upgrade(db, oldVersion) {
+    upgrade(db, oldVersion, _newVersion, tx) {
       if (oldVersion < 1) {
         db.createObjectStore("articles", { keyPath: "id" });
         db.createObjectStore("bookmarksList", { keyPath: "id" });
       }
       if (oldVersion < 2) db.createObjectStore("syncState");
+      if (oldVersion < 3) {
+        // Built over the existing records by the browser. Records written
+        // before missingImages existed simply aren't in that index (none
+        // missing, as far as anyone knows).
+        const articles = tx.objectStore("articles");
+        articles.createIndex("cachedAt", "cachedAt");
+        articles.createIndex("missingImages", "missingImages");
+      }
     },
   });
   return dbPromise;
@@ -101,10 +113,35 @@ export async function deleteArticle(id: string): Promise<void> {
   revokeObjectUrls(id);
 }
 
-export async function listCachedArticles(): Promise<{ id: string; missingImages: number }[]> {
+export interface CachedArticleInfo {
+  id: string;
+  cachedAt: string;
+  // How many of its images the offline copy lacks.
+  missingImages: number;
+}
+
+// What is cached, from the two indexes' key cursors — no record (and so no
+// image blob) is read.
+export async function listCachedArticles(): Promise<CachedArticleInfo[]> {
   const db = await getDb();
-  const articles = await db.getAll("articles");
-  return articles.map((a) => ({ id: a.id, missingImages: a.missingImages?.length ?? 0 }));
+  const store = db.transaction("articles").store;
+  const info = new Map<string, CachedArticleInfo>();
+  for (
+    let cursor = await store.index("cachedAt").openKeyCursor();
+    cursor;
+    cursor = await cursor.continue()
+  ) {
+    info.set(cursor.primaryKey, { id: cursor.primaryKey, cachedAt: cursor.key, missingImages: 0 });
+  }
+  for (
+    let cursor = await store.index("missingImages").openKeyCursor();
+    cursor;
+    cursor = await cursor.continue()
+  ) {
+    const entry = info.get(cursor.primaryKey);
+    if (entry) entry.missingImages = cursor.key.length;
+  }
+  return [...info.values()];
 }
 
 export async function getAllArticles(): Promise<CachedArticle[]> {
@@ -113,25 +150,30 @@ export async function getAllArticles(): Promise<CachedArticle[]> {
 }
 
 // Writes the list and, when given, its sync state in one transaction, so a
-// persisted watermark never runs ahead of the list it describes.
+// persisted watermark never runs ahead of the list it describes. Downloaded
+// articles stay listed even once they leave `items`: their metadata is
+// normally already in this store (cacheBookmark writes it there), so it is
+// carried over by id — only a record from before that, whose metadata lives
+// solely on the article, costs reading the article (and its blobs).
 export async function replaceBookmarksList(
   items: OfflineBookmarkMeta[],
   syncState?: ListSyncState,
 ): Promise<void> {
   if (items.length === 0) return;
   const db = await getDb();
-  const articles = await db.getAll("articles");
-  const byId = new Map<string, OfflineBookmarkMeta>();
-  for (const item of items) {
-    byId.set(item.id, item);
-  }
-  for (const article of articles) {
-    if (article.bookmark && !byId.has(article.id)) {
-      byId.set(article.id, article.bookmark);
-    }
-  }
-  const tx = db.transaction(["bookmarksList", "syncState"], "readwrite");
+  const tx = db.transaction(["articles", "bookmarksList", "syncState"], "readwrite");
+  const articles = tx.objectStore("articles");
   const list = tx.objectStore("bookmarksList");
+  const byId = new Map(items.map((item) => [item.id, item] as const));
+
+  const cachedIds = await articles.getAllKeys();
+  const kept = await Promise.all(
+    cachedIds
+      .filter((id) => !byId.has(id))
+      .map(async (id) => (await list.get(id)) ?? (await articles.get(id))?.bookmark),
+  );
+  for (const meta of kept) if (meta) byId.set(meta.id, meta);
+
   await list.clear();
   await Promise.all(Array.from(byId.values()).map((item) => list.put(item)));
   if (syncState) await tx.objectStore("syncState").put(syncState, SYNC_STATE_KEY);

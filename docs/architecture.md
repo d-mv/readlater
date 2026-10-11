@@ -649,8 +649,16 @@ icon with the count in its title, and the reader notes it while offline — and 
 - `bookmarksList` store — keyed by bookmark id → lightweight metadata
   (everything but `content_md`), replaced after every successful load/page
   of the *unfiltered* list and on Realtime events while showing it — never
-  from search results or the offline snapshot — and read as a fallback when
-  `fetch()` fails offline.
+  from search results or the offline snapshot, and not for a Realtime UPDATE
+  that only moved `progress` (the reader's ~2 s saves) — and read as a
+  fallback when `fetch()` fails offline. An online cold start reads only
+  this store, never the articles.
+- Never loading blobs just to list: `articles` has `cachedAt` and
+  `missingImages` indexes (DB v3), and `listCachedArticles()` walks their key
+  cursors, which yield (index key, id) without reading records.
+  `replaceBookmarksList()` takes the cached ids from `getAllKeys()` and keeps
+  their metadata from `bookmarksList` itself; only a pre-metadata record
+  falls back to reading the article.
 
 `cacheBookmark(id)` (wrapped by the `offlineCache` Pinia store) has two
 triggers: automatically after `ReaderView` successfully loads an article, or

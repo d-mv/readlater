@@ -488,6 +488,61 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks[0]?.updated_at).toBe("2026-10-01T00:00:00Z");
   });
 
+  describe("persisting Realtime UPDATEs", () => {
+    // What the publication sends: the whole row minus the body columns, and
+    // never the tags join.
+    function payloadRow(overrides: Partial<Bookmark>) {
+      const {
+        content_md: _body,
+        translated_content_md: _translation,
+        tags: _tags,
+        ...row
+      } = makeBookmark({ id: "1", progress: 0.1, ...overrides });
+      return row;
+    }
+
+    async function seeded() {
+      const seedRows = [makeBookmark({ id: "1", progress: 0.1 })];
+      from.mockReturnValue({ select: () => listQuery(seedRows) });
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+      replaceBookmarksList.mockClear();
+      return store;
+    }
+
+    test("an echo that only moves reading progress updates the row but isn't persisted", async () => {
+      const store = await seeded();
+
+      emitRealtime({
+        eventType: "UPDATE",
+        new: payloadRow({ progress: 0.5, updated_at: "2026-10-02T00:00:00Z" }),
+      });
+
+      expect(store.bookmarks[0]?.progress).toBe(0.5);
+      expect(replaceBookmarksList).not.toHaveBeenCalled();
+    });
+
+    test("an UPDATE that changes anything else is persisted", async () => {
+      await seeded();
+
+      emitRealtime({
+        eventType: "UPDATE",
+        new: payloadRow({ progress: 0.5, read_at: "2026-10-02T00:00:00Z" }),
+      });
+
+      expect(replaceBookmarksList).toHaveBeenCalledOnce();
+    });
+
+    test("an UPDATE for a row that isn't loaded isn't persisted", async () => {
+      await seeded();
+
+      emitRealtime({ eventType: "UPDATE", new: { id: "elsewhere", title: "Not here" } });
+
+      expect(replaceBookmarksList).not.toHaveBeenCalled();
+    });
+  });
+
   test("visibleBookmarks shows non-archived rows on the 'all' filter", async () => {
     const rows = [
       makeBookmark({ id: "1", archived: false }),
@@ -1762,6 +1817,9 @@ describe("useBookmarksStore", () => {
       expect(store.bookmarks.map((b) => b.id)).toEqual(["a"]);
       expect(store.bookmarks[0]?.content_md).toBeUndefined();
       expect(store.bookmarks[0]?.translated_content_md).toBeUndefined();
+      // Metadata only: the downloaded articles (and their image blobs) stay closed.
+      expect(getAllArticles).not.toHaveBeenCalled();
+      expect(getArticle).not.toHaveBeenCalled();
     });
 
     test("a delta too large to replay falls back to a fresh first page", async () => {
