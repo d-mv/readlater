@@ -10,8 +10,10 @@ vi.mock("vue-router", () => ({ useRouter: () => ({ push: pushMock }) }));
 const realtimeChannel = { on: () => realtimeChannel, subscribe: () => realtimeChannel };
 const listQuery = () => {
   const q: Record<string, unknown> = {};
-  for (const m of ["select", "textSearch", "lt", "limit"]) q[m] = () => q;
-  q.order = () => Promise.resolve({ data: [], error: null });
+  // Chainable and awaitable, like a PostgREST builder: the list query chains
+  // .order().order() (keyset on created_at, id) before it's awaited.
+  for (const m of ["select", "textSearch", "lt", "or", "gte", "limit", "order"]) q[m] = () => q;
+  q.then = (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null });
   return q;
 };
 vi.mock("../lib/supabase", () => ({

@@ -1044,7 +1044,13 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       }
       return writeResult(error);
     }
-    if (removed) removeStorageObjects(removed);
+    if (removed) {
+      try {
+        removeStorageObjects(removed);
+      } catch {
+        // Best-effort: the server-side orphan sweep is the backstop.
+      }
+    }
     await offlineDb.deleteBookmarkMeta(id).catch(() => {});
     await useOfflineCacheStore()
       .removeCachedBookmark(id)

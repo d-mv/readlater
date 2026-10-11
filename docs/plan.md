@@ -491,23 +491,28 @@ kairos-v2, drive_read and forth-circle-ims. Spec and deviations:
 
 ---
 
-## 8. 2026-10-11 audit (app 0.7.1)
+## 8. 2026-10-11 audit (app 0.8.0, worker 0.1.0)
 
-Three-way review (security, frontend, worker/backend). Full list with fix notes
-and live status: https://claude.ai/artifact/JJRcfoQm8CHYoimbZ5RTgz (private).
-Fix-first items:
+Three-way review (security, frontend, worker/backend). Full list with fix
+notes and live status: https://claude.ai/artifact/JJRcfoQm8CHYoimbZ5RTgz
+(private). All findings H01–H09, M01–M13 and L01–L09 are fixed; see
+`git log` from 8608782. Still open:
 
-- **H01 javascript: URL → XSS — done (app 0.7.2).** `isHttpUrl` gates `add()`,
-  import rows and the reader's "Open original" / page-translate links;
-  migration `20261011160000_bookmarks_url_http_only` adds a `NOT VALID` check
-  constraint (new writes only). Still open: `/capture` saves without a click,
-  so any site can queue http(s) URLs for the worker (feeds H02).
-- H02 browser-fallback SSRF (JS runs, no WS/SW interception, root, no sandbox).
-- H03 confirm production signup is off; `tags`/`bookmark_tags` RLS is
-  any-authenticated.
-- **H04 done (0.7.5)** — online cold start drops hydrated `blob:` bodies from the list.
-- **H05 done (0.7.3)** — writes return `{ error }`, change state only on success; delete is optimistic with rollback. Capture/share-target/add-dialog still ignore a failed `refresh()`.
-- **H06 done** — export and import duplicate check page past 1000 rows.
-- **H07 done** — linear chunking that cuts on lines, then sentences, then spaces. Needs `supabase functions deploy translate`.
-- **H08 done (worker 0.0.3)** — processing→ready nulls the translation. Needs a worker deploy.
-- **H09 done (0.7.4)** — Realtime merge keeps the local `updated_at`.
+- **Production signup is enabled** (`disable_signup: false`). Turn it off and
+  set the minimum password length to 12 in the dashboard.
+- **storage-sweep schedule**: pg_cron is not enabled in production. Enable
+  pg_cron + pg_net, store the service-role key in Vault as
+  `service_role_key`, then run the `cron.schedule` snippet at the end of
+  migration `20261011171000_audit_hardening.sql`.
+- Worker Chromium still runs `--no-sandbox` (sandbox fails under Docker's
+  default seccomp); the worker process keeps the service key in its env.
+- CSP `connect-src` allows any https origin (the offline cache fetches
+  article images from their hosts); `style-src-elem 'unsafe-inline'` for
+  CodeMirror.
+- Thumbnail delete from the client is denied (no client delete policy on
+  `bookmark-assets`); the sweep removes them.
+- Signing out offline with an expired token may leave supabase-js's stored
+  session behind.
+- Product gaps not built: undo for archive/delete, bulk actions, sort
+  options, offline full-text search, keyboard shortcuts, audit log,
+  capture-key rotation, share-link revoke UI.

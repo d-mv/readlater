@@ -22,7 +22,17 @@ vi.mock("../lib/supabase", () => ({
     functions: { invoke },
     channel: () => realtimeChannel,
     removeChannel: () => {},
-    storage: { from: () => ({ createSignedUrl: storageCreateSignedUrl, remove: storageRemove }) },
+    storage: {
+      from: () => ({
+        createSignedUrl: storageCreateSignedUrl,
+        remove: storageRemove,
+        getPublicUrl: () => ({
+          data: {
+            publicUrl: "https://example.supabase.co/storage/v1/object/public/bookmark-assets/",
+          },
+        }),
+      }),
+    },
   },
 }));
 vi.mock("vue-router", () => ({ useRouter: () => ({ push: pushMock }) }));

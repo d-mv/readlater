@@ -130,8 +130,10 @@ create index bookmark_tags_tag_idx on bookmark_tags (tag_id); -- tag → bookmar
 
 alter table tags enable row level security;
 alter table bookmark_tags enable row level security;
-create policy "authenticated only" on tags for all using (auth.role() = 'authenticated');
-create policy "authenticated only" on bookmark_tags for all using (auth.role() = 'authenticated');
+-- Since 20261011171000_audit_hardening: tags carry user_id (default
+-- auth.uid(), unique (user_id, name)) and are owner-only; a bookmark_tags
+-- link needs both its bookmark and its tag to belong to the caller. All
+-- policies use (select auth.uid()) so it is evaluated once per query.
 grant select, insert, update, delete on tags, bookmark_tags to authenticated;
 
 -- Returns a table of public-safe columns only (no user_id, pdf_path, url,
@@ -419,7 +421,20 @@ reserved and IPv4-mapped/NAT64 equivalents are refused. The plain fetch
 follows redirects by hand and checks every hop; a refused URL fails the
 bookmark instead of falling back to the browser, and the headless browser
 routes every request (navigation, redirects, subresources) through the same
-check. Known gap: DNS rebinding between the check and the connection.
+check. The plain fetch still has a DNS-rebinding window between the check and
+the connection. The browser fallback does not: all Chromium traffic goes
+through a local egress proxy (`worker/src/egressProxy.ts`) that resolves each
+host once, refuses private addresses and connects to exactly the vetted IP;
+service workers, downloads and WebSockets are blocked, and Chromium gets a
+minimal env (no Supabase key). Responses are capped at 5 MB and non-HTML is
+refused without the browser fallback.
+
+**Retries.** Transient failures (open breaker, 429, 5xx, network, timeout)
+return the row to `pending` with `attempts + 1` and `next_attempt_at`
+backoff (1m / 5m / 30m); the 4th failure is final. A user re-queue resets
+both (trigger). SIGTERM drains the in-flight bookmark for up to 20 s, then
+returns it to `pending`. Logs are single-line JSON; a heartbeat file backs
+the Docker HEALTHCHECK.
 
 A duplicate leading heading
 that repeats the article title is stripped from the converted markdown
@@ -711,13 +726,23 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
 `readlater.mlnkv.net`:
 - `readlater-app` — `app/Dockerfile`, port 80, `/*`, Supabase URL and
   publishable key baked in as build args.
-- `readlater-worker` — `worker/Dockerfile`, no public port, only needs
+- `readlater-worker` — `worker/Dockerfile` (non-root, pinned base image,
+  heartbeat HEALTHCHECK; the server compose sets `stop_grace_period: 30s`
+  and `mem_limit`), no public port, only needs
   outbound access to Supabase (+ YouTube's oEmbed endpoint, + whatever the
   headless-browser fallback needs to reach).
 - Bookmarklet — nothing to deploy. `bookmarklet/build.ts` bakes the app's
   origin into `bookmarklet/source.js` once; the built snippet is dragged to
   the bookmarks bar. No secret inside it, nothing to rotate when the PWA
   changes.
+
+Edge functions are rate-limited per user (`rate_limits` table,
+`bump_rate_limit`): capture 120/h, translate 20/h, snippet/file-import/
+pdf-import 30/h each; request bodies are size-capped and errors are generic.
+`storage-sweep` (service-role only, `?dry_run=1`) deletes Storage objects no
+bookmark references; the app also removes a deleted bookmark's PDF itself.
+nginx sends a CSP and baseline security headers (`app/nginx.conf`; the
+Supabase origin is hardcoded there). CI: `.github/workflows/ci.yml`.
 
 ## 9. Known trade-offs
 
