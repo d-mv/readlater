@@ -35,11 +35,11 @@ const containerClasses: Record<TabsVariant, string> = {
 
 const optionClasses: Record<TabsVariant, { base: string; active: string }> = {
   underline: {
-    base: "border-0 border-b-2 border-solid border-transparent bg-transparent px-0 pt-0 pb-8 font-mono text-xs uppercase tracking-label leading-[normal] text-ink-muted cursor-pointer hover:text-ink transition-colors duration-(--duration)",
+    base: "border-0 border-b-2 border-solid border-transparent bg-transparent px-0 pt-0 pb-8 font-mono text-sm sm:text-xs uppercase tracking-label leading-[normal] text-ink-muted cursor-pointer hover:text-ink transition-colors duration-(--duration)",
     active: "text-ink border-b-ink",
   },
   segmented: {
-    base: "flex-1 h-30 border-0 rounded-none bg-transparent font-mono text-xs uppercase tracking-label leading-[normal] text-ink cursor-pointer transition-colors duration-(--duration) not-first:border-l not-first:border-solid not-first:border-ink hover:bg-recessed",
+    base: "flex-1 h-30 border-0 rounded-none bg-transparent font-mono text-sm sm:text-xs uppercase tracking-label leading-[normal] text-ink cursor-pointer transition-colors duration-(--duration) not-first:border-l not-first:border-solid not-first:border-ink hover:bg-recessed",
     active: "bg-ink text-ink-inverse hover:bg-ink",
   },
 };

@@ -24,7 +24,9 @@ const options: TabOption<BookmarkFilter>[] = [
     class="border-b border-line px-16 py-12"
     @update:model-value="emit('change', $event)"
   >
-    <span v-if="unreadCount > 0" class="num ml-auto pb-8 text-2xs text-ink-muted uppercase"
+    <span
+      v-if="unreadCount > 0"
+      class="num ml-auto pb-8 text-sm text-ink-muted sm:text-2xs uppercase"
       >{{ unreadCount }} unread</span
     >
   </Tabs>

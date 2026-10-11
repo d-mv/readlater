@@ -80,7 +80,7 @@ const displayTitle = computed(() => {
             data-testid="title"
             :class="
               cn(
-                'truncate text-base font-medium text-ink',
+                'truncate text-md font-medium text-ink sm:text-base',
                 isRead && 'font-normal text-ink-faint',
                 isPending && 'italic text-ink-faint',
                 isFailed && 'text-danger',
@@ -98,7 +98,7 @@ const displayTitle = computed(() => {
           />
         </span>
         <span class="mt-4 flex min-w-0 items-center gap-4">
-          <span class="num truncate text-2xs text-ink-faint">{{ meta }}</span>
+          <span class="num truncate text-sm text-ink-faint sm:text-2xs">{{ meta }}</span>
           <IconLanguageHiragana
             v-if="isTranslated"
             data-testid="translated-badge"

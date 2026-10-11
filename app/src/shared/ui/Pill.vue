@@ -43,7 +43,7 @@ const toneClasses: Record<PillTone, string> = {
 const markerStyle = computed(() => (props.color ? { backgroundColor: props.color } : undefined));
 const classes = computed(() =>
   cn(
-    "inline-flex items-center gap-6 rounded-sm font-mono text-2xs uppercase tracking-meta",
+    "inline-flex items-center gap-6 rounded-sm font-mono text-sm sm:text-2xs uppercase tracking-meta",
     toneClasses[props.tone],
     props.class,
   ),
