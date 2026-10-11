@@ -5,6 +5,8 @@ import { parseYoutube, type ParsedYoutube } from "./parseYoutube";
 import { fetchMeta } from "./youtubeMeta";
 import { makeThumbnailUploader } from "./storage";
 import { closeBrowser, renderWithBrowser } from "./browserRender";
+import { writeFileSync } from "node:fs";
+import { isTransientError } from "./errors";
 import { log } from "./logger";
 import { withTimeout } from "./timeout";
 
@@ -20,10 +22,37 @@ const STALE_RECOVERY_EVERY = 4;
 const BATCH_SIZE = 5;
 const ERROR_MESSAGE_MAX_LENGTH = 500;
 const BOOKMARK_TIMEOUT_MS = 45_000;
+const DB_REQUEST_TIMEOUT_MS = 15_000;
+// A transient failure (open breaker, 429, 5xx, network, timeout) puts the row
+// back in the queue after these delays; the attempt after the last one is
+// final, so a bookmark gets MAX_ATTEMPTS tries in total.
+export const RETRY_BACKOFF_MS = [60_000, 5 * 60_000, 30 * 60_000] as const;
+export const MAX_ATTEMPTS = RETRY_BACKOFF_MS.length + 1;
+const MAX_RETRY_BACKOFF_MS = 30 * 60_000;
+// On SIGTERM the in-flight bookmark gets this long to finish before it's
+// handed back to the queue (Docker's default stop grace period is 10s, so the
+// deploy should give the container ~30s: `stop_grace_period`).
+export const SHUTDOWN_DRAIN_MS = 20_000;
+const HEARTBEAT_PATH = "/tmp/worker-heartbeat";
+
+// Every Supabase request gets a hard timeout so a hung connection can't stall
+// the poll loop forever (and keep the heartbeat from advancing).
+const fetchWithTimeout: typeof fetch = Object.assign(
+  (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
+    fetch(input, {
+      ...init,
+      signal: init?.signal
+        ? AbortSignal.any([init.signal, AbortSignal.timeout(DB_REQUEST_TIMEOUT_MS)])
+        : AbortSignal.timeout(DB_REQUEST_TIMEOUT_MS),
+    }),
+  { preconnect: fetch.preconnect },
+);
 
 export const supabase =
   process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
-    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY)
+    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, {
+        global: { fetch: fetchWithTimeout },
+      })
     : (null as unknown as SupabaseClient);
 
 export const uploadThumbnail = supabase
@@ -48,6 +77,8 @@ export interface Bookmark {
   id: string;
   url: string;
   type: (typeof PROCESSABLE_TYPES)[number];
+  /** Tries already spent on this row (failed transiently and re-queued). */
+  attempts: number;
 }
 
 type BookmarkStatus = "pending" | "processing" | "ready" | "failed";
@@ -75,6 +106,25 @@ export async function transition(
 }
 
 let pollCycleCount = 0;
+
+// Shutdown coordination: pollOnce stops picking up bookmarks once `stopping`
+// is set, and `inFlight` is the bookmark being processed right now.
+const worker: {
+  stopping: boolean;
+  inFlight: { id: string; done: Promise<void> } | null;
+} = { stopping: false, inFlight: null };
+
+let heartbeatPath: string | null = null;
+
+/** Touches the heartbeat file the Docker HEALTHCHECK watches. */
+function heartbeat() {
+  if (!heartbeatPath) return;
+  try {
+    writeFileSync(heartbeatPath, String(Date.now()));
+  } catch (err) {
+    log.warn("failed to write heartbeat", { err });
+  }
+}
 
 function sanitizeValue(val: unknown): unknown {
   if (typeof val === "string") {
@@ -181,11 +231,41 @@ export async function processBookmark(
       });
     }
   } catch (err) {
-    log.error("bookmark processing failed", { bookmarkId: bookmark.id, url: bookmark.url, err });
-    const failed = await transition(client, bookmark.id, "processing", "failed", {
+    const attempts = bookmark.attempts + 1;
+    const retry = isTransientError(err) && attempts < MAX_ATTEMPTS;
+    const fields = {
+      attempts,
       error_message: formatErrorMessage(err),
       processed_at: new Date().toISOString(),
+    };
+
+    if (retry) {
+      const delayMs = RETRY_BACKOFF_MS[attempts - 1] ?? MAX_RETRY_BACKOFF_MS;
+      const nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+      log.warn("bookmark processing failed transiently; will retry", {
+        bookmarkId: bookmark.id,
+        url: bookmark.url,
+        attempts,
+        nextAttemptAt,
+        err,
+      });
+      const requeued = await transition(client, bookmark.id, "processing", "pending", {
+        ...fields,
+        next_attempt_at: nextAttemptAt,
+      });
+      if (requeued.error) {
+        log.error("failed to re-queue bookmark", { bookmarkId: bookmark.id, err: requeued.error });
+      }
+      return;
+    }
+
+    log.error("bookmark processing failed", {
+      bookmarkId: bookmark.id,
+      url: bookmark.url,
+      attempts,
+      err,
     });
+    const failed = await transition(client, bookmark.id, "processing", "failed", fields);
     if (failed.error) {
       log.error("failed to mark bookmark as failed", {
         bookmarkId: bookmark.id,
@@ -217,10 +297,12 @@ export async function pollOnce(
         await recoverStaleProcessing(client);
       }
 
+      // Rows waiting out a retry backoff aren't due yet.
       const { data: pending, error } = await client
         .from("bookmarks")
-        .select("id, url, type")
+        .select("id, url, type, attempts")
         .eq("status", "pending")
+        .or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`)
         .limit(BATCH_SIZE);
 
       if (error) {
@@ -229,10 +311,16 @@ export async function pollOnce(
 
       pendingCount = pending?.length ?? 0;
       for (const bookmark of pending ?? []) {
-        try {
-          await processBookmark(bookmark, client, runners);
-        } catch (err) {
+        if (worker.stopping) break;
+        heartbeat();
+        const done = processBookmark(bookmark, client, runners).catch((err: unknown) => {
           log.error("unexpected failure processing bookmark", { bookmarkId: bookmark.id, err });
+        });
+        worker.inFlight = { id: bookmark.id, done };
+        try {
+          await done;
+        } finally {
+          worker.inFlight = null;
         }
       }
     });
@@ -246,32 +334,95 @@ export async function pollOnce(
   return pendingCount;
 }
 
+/**
+ * Graceful stop: no new bookmarks are picked up, the in-flight one gets
+ * `drainMs` to finish, and if it doesn't it is handed back to the queue
+ * (processing → pending, without spending an attempt) rather than left for
+ * the stale-processing sweep to fail. Then the browser is closed.
+ */
+export async function shutdown(
+  client: SupabaseClient = supabase,
+  opts: { drainMs?: number; closeBrowserFn?: () => Promise<void> } = {},
+): Promise<void> {
+  const drainMs = opts.drainMs ?? SHUTDOWN_DRAIN_MS;
+  worker.stopping = true;
+
+  const job = worker.inFlight;
+  if (job) {
+    log.info("shutting down; waiting for in-flight bookmark", { bookmarkId: job.id, drainMs });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const finished = await Promise.race([
+      job.done.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), drainMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (!finished) {
+      // next_attempt_at is set explicitly so the DB's retry-reset trigger can
+      // tell this hand-back apart from a user-initiated refresh.
+      const released = await transition(client, job.id, "processing", "pending", {
+        next_attempt_at: new Date().toISOString(),
+      });
+      log.warn("in-flight bookmark did not finish; returned it to the queue", {
+        bookmarkId: job.id,
+        moved: released.moved,
+        err: released.error,
+      });
+    }
+  }
+
+  await (opts.closeBrowserFn ?? closeBrowser)();
+}
+
+/** Test hook: clears shutdown state between tests. */
+export function resetWorkerState() {
+  worker.stopping = false;
+  worker.inFlight = null;
+}
+
 if (import.meta.main) {
+  const missing = ["SUPABASE_URL", "SUPABASE_SECRET_KEY"].filter((name) => !process.env[name]);
+  if (missing.length > 0) {
+    log.error("missing required environment variables; exiting", { missing });
+    process.exit(1);
+  }
+
+  heartbeatPath = HEARTBEAT_PATH;
   // Recursive setTimeout (not setInterval) so cycles never overlap and the
   // delay can grow while the queue is empty.
   let interval = POLL_INTERVAL_MS;
+  let timer: ReturnType<typeof setTimeout> | undefined;
 
   const loop = async () => {
+    heartbeat();
     let pending = 0;
     try {
       pending = await pollOnce();
     } catch (err) {
       log.error("poll cycle failed", { err });
     }
+    heartbeat();
+    if (worker.stopping) return;
     interval = pending > 0 ? POLL_INTERVAL_MS : Math.min(interval * 2, MAX_POLL_INTERVAL_MS);
-    setTimeout(loop, interval);
+    timer = setTimeout(loop, interval);
   };
   loop();
 
-  process.on("SIGINT", async () => {
-    await closeBrowser();
-    process.exit(0);
-  });
-
-  process.on("SIGTERM", async () => {
-    await closeBrowser();
-    process.exit(0);
-  });
+  let shuttingDown = false;
+  const onSignal = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info("received signal; shutting down", { signal });
+    clearTimeout(timer);
+    try {
+      await shutdown();
+    } finally {
+      process.exit(0);
+    }
+  };
+  process.on("SIGINT", () => void onSignal("SIGINT"));
+  process.on("SIGTERM", () => void onSignal("SIGTERM"));
 
   log.info("worker started", { pollIntervalMs: POLL_INTERVAL_MS });
 }

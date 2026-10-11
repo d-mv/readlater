@@ -14,6 +14,7 @@ import { assertPublicUrl, BlockedUrlError, type LookupAll } from "./urlGuard";
 export type FetchHtml = (url: string) => Promise<string>;
 
 const MAX_REDIRECTS = 5;
+const FETCH_TIMEOUT_MS = 15_000;
 const HTML_TYPES = new Set(["text/html", "application/xhtml+xml"]);
 
 // Plain HTTP fetch of a page, with every hop (the URL and each redirect
@@ -26,12 +27,14 @@ export function createFetchHtml(
   const maxRedirects = deps.maxRedirects ?? MAX_REDIRECTS;
 
   return async (url) => {
+    // One budget for the whole redirect chain and body, not 15s per hop.
+    const signal = AbortSignal.timeout(FETCH_TIMEOUT_MS);
     let current = url;
     for (let hop = 0; hop <= maxRedirects; hop++) {
       await assertPublicUrl(current, deps.lookup);
       const res = await fetchImpl(current, {
         redirect: "manual",
-        signal: AbortSignal.timeout(15_000),
+        signal,
         headers: {
           "User-Agent": USER_AGENT,
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",

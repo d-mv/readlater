@@ -23,5 +23,11 @@ COPY src ./src
 # compromised renderer could reach.
 USER bun
 
+# The poll loop touches /tmp/worker-heartbeat every cycle and before each
+# bookmark (a cycle waits at most 60s; a bookmark is capped at 45s). If it
+# hasn't moved for 3 minutes the loop is stuck: report unhealthy.
+HEALTHCHECK --interval=60s --timeout=5s --start-period=60s --retries=2 \
+  CMD test -n "$(find /tmp/worker-heartbeat -mmin -3 2>/dev/null)" || exit 1
+
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["bun", "run", "src/index.ts"]

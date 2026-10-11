@@ -1,4 +1,5 @@
 import { CircuitBreaker } from "./circuitBreaker";
+import { HttpStatusError, isBreakerFailure } from "./errors";
 import { USER_AGENT } from "./http";
 import { log } from "./logger";
 import type { YoutubeMeta } from "./parseYoutube";
@@ -7,6 +8,9 @@ export const youtubeCircuitBreaker = new CircuitBreaker({
   name: "youtube-oembed",
   failureThreshold: 3,
   resetTimeoutMs: 30_000,
+  // 5xx, timeouts and network errors count; a 4xx (e.g. a private or
+  // removed video) is YouTube answering correctly.
+  isFailure: isBreakerFailure,
   onStateChange: (from, to) => {
     log.warn("circuit breaker state changed", { breaker: "youtube-oembed", from, to });
   },
@@ -31,7 +35,7 @@ export async function fetchMeta(url: string): Promise<YoutubeMeta> {
         "User-Agent": USER_AGENT,
       },
     });
-    if (!response.ok) throw new Error(`oEmbed request failed: ${response.status}`);
+    if (!response.ok) throw new HttpStatusError(response.status, "from YouTube oEmbed");
     const json = await response.json();
     return {
       id: extractVideoId(url),

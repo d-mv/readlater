@@ -1,11 +1,19 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   recoverStaleProcessing,
   processBookmark,
   pollOnce,
   formatErrorMessage,
+  resetWorkerState,
+  RETRY_BACKOFF_MS,
+  shutdown,
   type Bookmark,
 } from "../src/index";
+import { CircuitBreakerOpenError } from "../src/circuitBreaker";
+import { HttpStatusError } from "../src/errors";
+import { TimeoutError } from "../src/timeout";
+
+afterEach(() => resetWorkerState());
 
 describe("formatErrorMessage", () => {
   test("extracts message from Error object and strips null bytes", () => {
@@ -73,6 +81,7 @@ function fakeClient(
   } = {},
 ) {
   const updates: Update[] = [];
+  const pollFilters: string[] = [];
   const client = {
     from: (_table: string) => ({
       update: (payload: Record<string, unknown>) => {
@@ -96,13 +105,18 @@ function fakeClient(
       },
       select: () => ({
         eq: () => ({
-          limit: () => Promise.resolve({ data: opts.pending ?? [], error: null }),
+          or: (filter: string) => {
+            pollFilters.push(filter);
+            return {
+              limit: () => Promise.resolve({ data: opts.pending ?? [], error: null }),
+            };
+          },
         }),
       }),
     }),
   };
   // deno-lint-ignore no-explicit-any
-  return { client: client as any, updates };
+  return { client: client as any, updates, pollFilters };
 }
 
 const parsed = async () => ({
@@ -115,7 +129,12 @@ const parsed = async () => ({
 });
 
 describe("processBookmark", () => {
-  const article: Bookmark = { id: "bm-1", url: "https://example.com/article", type: "article" };
+  const article: Bookmark = {
+    id: "bm-1",
+    url: "https://example.com/article",
+    type: "article",
+    attempts: 0,
+  };
 
   test("claims pending → processing, then finishes processing → ready", async () => {
     const { client, updates } = fakeClient();
@@ -242,8 +261,8 @@ describe("pollOnce", () => {
     const processedIds: string[] = [];
     const { client } = fakeClient({
       pending: [
-        { id: "bm-1", url: "https://example.com/1", type: "article" },
-        { id: "bm-2", url: "https://example.com/2", type: "article" },
+        { id: "bm-1", url: "https://example.com/1", type: "article", attempts: 0 },
+        { id: "bm-2", url: "https://example.com/2", type: "article", attempts: 0 },
       ],
     });
 
@@ -261,8 +280,8 @@ describe("pollOnce", () => {
   test("returns the number of pending bookmarks it picked up", async () => {
     const { client } = fakeClient({
       pending: [
-        { id: "bm-1", url: "https://example.com/1", type: "article" },
-        { id: "bm-2", url: "https://example.com/2", type: "article" },
+        { id: "bm-1", url: "https://example.com/1", type: "article", attempts: 0 },
+        { id: "bm-2", url: "https://example.com/2", type: "article", attempts: 0 },
       ],
     });
 
@@ -286,7 +305,9 @@ describe("pollOnce", () => {
           }),
         }),
         select: () => ({
-          eq: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }),
+          eq: () => ({
+            or: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }),
+          }),
         }),
       }),
       // deno-lint-ignore no-explicit-any
@@ -308,7 +329,10 @@ describe("pollOnce", () => {
         }),
         select: () => ({
           eq: () => ({
-            limit: () => Promise.resolve({ data: null, error: { message: "connection refused" } }),
+            or: () => ({
+              limit: () =>
+                Promise.resolve({ data: null, error: { message: "connection refused" } }),
+            }),
           }),
         }),
       }),
@@ -336,5 +360,159 @@ describe("pollOnce", () => {
 
     // Clean up
     supabaseCircuitBreaker.reset();
+  });
+});
+
+describe("processBookmark retries", () => {
+  const bookmarkWith = (attempts: number): Bookmark => ({
+    id: "bm-r",
+    url: "https://example.com/flaky",
+    type: "article",
+    attempts,
+  });
+  const failingWith = (err: unknown) => async () => {
+    throw err;
+  };
+
+  test.each([
+    [0, RETRY_BACKOFF_MS[0]],
+    [1, RETRY_BACKOFF_MS[1]],
+    [2, RETRY_BACKOFF_MS[2]],
+  ])(
+    "a transient failure on attempt %#+1 re-queues the row with backoff",
+    async (attempts, delay) => {
+      const { client, updates } = fakeClient();
+      const before = Date.now();
+
+      await processBookmark(bookmarkWith(attempts), client, {
+        parseArticleFn: failingWith(new HttpStatusError(503, "Service Unavailable")),
+      });
+
+      expect(updates).toHaveLength(2);
+      const requeue = updates[1]!;
+      expect(requeue.filters).toEqual({ id: "bm-r", status: "processing" });
+      expect(requeue.payload).toMatchObject({
+        status: "pending",
+        attempts: attempts + 1,
+        error_message: "HTTP 503 Service Unavailable",
+      });
+      const next = Date.parse(String(requeue.payload.next_attempt_at));
+      expect(next).toBeGreaterThanOrEqual(before + delay);
+      expect(next).toBeLessThanOrEqual(Date.now() + delay);
+    },
+  );
+
+  test("the fourth transient failure fails the row for good", async () => {
+    const { client, updates } = fakeClient();
+
+    await processBookmark(bookmarkWith(3), client, {
+      parseArticleFn: failingWith(new TimeoutError("Processing timed out after 45s")),
+    });
+
+    expect(updates[1]?.payload).toMatchObject({ status: "failed", attempts: 4 });
+    expect(updates[1]?.payload).not.toHaveProperty("next_attempt_at");
+  });
+
+  test.each([
+    ["an open circuit breaker", new CircuitBreakerOpenError("playwright-browser", 20_000)],
+    ["a 429", new HttpStatusError(429, "Too Many Requests")],
+    ["a timeout", new TimeoutError("Browser render timed out")],
+    ["a network error", Object.assign(new Error("Unable to connect"), { code: "ECONNRESET" })],
+  ])("%s puts the row back to pending", async (_label, err) => {
+    const { client, updates } = fakeClient();
+
+    await processBookmark(bookmarkWith(0), client, { parseArticleFn: failingWith(err) });
+
+    expect(updates[1]?.payload).toMatchObject({ status: "pending", attempts: 1 });
+  });
+
+  test.each([
+    ["a 404", new HttpStatusError(404, "Not Found")],
+    ["an extraction failure", new Error("Readability could not extract article content")],
+  ])("%s fails the row immediately", async (_label, err) => {
+    const { client, updates } = fakeClient();
+
+    await processBookmark(bookmarkWith(0), client, { parseArticleFn: failingWith(err) });
+
+    expect(updates[1]?.payload).toMatchObject({ status: "failed", attempts: 1 });
+  });
+});
+
+describe("pollOnce queue filter", () => {
+  test("only picks up pending rows whose retry backoff has elapsed", async () => {
+    const { client, pollFilters } = fakeClient();
+    const before = new Date().toISOString();
+
+    await pollOnce(client);
+
+    expect(pollFilters).toHaveLength(1);
+    const [isNull, lte] = pollFilters[0]!.split(",");
+    expect(isNull).toBe("next_attempt_at.is.null");
+    expect(lte).toStartWith("next_attempt_at.lte.");
+    expect(lte!.slice("next_attempt_at.lte.".length) >= before).toBe(true);
+  });
+});
+
+describe("shutdown", () => {
+  const two: Bookmark[] = [
+    { id: "bm-1", url: "https://example.com/1", type: "article", attempts: 0 },
+    { id: "bm-2", url: "https://example.com/2", type: "article", attempts: 0 },
+  ];
+
+  test("waits for the in-flight bookmark, then stops without taking the next one", async () => {
+    const { client, updates } = fakeClient({ pending: two });
+    const parsedUrls: string[] = [];
+    let finish: () => void = () => {};
+    let browserClosed = false;
+
+    const cycle = pollOnce(client, {
+      parseArticleFn: async (url) => {
+        parsedUrls.push(url);
+        await new Promise<void>((resolve) => (finish = resolve));
+        return parsed();
+      },
+    });
+    await Bun.sleep(5);
+
+    const stopping = shutdown(client, {
+      drainMs: 1_000,
+      closeBrowserFn: async () => {
+        browserClosed = true;
+      },
+    });
+    finish();
+    await stopping;
+    await cycle;
+
+    expect(parsedUrls).toEqual(["https://example.com/1"]);
+    expect(updates.map((u) => u.payload.status)).toEqual(["processing", "ready"]);
+    expect(browserClosed).toBe(true);
+  });
+
+  test("hands a bookmark that outlives the drain window back to the queue", async () => {
+    const { client, updates } = fakeClient({ pending: two });
+    let browserClosed = false;
+
+    void pollOnce(client, {
+      parseArticleFn: () => new Promise(() => {}), // never finishes
+    });
+    await Bun.sleep(5);
+
+    await shutdown(client, {
+      drainMs: 30,
+      closeBrowserFn: async () => {
+        browserClosed = true;
+      },
+    });
+
+    expect(updates.map((u) => [u.filters.status, u.payload.status])).toEqual([
+      ["pending", "processing"],
+      ["processing", "pending"],
+    ]);
+    // An explicit next_attempt_at marks it as a hand-back, not a user refresh,
+    // and no attempt is spent.
+    expect(updates[1]?.payload.next_attempt_at).toBeString();
+    expect(updates[1]?.payload).not.toHaveProperty("attempts");
+    expect(browserClosed).toBe(true);
   });
 });
