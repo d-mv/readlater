@@ -39,6 +39,7 @@ const LIST_COLUMNS = [
   "error_message",
   "created_at",
   "processed_at",
+  "updated_at",
   "pdf_path",
   "pdf_parsed",
   "view_mode",
@@ -50,11 +51,26 @@ const LIST_COLUMNS = [
 const LIST_SELECT = `${LIST_COLUMNS}, tags(id, name, color)`;
 const UNIQUE_VIOLATION = "23505";
 const PAGE_SIZE = 50;
+// A delta larger than this means the local copy is far behind; a fresh first
+// page is cheaper than replaying it.
+const DELTA_LIMIT = 200;
+// updated_at is the writing transaction's start time, so a slow transaction
+// can commit a row stamped just before the watermark. Re-asking for a short
+// overlap catches those; applying a row twice is harmless.
+const DELTA_OVERLAP_MS = 5 * 60_000;
 const PDF_BUCKET = "bookmark-pdfs";
 const PDF_SIGNED_URL_TTL_SECONDS = 60;
 
 function stripContentMd(bookmark: Bookmark): offlineDb.OfflineBookmarkMeta {
   return offlineDb.stripContentMd(bookmark);
+}
+
+function byCreatedAtDesc(a: Bookmark, b: Bookmark) {
+  return Date.parse(b.created_at) - Date.parse(a.created_at);
+}
+
+function latest(a: string | null, b: string): string {
+  return a !== null && Date.parse(a) >= Date.parse(b) ? a : b;
 }
 
 async function loadOfflineBookmarks(): Promise<Bookmark[]> {
@@ -102,6 +118,7 @@ async function loadOfflineBookmarks(): Promise<Bookmark[]> {
         error_message: null,
         created_at: article.cachedAt,
         processed_at: article.cachedAt,
+        updated_at: article.cachedAt,
         pdf_path: null,
         pdf_parsed: false,
         view_mode: null,
@@ -208,16 +225,18 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   // tell whether they still apply:
   // - "recent": the unfiltered newest-first window, paged by `cursor` (the
   //   created_at of the oldest *paged* row — rows added by fetchOne() or
-  //   Realtime don't move it). The only kind mirrored to the offline list.
+  //   Realtime don't move it), current as of `watermark` (the newest
+  //   updated_at / deleted_at it reflects; null until a row has been seen).
+  //   The only kind mirrored to the offline list.
   // - "search": a whole, unpaged full-text result set for `query`.
   // - "offline": a read-only snapshot from IndexedDB after a failed fetch.
   // Every fetch() bumps `listGeneration`; a response (fetch or loadMore)
   // started under an older generation is discarded.
   type ListSession =
-    | { kind: "recent"; cursor: string | null }
+    | { kind: "recent"; cursor: string | null; watermark: string | null }
     | { kind: "search"; query: string }
     | { kind: "offline"; query: string };
-  let listSession: ListSession = { kind: "recent", cursor: null };
+  let listSession: ListSession = { kind: "recent", cursor: null, watermark: null };
   let listGeneration = 0;
 
   // One page of the list, newest first. `query` applies full-text search;
@@ -240,6 +259,98 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return (data ?? []) as unknown as Bookmark[];
   }
 
+  // Rows changed, and ids deleted, at or after `since`. At most
+  // DELTA_LIMIT + 1 changed rows, so the caller can tell an oversized delta.
+  async function queryDelta(since: string) {
+    const [changed, deleted] = await Promise.all([
+      supabase
+        .from("bookmarks")
+        .select(LIST_SELECT)
+        .gte("updated_at", since)
+        .limit(DELTA_LIMIT + 1)
+        .order("updated_at", { ascending: true }),
+      supabase
+        .from("bookmark_deletions")
+        .select("bookmark_id, deleted_at")
+        .gte("deleted_at", since)
+        .order("deleted_at", { ascending: true }),
+    ]);
+    if (changed.error) throw changed.error;
+    if (deleted.error) throw deleted.error;
+    return {
+      changed: (changed.data ?? []) as unknown as Bookmark[],
+      deleted: (deleted.data ?? []) as { bookmark_id: string; deleted_at: string }[],
+    };
+  }
+
+  // Whether a row created at `createdAt` belongs to the paged window — rows
+  // older than the cursor arrive through loadMore(), fresh.
+  function inWindow(createdAt: string, cursor: string | null, more: boolean) {
+    return !more || cursor === null || Date.parse(createdAt) >= Date.parse(cursor);
+  }
+
+  // Brings the "recent" list up to date by delta instead of re-reading the
+  // first page: from the list already in memory, else from the persisted
+  // snapshot (shown at once, then patched). Returns false when there is no
+  // synced list to start from, or it is too far behind — the caller then
+  // loads a fresh first page.
+  async function syncRecent(isCurrent: () => boolean): Promise<boolean> {
+    let cursor: string | null;
+    let watermark: string;
+    if (listSession.kind === "recent" && listSession.watermark !== null) {
+      ({ cursor, watermark } = listSession);
+    } else {
+      const state = await offlineDb.getSyncState().catch(() => undefined);
+      if (!state) return false;
+      const snapshot = await loadOfflineBookmarks();
+      if (!isCurrent()) return true;
+      ({ cursor, watermark } = state);
+      // Downloaded articles outside the window carry metadata of unknown age;
+      // leave them for loadMore() rather than show them stale.
+      bookmarks.value = snapshot.filter((b) => inWindow(b.created_at, cursor, state.hasMore));
+      listSession = { kind: "recent", cursor, watermark };
+      hasMore.value = state.hasMore;
+    }
+
+    const since = new Date(Date.parse(watermark) - DELTA_OVERLAP_MS).toISOString();
+    const { changed, deleted } = await queryDelta(since);
+    if (!isCurrent()) return true;
+    if (changed.length > DELTA_LIMIT) return false;
+
+    const gone = new Set(deleted.map((d) => d.bookmark_id));
+    const byId = new Map(
+      bookmarks.value.filter((b) => !gone.has(b.id)).map((b) => [b.id, b] as const),
+    );
+    for (const row of changed) {
+      if (gone.has(row.id)) continue;
+      const existing = byId.get(row.id);
+      // Unchanged since loaded (the overlap re-sends recent rows): keep it,
+      // with any body the reader already pulled.
+      if (existing?.updated_at === row.updated_at) continue;
+      if (existing || inWindow(row.created_at, cursor, hasMore.value)) byId.set(row.id, row);
+    }
+    for (const row of changed) watermark = latest(watermark, row.updated_at);
+    for (const d of deleted) watermark = latest(watermark, d.deleted_at);
+
+    // A downloaded copy would otherwise put a deleted row back into the
+    // persisted list (replaceBookmarksList keeps cached articles' metadata).
+    const offlineCache = useOfflineCacheStore();
+    await Promise.all(
+      [...gone].map((id) =>
+        Promise.all([
+          offlineDb.deleteBookmarkMeta(id),
+          offlineCache.removeCachedBookmark(id),
+        ]).catch(() => {}),
+      ),
+    );
+    if (!isCurrent()) return true;
+
+    bookmarks.value = [...byId.values()].sort(byCreatedAtDesc);
+    listSession = { kind: "recent", cursor, watermark };
+    persistOfflineList();
+    return true;
+  }
+
   async function fetch() {
     const generation = ++listGeneration;
     const isCurrent = () => generation === listGeneration;
@@ -252,6 +363,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       if (isOffline || !auth.userId || !auth.session) {
         throw new Error("Offline or session unavailable");
       }
+      if (!query && (await syncRecent(isCurrent))) return;
       // A search result set is bounded and worth showing whole; only the
       // unfiltered list is paged.
       const page = await queryBookmarks(query ? { query } : { limit: PAGE_SIZE });
@@ -261,7 +373,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         listSession = { kind: "search", query };
         hasMore.value = false;
       } else {
-        listSession = { kind: "recent", cursor: page.at(-1)?.created_at ?? null };
+        let watermark: string | null = null;
+        for (const row of page) watermark = latest(watermark, row.updated_at);
+        listSession = { kind: "recent", cursor: page.at(-1)?.created_at ?? null, watermark };
         hasMore.value = page.length === PAGE_SIZE;
         persistOfflineList();
       }
@@ -303,7 +417,13 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       if (generation !== listGeneration || listSession !== session) return;
       const seen = new Set(bookmarks.value.map((b) => b.id));
       bookmarks.value = [...bookmarks.value, ...page.filter((b) => !seen.has(b.id))];
-      listSession = { kind: "recent", cursor: page.at(-1)?.created_at ?? session.cursor };
+      let watermark = session.watermark;
+      for (const row of page) watermark = latest(watermark, row.updated_at);
+      listSession = {
+        kind: "recent",
+        cursor: page.at(-1)?.created_at ?? session.cursor,
+        watermark,
+      };
       hasMore.value = page.length === PAGE_SIZE;
       persistOfflineList();
     } catch {
@@ -318,8 +438,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     // search result or an offline snapshot must never replace it.
     if (listSession.kind !== "recent") return;
     if (bookmarks.value.length === 0) return;
+    const { cursor, watermark } = listSession;
+    const syncState = watermark ? { watermark, cursor, hasMore: hasMore.value } : undefined;
     // Best-effort: private browsing / storage quota must not blank the list.
-    offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd)).catch(() => {});
+    offlineDb.replaceBookmarksList(bookmarks.value.map(stripContentMd), syncState).catch(() => {});
   }
 
   // A single postgres_changes subscription keeps `bookmarks` live without the
@@ -688,6 +810,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         error_message: null,
         created_at: cachedArticle.cachedAt,
         processed_at: cachedArticle.cachedAt,
+        updated_at: cachedArticle.cachedAt,
         pdf_path: null,
         pdf_parsed: false,
         view_mode: null,

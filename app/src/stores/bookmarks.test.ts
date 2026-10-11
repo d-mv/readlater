@@ -54,13 +54,14 @@ function emitRealtime(payload: Record<string, unknown>) {
 }
 
 /**
- * Chainable stand-in for a PostgREST list query: .textSearch()/.lt()/.limit()
+ * Chainable stand-in for a PostgREST list query: .textSearch()/.lt()/.gte()/.limit()
  * return self, .order() resolves with { data, error }.
  */
 function listQuery(rows: unknown = [], error: unknown = null) {
   const self = {
     textSearch: vi.fn(() => self),
     lt: vi.fn(() => self),
+    gte: vi.fn(() => self),
     limit: vi.fn(() => self),
     order: vi.fn().mockResolvedValue({ data: rows, error }),
   };
@@ -75,7 +76,9 @@ const {
   deleteBookmarkMeta,
   putBookmarkMeta,
   hydrateArticleContent,
+  getSyncState,
 } = vi.hoisted(() => ({
+  getSyncState: vi.fn(),
   replaceBookmarksList: vi.fn(),
   getBookmarksList: vi.fn(),
   getAllArticles: vi.fn(),
@@ -85,6 +88,7 @@ const {
   hydrateArticleContent: vi.fn((article: { content_md: string }) => article.content_md),
 }));
 vi.mock("../lib/offlineDb", () => ({
+  getSyncState,
   replaceBookmarksList,
   getBookmarksList,
   getAllArticles,
@@ -132,6 +136,7 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     error_message: null,
     created_at: "2026-01-01T00:00:00Z",
     processed_at: "2026-01-01T00:01:00Z",
+    updated_at: "2026-01-01T00:01:00Z",
     pdf_path: null,
     pdf_parsed: false,
     view_mode: null,
@@ -152,6 +157,7 @@ describe("useBookmarksStore", () => {
     getArticle.mockResolvedValue(undefined);
     deleteBookmarkMeta.mockResolvedValue(undefined);
     putBookmarkMeta.mockResolvedValue(undefined);
+    getSyncState.mockResolvedValue(undefined);
     removeCachedBookmark.mockResolvedValue(undefined);
     refreshCached.mockResolvedValue(undefined);
     hydrateArticleContent.mockImplementation(
@@ -1432,6 +1438,160 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks).toHaveLength(0);
     expect(deleteBookmarkMeta).toHaveBeenCalledWith("1");
     expect(removeCachedBookmark).toHaveBeenCalledWith("1");
+  });
+
+  describe("delta sync", () => {
+    const row = (id: string, created: string, updated: string, extra: Partial<Bookmark> = {}) =>
+      makeBookmark({
+        id,
+        created_at: `2026-10-${created}T00:00:00Z`,
+        updated_at: `2026-10-${updated}T00:00:00Z`,
+        ...extra,
+      });
+
+    /** Route `from(table)` to a per-table query stub. */
+    function tables(bookmarks: ReturnType<typeof listQuery>, deletions = listQuery([])) {
+      from.mockImplementation((table: string) => ({
+        select: () => (table === "bookmark_deletions" ? deletions : bookmarks),
+      }));
+    }
+
+    const firstPage = () => [row("b", "05", "06"), row("a", "01", "09")];
+
+    test("a first-page fetch persists the list with its sync state", async () => {
+      tables(listQuery(firstPage()));
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(replaceBookmarksList).toHaveBeenLastCalledWith(expect.any(Array), {
+        watermark: "2026-10-09T00:00:00Z",
+        cursor: "2026-10-01T00:00:00Z",
+        hasMore: false,
+      });
+    });
+
+    test("a repeat fetch asks only for what changed since the watermark", async () => {
+      tables(listQuery(firstPage()));
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      const delta = listQuery([row("c", "10", "10"), row("b", "05", "10", { title: "Renamed" })]);
+      const deletions = listQuery([{ bookmark_id: "a", deleted_at: "2026-10-11T00:00:00Z" }]);
+      tables(delta, deletions);
+      await store.fetch();
+
+      // Watermark minus the 5-minute overlap.
+      expect(delta.gte).toHaveBeenCalledWith("updated_at", "2026-10-08T23:55:00.000Z");
+      expect(deletions.gte).toHaveBeenCalledWith("deleted_at", "2026-10-08T23:55:00.000Z");
+      expect(delta.limit).not.toHaveBeenCalledWith(50);
+      expect(store.bookmarks.map((b) => [b.id, b.title])).toEqual([
+        ["c", "Title"],
+        ["b", "Renamed"],
+      ]);
+      expect(replaceBookmarksList).toHaveBeenLastCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ watermark: "2026-10-11T00:00:00Z" }),
+      );
+    });
+
+    test("tombstoned rows lose their downloaded copy and offline metadata", async () => {
+      tables(listQuery(firstPage()));
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      tables(listQuery([]), listQuery([{ bookmark_id: "a", deleted_at: "2026-10-11T00:00:00Z" }]));
+      await store.fetch();
+
+      expect(removeCachedBookmark).toHaveBeenCalledWith("a");
+      expect(deleteBookmarkMeta).toHaveBeenCalledWith("a");
+    });
+
+    test("a row re-sent unchanged by the overlap keeps the body the reader loaded", async () => {
+      tables(listQuery(firstPage()));
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.bookmarks[1].content_md = "loaded body";
+
+      const { content_md: _body, ...listRow } = row("a", "01", "09");
+      tables(listQuery([listRow]));
+      await store.fetch();
+
+      expect(store.bookmarks.find((b) => b.id === "a")?.content_md).toBe("loaded body");
+    });
+
+    test("a changed row older than the paged window is left for loadMore", async () => {
+      const page = Array.from({ length: 50 }, (_, i) =>
+        row(`p${i}`, String(30 - Math.floor(i / 5)).padStart(2, "0"), "20"),
+      );
+      tables(listQuery(page));
+      const store = useBookmarksStore();
+      await store.fetch();
+      expect(store.hasMore).toBe(true);
+
+      tables(listQuery([row("old", "01", "21")]));
+      await store.fetch();
+
+      expect(store.bookmarks.some((b) => b.id === "old")).toBe(false);
+    });
+
+    test("a cold start shows the persisted window, then patches it by delta", async () => {
+      getSyncState.mockResolvedValue({
+        watermark: "2026-10-09T00:00:00Z",
+        cursor: "2026-10-05T00:00:00Z",
+        hasMore: true,
+      });
+      getBookmarksList.mockResolvedValue([
+        row("b", "06", "06"),
+        row("a", "05", "05"),
+        // A downloaded article's metadata, older than the window.
+        row("stale", "01", "01"),
+      ]);
+      const delta = listQuery([row("b", "06", "10", { title: "Fresh" })]);
+      tables(delta);
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(delta.gte).toHaveBeenCalledWith("updated_at", "2026-10-08T23:55:00.000Z");
+      expect(store.bookmarks.map((b) => [b.id, b.title])).toEqual([
+        ["b", "Fresh"],
+        ["a", "Title"],
+      ]);
+      expect(store.hasMore).toBe(true);
+    });
+
+    test("a delta too large to replay falls back to a fresh first page", async () => {
+      getSyncState.mockResolvedValue({
+        watermark: "2026-10-09T00:00:00Z",
+        cursor: null,
+        hasMore: false,
+      });
+      const huge = Array.from({ length: 201 }, (_, i) => row(`d${i}`, "10", "10"));
+      const fresh = listQuery([row("new", "10", "10")]);
+      let call = 0;
+      from.mockImplementation((table: string) => ({
+        select: () =>
+          table === "bookmark_deletions" ? listQuery([]) : call++ === 0 ? listQuery(huge) : fresh,
+      }));
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(fresh.limit).toHaveBeenCalledWith(50);
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["new"]);
+    });
+
+    test("a failed delta falls back to the offline copy", async () => {
+      tables(listQuery(firstPage()));
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      getBookmarksList.mockResolvedValue([row("cached", "01", "01")]);
+      tables(listQuery(null, { message: "network" }));
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["cached"]);
+    });
   });
 
   describe("realtime", () => {

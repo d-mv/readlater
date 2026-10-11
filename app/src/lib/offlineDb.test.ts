@@ -1,5 +1,6 @@
 import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { openDB } from "idb";
 import * as offlineDb from "./offlineDb";
 import type { OfflineBookmarkMeta } from "./offlineDb";
 
@@ -26,6 +27,7 @@ function makeMeta(overrides: Partial<OfflineBookmarkMeta> = {}): OfflineBookmark
     error_message: null,
     created_at: "2026-01-01T00:00:00Z",
     processed_at: "2026-01-01T00:01:00Z",
+    updated_at: "2026-01-01T00:01:00Z",
     pdf_path: null,
     pdf_parsed: false,
     view_mode: null,
@@ -141,6 +143,55 @@ describe("offlineDb", () => {
     const ids = list.map((b) => b.id);
     expect(ids).toContain("recent-1");
     expect(ids).toContain("cached-1");
+  });
+
+  describe("list sync state", () => {
+    const state = {
+      watermark: "2026-10-01T00:00:00Z",
+      cursor: "2026-09-01T00:00:00Z",
+      hasMore: true,
+    };
+
+    test("is absent until a list is persisted with one", async () => {
+      await offlineDb.replaceBookmarksList([makeMeta({ id: "1" })]);
+      expect(await offlineDb.getSyncState()).toBeUndefined();
+    });
+
+    test("replaceBookmarksList stores the sync state alongside the list", async () => {
+      await offlineDb.replaceBookmarksList([makeMeta({ id: "1" })], state);
+
+      expect(await offlineDb.getSyncState()).toEqual(state);
+      expect((await offlineDb.getBookmarksList()).map((b) => b.id)).toEqual(["1"]);
+    });
+
+    test("an empty list leaves the previous sync state in place", async () => {
+      await offlineDb.replaceBookmarksList([makeMeta({ id: "1" })], state);
+      await offlineDb.replaceBookmarksList([], { ...state, watermark: "2026-10-09T00:00:00Z" });
+
+      expect(await offlineDb.getSyncState()).toEqual(state);
+    });
+
+    test("upgrading a version-1 database keeps its articles and list", async () => {
+      await offlineDb._resetForTests();
+      const v1 = await openDB("read-later-offline", 1, {
+        upgrade(db) {
+          db.createObjectStore("articles", { keyPath: "id" });
+          db.createObjectStore("bookmarksList", { keyPath: "id" });
+        },
+      });
+      await v1.put("bookmarksList", makeMeta({ id: "kept" }));
+      await v1.put("articles", {
+        id: "a",
+        content_md: "x",
+        images: [],
+        cachedAt: "2026-01-01T00:00:00Z",
+      });
+      v1.close();
+
+      expect((await offlineDb.getBookmarksList()).map((b) => b.id)).toEqual(["kept"]);
+      expect(await offlineDb.getArticle("a")).toBeDefined();
+      expect(await offlineDb.getSyncState()).toBeUndefined();
+    });
   });
 
   test("deleteBookmarkMeta removes a single entry from the offline list", async () => {

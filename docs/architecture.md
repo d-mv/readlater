@@ -87,6 +87,7 @@ create table bookmarks (
   error_message   text,
   created_at      timestamptz not null default now(),
   processed_at    timestamptz,
+  updated_at      timestamptz not null default now(), -- trigger-bumped; delta sync
 
   constraint bookmarks_url_required_unless_note check (type in ('note', 'pdf') or url is not null),
   constraint bookmarks_pdf_path_requires_type check (pdf_path is null or type = 'pdf')
@@ -154,6 +155,15 @@ grant execute on function get_public_bookmark(uuid) to anon, authenticated;
 -- with 42P10.
 create unique index bookmarks_replica_identity_idx on bookmarks (id, user_id);
 alter table bookmarks replica identity using index bookmarks_replica_identity_idx;
+
+-- Delta sync (20261011120000): before-update trigger bumps updated_at; an
+-- insert/delete on bookmark_tags bumps its bookmark's updated_at; an
+-- after-delete trigger records a tombstone.
+create table bookmark_deletions (
+  bookmark_id uuid primary key,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  deleted_at  timestamptz not null default now()
+); -- RLS: owner select only; written by the security-definer trigger
 ```
 
 Notes on the shape:
@@ -471,6 +481,21 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   on open, and again on the Realtime pending→ready transition. Tag
   filtering and the tag bar are derived client-side from the loaded rows
   (match-all); no query on toggle.
+- **Delta sync** — the unfiltered list is persisted to IndexedDB with a sync
+  state (`watermark` = newest `updated_at`/`deleted_at` it reflects, plus the
+  keyset `cursor`/`hasMore`), written in one transaction with the list.
+  `fetch()` without a search then asks only for rows with `updated_at >=
+  watermark − 5 min` (overlap for late-committing transactions) and for
+  `bookmark_deletions` tombstones since then, instead of re-reading the first
+  page. Source: the list in memory, else the persisted snapshot (shown at
+  once, trimmed to the paged window — older downloaded-article metadata is
+  left to `loadMore()`). A changed row is applied only if loaded or inside the
+  window; a row re-sent with the same `updated_at` keeps its loaded body;
+  tombstoned ids are evicted from the offline cache too. Over 200 changed rows,
+  no sync state, or an empty list → a fresh first page. DB side:
+  `bookmarks.updated_at` (before-update trigger; tag attach/detach on
+  `bookmark_tags` bumps it too), `bookmark_deletions` (after-delete trigger,
+  owner-read RLS, kept indefinitely).
 - **Live updates** — `store.subscribeToChanges()` opens one Realtime
   `postgres_changes` channel (RLS-scoped, no body columns in the payload).
   INSERT prepends, UPDATE merges (keeping a body the reader already loaded),

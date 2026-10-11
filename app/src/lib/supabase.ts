@@ -38,6 +38,9 @@ export interface Bookmark {
   error_message: string | null;
   created_at: string;
   processed_at: string | null;
+  // Bumped by the database on every change (incl. tag attach/detach); drives
+  // the list's delta sync.
+  updated_at: string;
   // PDF-only: path of the original file in the bookmark-pdfs storage bucket
   // (null once the user trashes it), whether text extraction succeeded, and
   // the persisted markdown/original view toggle.

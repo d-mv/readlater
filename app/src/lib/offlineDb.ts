@@ -33,18 +33,35 @@ interface OfflineDbSchema extends DBSchema {
     key: string;
     value: OfflineBookmarkMeta;
   };
+  syncState: {
+    key: string;
+    value: ListSyncState;
+  };
+}
+
+// Where the persisted list stands relative to the server: `watermark` is the
+// newest updated_at it reflects (delta sync asks only for rows changed or
+// deleted since), `cursor`/`hasMore` the created_at keyset window it covers.
+export interface ListSyncState {
+  watermark: string;
+  cursor: string | null;
+  hasMore: boolean;
 }
 
 const DB_NAME = "read-later-offline";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
+const SYNC_STATE_KEY = "list";
 
 let dbPromise: Promise<IDBPDatabase<OfflineDbSchema>> | null = null;
 
 function getDb() {
   dbPromise ??= openDB<OfflineDbSchema>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      db.createObjectStore("articles", { keyPath: "id" });
-      db.createObjectStore("bookmarksList", { keyPath: "id" });
+    upgrade(db, oldVersion) {
+      if (oldVersion < 1) {
+        db.createObjectStore("articles", { keyPath: "id" });
+        db.createObjectStore("bookmarksList", { keyPath: "id" });
+      }
+      if (oldVersion < 2) db.createObjectStore("syncState");
     },
   });
   return dbPromise;
@@ -90,7 +107,12 @@ export async function getAllArticles(): Promise<CachedArticle[]> {
   return db.getAll("articles");
 }
 
-export async function replaceBookmarksList(items: OfflineBookmarkMeta[]): Promise<void> {
+// Writes the list and, when given, its sync state in one transaction, so a
+// persisted watermark never runs ahead of the list it describes.
+export async function replaceBookmarksList(
+  items: OfflineBookmarkMeta[],
+  syncState?: ListSyncState,
+): Promise<void> {
   if (items.length === 0) return;
   const db = await getDb();
   const articles = await db.getAll("articles");
@@ -103,10 +125,17 @@ export async function replaceBookmarksList(items: OfflineBookmarkMeta[]): Promis
       byId.set(article.id, article.bookmark);
     }
   }
-  const tx = db.transaction("bookmarksList", "readwrite");
-  await tx.store.clear();
-  await Promise.all(Array.from(byId.values()).map((item) => tx.store.put(item)));
+  const tx = db.transaction(["bookmarksList", "syncState"], "readwrite");
+  const list = tx.objectStore("bookmarksList");
+  await list.clear();
+  await Promise.all(Array.from(byId.values()).map((item) => list.put(item)));
+  if (syncState) await tx.objectStore("syncState").put(syncState, SYNC_STATE_KEY);
   await tx.done;
+}
+
+export async function getSyncState(): Promise<ListSyncState | undefined> {
+  const db = await getDb();
+  return db.get("syncState", SYNC_STATE_KEY);
 }
 
 export async function putBookmarkMeta(item: OfflineBookmarkMeta): Promise<void> {

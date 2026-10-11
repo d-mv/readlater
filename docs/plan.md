@@ -236,7 +236,9 @@ revokes them. Revoke on reader unmount / article change. Effort S.
 `offlineCache.ts` `fetch(url)` for hot-linked source images fails under CORS
 and is swallowed — the offline copy lacks images with no signal. Options:
 `mode: "no-cors"` opaque blobs (renderable via `blob:`? verify), proxy through
-the worker, or surface "images not cached". Needs a decision. Effort M.
+the worker, or surface "images not cached". Effort M.
+**Decision (2026-10-11):** surface "images not cached" — no proxy, no opaque
+blobs. Not yet implemented.
 
 ### 3.5 Offline mode broken: service worker registration crash & reader missing offline fallback
 **Status:** done (app 0.4.2).
@@ -250,8 +252,9 @@ the worker, or surface "images not cached". Needs a decision. Effort M.
 
 ## 4. Follow-ups (Kairos)
 
-- **True `updated_at` delta sync** for the list, with delete tombstones — if the
-  first-page fetch per session becomes visible. (Kairos task exists.)
+- ~~**True `updated_at` delta sync** for the list, with delete tombstones~~ —
+  done (app 0.5.0, migration `20261011120000_bookmarks_delta_sync.sql`). See
+  architecture §6 *Delta sync*.
 - ~~**Refresh the offline copy when an article is edited/translated**~~ — done
   (app 0.1.1): `offlineCache.refreshCached()` on edit/translate; the record also
   stores the translation.
