@@ -17,6 +17,10 @@ export interface CircuitBreakerOptions {
   failureThreshold?: number;
   resetTimeoutMs?: number;
   onStateChange?: (from: CircuitBreakerState, to: CircuitBreakerState) => void;
+  /** Which errors count against the dependency's health. Defaults to all; an
+   * error it rejects (e.g. a 404) proves the dependency is responding and is
+   * recorded as a success. */
+  isFailure?: (err: unknown) => boolean;
 }
 
 export class CircuitBreaker {
@@ -27,12 +31,14 @@ export class CircuitBreaker {
   public readonly failureThreshold: number;
   public readonly resetTimeoutMs: number;
   private readonly onStateChange?: (from: CircuitBreakerState, to: CircuitBreakerState) => void;
+  private readonly isFailure: (err: unknown) => boolean;
 
   constructor(options: CircuitBreakerOptions = {}) {
     this.name = options.name ?? "default";
     this.failureThreshold = options.failureThreshold ?? 3;
     this.resetTimeoutMs = options.resetTimeoutMs ?? 30_000;
     this.onStateChange = options.onStateChange;
+    this.isFailure = options.isFailure ?? (() => true);
   }
 
   getState(): CircuitBreakerState {
@@ -55,7 +61,8 @@ export class CircuitBreaker {
       this.recordSuccess();
       return result;
     } catch (err) {
-      this.recordFailure(err);
+      if (this.isFailure(err)) this.recordFailure(err);
+      else this.recordSuccess();
       throw err;
     }
   }

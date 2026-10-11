@@ -7,9 +7,10 @@ import { isIP } from "node:net";
 // and store the response as an "article". Only http(s) URLs whose host
 // resolves exclusively to public addresses are allowed.
 //
-// Known gap: the address is checked at resolve time and fetch() resolves
-// again (DNS rebinding). Acceptable for a single-user app; closing it would
-// need pinning the connection to the checked address.
+// Known gap: for the plain fetch the address is checked at resolve time and
+// fetch() resolves again (DNS rebinding). Acceptable for a single-user app:
+// the worker's own fetch runs no page code. The headless browser, which does
+// run page JavaScript, is pinned instead — see egressProxy.ts.
 
 export class BlockedUrlError extends Error {
   override name = "BlockedUrlError";

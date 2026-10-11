@@ -140,6 +140,26 @@ describe("CircuitBreaker", () => {
     expect(breaker.getState()).toBe("OPEN");
   });
 
+  test("errors rejected by isFailure don't count, and reset the failure streak", async () => {
+    const breaker = new CircuitBreaker({
+      failureThreshold: 2,
+      isFailure: (err) => (err as Error).message !== "404",
+    });
+    const fail = (message: string) =>
+      breaker
+        .execute(async () => {
+          throw new Error(message);
+        })
+        .catch(() => {});
+
+    await fail("503");
+    await fail("404");
+    await fail("503");
+    expect(breaker.getState()).toBe("CLOSED");
+    await fail("503");
+    expect(breaker.getState()).toBe("OPEN");
+  });
+
   test("manual reset sets state back to CLOSED", () => {
     const breaker = new CircuitBreaker({ failureThreshold: 1 });
     breaker.recordFailure();
