@@ -32,17 +32,18 @@ const props = withDefaults(defineProps<PillProps>(), {
 });
 const emit = defineEmits<PillEmits>();
 
+// Braun keeps colour off surfaces: a tag's colour is a 6px square marker
+// (kairos area markers), the pill itself stays ink on neutral.
 const toneClasses: Record<PillTone, string> = {
-  outline: "border border-line bg-transparent text-ink-muted",
-  solid:
-    "border border-(--tag-color,var(--color-accent)) bg-(--tag-color,var(--color-accent)) text-accent-ink font-semibold",
-  wash: "border border-transparent bg-accent-wash text-accent-wash-ink font-semibold",
+  outline: "border border-line bg-transparent text-ink-muted hover:border-line-strong",
+  solid: "border border-ink bg-ink text-ink-inverse",
+  wash: "border border-transparent bg-accent-wash text-accent-wash-ink",
 };
 
-const style = computed(() => (props.color ? { "--tag-color": props.color } : undefined));
+const markerStyle = computed(() => (props.color ? { backgroundColor: props.color } : undefined));
 const classes = computed(() =>
   cn(
-    "inline-flex items-center rounded-none text-xs font-sans",
+    "inline-flex items-center gap-6 rounded-sm font-mono text-2xs uppercase tracking-meta",
     toneClasses[props.tone],
     props.class,
   ),
@@ -55,13 +56,26 @@ const classes = computed(() =>
     type="button"
     :aria-pressed="props.pressed"
     :data-testid="props.testId"
-    :style="style"
     :class="cn(classes, 'cursor-pointer')"
     @click="emit('click', $event)"
   >
+    <span
+      v-if="markerStyle"
+      data-testid="tag-marker"
+      aria-hidden="true"
+      class="size-6 shrink-0"
+      :style="markerStyle"
+    />
     <slot />
   </button>
-  <span v-else :data-testid="props.testId" :style="style" :class="classes">
+  <span v-else :data-testid="props.testId" :class="classes">
+    <span
+      v-if="markerStyle"
+      data-testid="tag-marker"
+      aria-hidden="true"
+      class="size-6 shrink-0"
+      :style="markerStyle"
+    />
     <slot />
   </span>
 </template>

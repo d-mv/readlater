@@ -12,10 +12,17 @@ const props = withDefaults(defineProps<EmptyProps>(), { testId: undefined, class
 </script>
 
 <template>
-  <p
+  <div
     :data-testid="props.testId"
-    :class="cn('m-0 px-16 py-32 text-center text-sm text-ink-faint', props.class)"
+    :class="
+      cn(
+        'm-16 p-16 bg-[repeating-linear-gradient(-45deg,transparent_0_7px,var(--color-line)_7px_8px)]',
+        props.class,
+      )
+    "
   >
-    <slot />
-  </p>
+    <p class="m-0 border border-line-strong bg-canvas px-16 py-20 label">
+      <slot />
+    </p>
+  </div>
 </template>

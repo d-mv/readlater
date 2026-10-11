@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { BookmarkFilter } from "../../stores/bookmarks";
 import Tabs, { type TabOption } from "../../shared/ui/Tabs.vue";
-import Pill from "../../shared/ui/Pill.vue";
 
 defineProps<{
   activeFilter: BookmarkFilter;
@@ -25,8 +24,8 @@ const options: TabOption<BookmarkFilter>[] = [
     class="border-b border-line px-16 py-12"
     @update:model-value="emit('change', $event)"
   >
-    <Pill v-if="unreadCount > 0" tone="wash" class="ml-auto px-10 py-4 text-2xs font-semibold"
-      >{{ unreadCount }} unread</Pill
+    <span v-if="unreadCount > 0" class="num ml-auto pb-8 text-2xs text-ink-muted uppercase"
+      >{{ unreadCount }} unread</span
     >
   </Tabs>
 </template>

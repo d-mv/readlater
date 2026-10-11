@@ -62,7 +62,7 @@ const displayTitle = computed(() => {
 <template>
   <div
     data-testid="row"
-    class="flex w-full items-center gap-4 border-t border-line px-16 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors"
+    class="flex w-full items-center gap-4 border-t border-line px-16 first-of-type:border-t-0 transition-colors duration-(--duration) hover:bg-raised"
   >
     <button
       class="flex min-w-0 flex-1 cursor-pointer items-center gap-12 border-0 bg-transparent px-0 py-14 text-left [font:inherit]"
@@ -80,7 +80,7 @@ const displayTitle = computed(() => {
             data-testid="title"
             :class="
               cn(
-                'truncate text-base font-semibold text-ink',
+                'truncate text-base font-medium text-ink',
                 isRead && 'font-normal text-ink-faint',
                 isPending && 'italic text-ink-faint',
                 isFailed && 'text-danger',
@@ -93,12 +93,12 @@ const displayTitle = computed(() => {
             v-if="bookmark.is_public"
             data-testid="public-badge"
             :size="12"
-            class="shrink-0 text-accent"
+            class="shrink-0 text-ink-faint"
             aria-label="Shared publicly"
           />
         </span>
         <span class="mt-4 flex min-w-0 items-center gap-4">
-          <span class="truncate text-xs text-ink-faint">{{ meta }}</span>
+          <span class="num truncate text-2xs text-ink-faint">{{ meta }}</span>
           <IconLanguageHiragana
             v-if="isTranslated"
             data-testid="translated-badge"
@@ -114,7 +114,7 @@ const displayTitle = computed(() => {
       test-id="offline-toggle"
       :title="offlineTitle"
       :pressed="isCached"
-      :class="cn('size-28 shrink-0 text-ink-faint hover:text-ink', isCached && 'text-accent')"
+      :class="cn('size-28 shrink-0 text-ink-faint hover:text-ink', isCached && 'text-ink')"
       @click="emit('toggleOffline', bookmark.id)"
     >
       <IconPhotoOff v-if="isIncomplete" data-testid="images-not-cached" :size="16" />

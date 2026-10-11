@@ -561,9 +561,9 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   skipped client-side (an empty `websearch_to_tsquery` matches nothing) and
   falls back to the normal `order('created_at')` list query. A search loads
   its whole result set unpaged.
-- **Fonts** — self-hosted woff2 (not a CDN). Source Serif 4 for body copy,
-  Inter for UI chrome, JetBrains Mono for metadata (domain, reading time,
-  timestamp).
+- **Fonts** — self-hosted woff2 via `@fontsource` (not a CDN). Literata
+  for article text, Space Grotesk for UI chrome, IBM Plex Mono for labels and
+  metadata (domain, reading time, byline, tabs, buttons).
 
 ### Styling and design tokens
 
@@ -572,33 +572,44 @@ theme, preflight and utilities layers; a `dark` custom variant keyed on
 `[data-theme=dark]`; an `@theme` block of semantic tokens with a
 `[data-theme="dark"]` override block. No component has a `<style>` block.
 
-- **Tokens** (kairos names, read-later palette): `canvas` / `raised` /
-  `recessed` surfaces, `line` / `line-strong`, `ink` / `ink-muted` /
-  `ink-faint` / `ink-inverse`, `accent` / `accent-hover` / `accent-wash` /
-  `accent-wash-ink` / `accent-ink`, `danger`, `scrim`, `focus`,
-  `drop-target`. Fonts: `font-sans` (Inter), `font-serif` (Source Serif 4),
-  `font-mono` (JetBrains Mono), self-hosted via `@fontsource`.
+- **Design language: Braun / Dieter Rams**, shared with kairos-v2,
+  drive_read and forth-circle-ims (spec: `docs/redesign/README.md`). Tokens
+  are the kairos-v2 sheet verbatim: `recessed` (wells, inputs, code) /
+  `canvas` (the enclosure) / `raised` (cards, dialogs, the reading page)
+  surfaces, `line` / `line-strong` hairlines, `ink` / `ink-muted` /
+  `ink-faint` / `ink-inverse`, one signal-red `accent` (+ `accent-hover`,
+  `accent-wash`, `accent-wash-ink`, `accent-ink`; `danger` is the same red),
+  `scrim`, `focus` (ink), `drop-target`. Fonts: `font-sans` (Space Grotesk),
+  `font-serif` (Literata), `font-mono` (IBM Plex Mono).
 - **Scale:** root `font-size: 62.5%` (1rem = 10px); `--spacing: 0.1rem`, so
-  one spacing unit is 1px (`p-16` = 16px); a replaced text scale
-  (`text-2xs` 11px … `text-xl` 20px) that sets only font-size.
+  one spacing unit is 1px (`p-16` = 16px); a replaced minor-third text scale
+  (`text-2xs` 10px … `text-xl` 26px) that sets only font-size. Radius tokens
+  are 2px ("a manufacturing tolerance"); no shadows anywhere.
+- **Utilities:** `label` (mono, 10px, uppercase, 0.14em tracking, ink-faint —
+  every label, section heading and byline) and `num` (mono, tabular numerals —
+  metadata rows, counts); `tracking-label` / `tracking-meta` / `tracking-tight`.
 - **Base layer** restores the browser defaults the design relies on after
-  preflight: `line-height: normal`, the default placeholder grey.
+  preflight (`line-height: normal`), sets the ink-faint placeholder and a 2px
+  ink `:focus-visible` outline.
 - **`.prose`** (components layer) styles rendered article markdown, which
-  can't carry utility classes: serif body at the reader font-size
-  (`--rl-article-font-size`, px, from `stores/fontSize.ts`), line-height 1.7,
-  UA-style headings, lists, blockquotes and code.
-- **Shared UI** (`app/src/shared/ui/`): `Button`, `IconButton`, `Dialog`,
-  `Input`, `Tabs`, `Pill`, `Message`, `Empty`. They have typed props/emits,
-  `inheritAttrs: false`, explicit `testId` and `class` props, and merge
-  classes with `cn()` (`app/src/shared/clsx.ts`, tailwind-merge).
+  can't carry utility classes: Literata at the reader font-size
+  (`--rl-article-font-size`, px, from `stores/fontSize.ts`), line-height 1.65,
+  Space Grotesk headings, ink links with a line-strong underline, ruled
+  blockquotes, code on `recessed`.
+- **Shared UI** (`app/src/shared/ui/`): `Button` (primary = ink fill,
+  secondary = line-strong outline; mono uppercase), `IconButton`, `Dialog`,
+  `Input`, `Tabs` (underline = mono bands underscored in ink; segmented = the
+  kairos ink-bordered selector), `Pill` (a tag colour is a 6px square marker,
+  never a fill), `Message`, `Empty` (kairos hatched well). They have typed
+  props/emits, `inheritAttrs: false`, explicit `testId` and `class` props, and
+  merge classes with `cn()` (`app/src/shared/clsx.ts`, tailwind-merge).
   Tests locate elements by `data-testid`, and assert state through
   `aria-pressed` / `data-*`, never through styling classes.
 
-One accent colour, used sparingly (the primary action and the unread count);
-everything else is grayscale. Dark mode uses a warm near-black canvas rather
-than pure black, so it keeps the light palette's character, and the accent
-lightens from the 400 to the 200 stop of the same coral family, because the
-saturated version glares on dark.
+Colour is a signal, not decoration: the red marks reading progress, failed
+items, errors and destructive actions; primary actions are ink. Dark mode is
+a dimmed instrument panel in warm graphite (not an inversion), with the red
+lifted so it holds against it.
 
 **Theme switching** (`stores/theme.ts`) — a `light` / `dark` / `system`
 preference (stored under `localStorage.theme`; nothing stored means `system`),

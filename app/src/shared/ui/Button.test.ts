@@ -12,11 +12,13 @@ describe("Button", () => {
     expect(wrapper.emitted("click")).toHaveLength(1);
   });
 
-  test("primary is the default variant; secondary gets the outlined style", () => {
-    expect(mount(Button).get("button").classes()).toContain("bg-accent");
+  test("primary (default) is ink-filled; secondary is outlined; both are mono labels", () => {
+    const primary = mount(Button).get("button");
+    expect(primary.classes()).toContain("bg-ink");
+    expect(primary.classes()).toContain("uppercase");
     const secondary = mount(Button, { props: { variant: "secondary" } }).get("button");
-    expect(secondary.classes()).toContain("border-line");
-    expect(secondary.classes()).not.toContain("bg-accent");
+    expect(secondary.classes()).toContain("border-line-strong");
+    expect(secondary.classes()).not.toContain("bg-ink");
   });
 
   test("lg is 40px tall; md is 34px", () => {

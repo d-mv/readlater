@@ -127,9 +127,9 @@ function onToggleTag(tagId: string) {
 </script>
 
 <template>
-  <main class="mx-auto min-h-screen max-w-640 bg-canvas">
+  <main class="mx-auto min-h-screen max-w-640 bg-canvas sm:border-x sm:border-line">
     <div class="flex items-center justify-between px-16 pt-16 pb-4">
-      <h1 class="m-0 text-md font-bold tracking-tight text-ink font-sans">Read Later</h1>
+      <h1 class="m-0 font-sans text-md font-medium tracking-tight text-ink">Read Later</h1>
       <div class="flex items-center gap-12">
         <AddBookmarkDialog />
         <IconButton title="Settings" @click="router.push({ name: 'settings' })">
@@ -145,7 +145,7 @@ function onToggleTag(tagId: string) {
         type="search"
         placeholder="Search…"
         :maxlength="200"
-        class="mx-16 my-8 block h-34 w-[calc(100%-32px)] bg-recessed focus:border-line-strong focus:outline-none"
+        class="mx-16 my-8 block h-34 w-[calc(100%-32px)] bg-recessed"
         @update:model-value="onSearchInput"
       />
     </form>

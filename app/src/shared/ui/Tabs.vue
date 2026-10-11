@@ -25,19 +25,22 @@ const props = withDefaults(defineProps<TabsProps<T>>(), {
 });
 const emit = defineEmits<{ (e: "update:modelValue", value: T): void }>();
 
+// underline: mono band labels over a hairline, the active one underscored in
+// ink. segmented: the kairos selector — an ink-bordered band, the active
+// segment ink-on.
 const containerClasses: Record<TabsVariant, string> = {
   underline: "flex items-center gap-20",
-  segmented: "flex rounded-none border border-line p-2 bg-canvas",
+  segmented: "flex rounded-sm border border-ink",
 };
 
 const optionClasses: Record<TabsVariant, { base: string; active: string }> = {
   underline: {
-    base: "border-0 border-b-2 border-solid border-transparent bg-transparent px-0 pt-0 pb-8 text-ink-muted cursor-pointer [font-family:inherit] [font-size:inherit] [line-height:inherit] hover:text-ink transition-colors",
-    active: "font-semibold text-ink border-b-accent",
+    base: "border-0 border-b-2 border-solid border-transparent bg-transparent px-0 pt-0 pb-8 font-mono text-xs uppercase tracking-label leading-[normal] text-ink-muted cursor-pointer hover:text-ink transition-colors duration-(--duration)",
+    active: "text-ink border-b-ink",
   },
   segmented: {
-    base: "flex-1 h-28 border-0 rounded-none bg-transparent text-sm leading-[normal] text-ink-muted cursor-pointer transition-colors",
-    active: "bg-accent text-accent-ink font-semibold",
+    base: "flex-1 h-30 border-0 rounded-none bg-transparent font-mono text-xs uppercase tracking-label leading-[normal] text-ink cursor-pointer transition-colors duration-(--duration) not-first:border-l not-first:border-solid not-first:border-ink hover:bg-recessed",
+    active: "bg-ink text-ink-inverse hover:bg-ink",
   },
 };
 </script>

@@ -29,16 +29,16 @@ function onSubmit() {
     <Pill
       v-for="tag in tags"
       :key="tag.id"
-      tone="solid"
+      tone="outline"
       test-id="tag-chip"
       :color="tag.color"
-      class="h-24 gap-4 border-0 bg-(--tag-color,var(--color-line)) px-8"
+      class="h-24 gap-6 pr-2 pl-8 text-ink"
     >
       {{ tag.name }}
       <IconButton
         :title="`Remove ${tag.name}`"
         test-id="remove-btn"
-        class="text-[inherit] opacity-80"
+        class="size-20 text-ink-faint"
         @click="emit('remove', tag.id)"
       >
         <IconX :size="12" />
@@ -47,7 +47,7 @@ function onSubmit() {
     <input
       v-model="draft"
       data-testid="tag-draft-input"
-      class="min-w-80 flex-1 border-0 bg-transparent px-2 py-1 text-xs leading-[normal] text-ink focus:outline-none"
+      class="min-w-80 flex-1 border-0 bg-transparent px-2 py-1 font-mono text-xs leading-[normal] text-ink focus:outline-none"
       type="text"
       placeholder="Add tag…"
       @keydown.enter.prevent="onSubmit"

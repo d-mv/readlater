@@ -32,7 +32,7 @@ const scrimClasses: Record<DialogPlacement, string> = {
 };
 
 const panelClasses: Record<DialogPlacement, string> = {
-  center: "m-auto rounded-none p-24 w-320 max-w-[calc(100vw-32px)] border border-line-strong",
+  center: "m-auto rounded-sm p-24 w-320 max-w-[calc(100vw-32px)] border border-line-strong",
   sheet:
     "static m-0 w-full max-w-480 rounded-none p-20 flex flex-col gap-16 border-t border-line-strong",
 };
@@ -41,7 +41,7 @@ const panelClasses: Record<DialogPlacement, string> = {
 <template>
   <div
     data-testid="backdrop"
-    :class="cn('fixed inset-0 flex justify-center bg-black/40', scrimClasses[props.placement])"
+    :class="cn('fixed inset-0 flex justify-center bg-scrim', scrimClasses[props.placement])"
     @click.self="emit('close')"
   >
     <dialog

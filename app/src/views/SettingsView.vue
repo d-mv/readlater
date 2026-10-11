@@ -81,11 +81,11 @@ async function onFileSelected(event: Event) {
       <IconButton title="Back" @click="onBack">
         <IconArrowLeft :size="18" />
       </IconButton>
-      <h1 class="m-0 text-xl font-bold">Settings</h1>
+      <h1 class="m-0 text-lg font-medium tracking-tight">Settings</h1>
     </div>
 
-    <section class="mb-16 rounded-none border border-line bg-raised p-20">
-      <h2 class="m-0 mb-8 text-[1.5rem] font-bold">Export</h2>
+    <section class="mb-16 rounded-sm border border-line bg-raised p-20">
+      <h2 class="label m-0 mb-12">Export</h2>
       <p class="m-0 mb-16 text-sm leading-[1.5] text-ink-muted">
         Download every bookmark and tag as a JSON file. Thumbnail and PDF files stay in this
         project's storage — only their paths/URLs are included, so they won't follow the export into
@@ -100,8 +100,8 @@ async function onFileSelected(event: Event) {
       </Message>
     </section>
 
-    <section class="mb-16 rounded-none border border-line bg-raised p-20">
-      <h2 class="m-0 mb-8 text-[1.5rem] font-bold">Import</h2>
+    <section class="mb-16 rounded-sm border border-line bg-raised p-20">
+      <h2 class="label m-0 mb-12">Import</h2>
       <p class="m-0 mb-16 text-sm leading-[1.5] text-ink-muted">
         Import a Read Later export file. Bookmarks whose URL already exists here are skipped.
       </p>

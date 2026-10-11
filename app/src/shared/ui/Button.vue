@@ -29,17 +29,19 @@ const props = withDefaults(defineProps<ButtonProps>(), {
 });
 const emit = defineEmits<ButtonEmits>();
 
+// Braun actuators: mono, uppercase, letterspaced; a 2px tolerance, no shadow.
 const base =
-  "inline-flex items-center justify-center gap-6 rounded-none px-14 text-sm leading-[normal] cursor-pointer border select-none font-sans disabled:opacity-50 disabled:cursor-default disabled:active:translate-x-0 disabled:active:translate-y-0 active:translate-x-px active:translate-y-px transition-[background-color] duration-100";
+  "inline-flex items-center justify-center gap-6 rounded-sm px-14 font-mono text-xs uppercase tracking-meta leading-[normal] cursor-pointer border select-none disabled:opacity-50 disabled:cursor-default transition-colors duration-(--duration) ease-(--ease)";
 
 const variantClasses: Record<ButtonVariant, string> = {
-  primary: "bg-accent text-accent-ink font-semibold border-line-strong hover:bg-accent-hover",
-  secondary: "bg-raised text-ink border-line hover:bg-recessed",
+  primary:
+    "bg-ink text-ink-inverse border-transparent hover:enabled:bg-transparent hover:enabled:text-ink hover:enabled:border-ink",
+  secondary: "bg-transparent text-ink border-line-strong hover:enabled:bg-recessed",
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
   md: "h-34",
-  lg: "h-40 text-base",
+  lg: "h-40 text-sm",
 };
 </script>
 

@@ -1,8 +1,10 @@
-@import "@fontsource/inter/400.css";
-@import "@fontsource/inter/500.css";
-@import "@fontsource/source-serif-4/400.css";
-@import "@fontsource/jetbrains-mono/400.css";
-@import "@fontsource/jetbrains-mono/500.css";
+/* Braun type, as in kairos-v2 / drive_read: Space Grotesk for the interface,
+   IBM Plex Mono for labels and numerals, Literata for article text. */
+@import "@fontsource-variable/space-grotesk/wght.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource-variable/literata/wght.css";
+@import "@fontsource-variable/literata/wght-italic.css";
 
 /* Tailwind v4, set up like kairos-v2's client (see docs/plan.md §7).
    Preflight (Tailwind's base reset) is deliberately not imported yet: the
@@ -16,73 +18,101 @@
 @custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
 
 @theme {
-  /* Surfaces, lines and ink — Flat BeOS pixel palette. */
-  --color-canvas: #f2f1ee;
-  --color-raised: #e6e5e1;
-  --color-recessed: #ffffff;
-  --color-scrim: rgba(0, 0, 0, 0.45);
-  --color-line: #d3d1cb;
-  --color-line-strong: #111111;
-  --color-ink: #111111;
-  --color-ink-muted: #5a5955;
-  --color-ink-faint: #8a8880;
-  --color-ink-inverse: #ffffff;
-  --color-accent: #ffc400;
-  --color-accent-hover: #ffd133;
-  --color-accent-wash: #fff6d6;
-  --color-accent-wash-ink: #8a6a00;
-  --color-accent-ink: #111111;
-  --color-danger: #c82828;
-  --color-focus: #ffc400;
-  --color-beos-blue: #235487;
-  /* Dropzone while a file is dragged over it: accent at 8% over canvas. */
-  --color-drop-target: #fff4cc;
+  /* Braun / Dieter Rams — the kairos-v2 token sheet
+     (kairos-v2/docs/redesign/kairos-tokens.css). Three surface depths only:
+     recessed (wells, inputs), canvas (the enclosure), raised (cards, dialogs,
+     the reading page). Depth is a tone shift plus a hairline, never a shadow. */
+  --color-recessed: #e4e0d4;
+  --color-canvas: #edeae1;
+  --color-raised: #f5f3ec;
+  --color-scrim: rgba(28, 27, 24, 0.28);
+  --color-line: #cfcaba;
+  --color-line-strong: #afa997;
+  --color-ink: #1c1b18;
+  --color-ink-muted: #6d695e;
+  --color-ink-faint: #999487;
+  --color-ink-inverse: #edeae1;
+  /* Signal red — the single accent: reading progress, destructive actions,
+     the one primary actuator per screen. Nothing else. */
+  --color-accent: #c63c23;
+  --color-accent-hover: #ae3320;
+  --color-accent-wash: rgba(198, 60, 35, 0.09);
+  --color-accent-wash-ink: #c63c23;
+  --color-accent-ink: #ffffff;
+  --color-danger: #c63c23;
+  --color-focus: #1c1b18;
+  /* Dropzone while a file is dragged over it. */
+  --color-drop-target: #e4e0d4;
 
-  --font-sans: "JetBrains Mono", ui-monospace, Menlo, monospace;
-  --font-serif: "Source Serif 4", Georgia, serif;
-  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  --font-sans: "Space Grotesk Variable", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-serif: "Literata Variable", Georgia, serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+
+  /* Braun labels are always letterspaced. */
+  --tracking-label: 0.14em;
+  --tracking-meta: 0.06em;
+  --tracking-tight: -0.02em;
 
   /* Root font-size is 62.5% (1rem = 10px), as in kairos. Spacing is one
-     unit per pixel (p-8 = 8px) so the scoped CSS converts one-to-one. */
+     unit per pixel (p-8 = 8px). */
   --spacing: 0.1rem;
   /* Replace Tailwind's scale entirely: its sizes carry line-heights the app
-     never set, so text-* only changes font-size here. */
+     never set, so text-* only changes font-size here. Minor third from 14px. */
   --text-*: initial;
-  --text-2xs: 1.1rem;
-  --text-xs: 1.2rem;
+  --text-2xs: 1rem;
+  --text-xs: 1.1rem;
   --text-sm: 1.3rem;
   --text-base: 1.4rem;
-  --text-md: 1.6rem;
-  --text-lg: 1.8rem;
-  --text-xl: 2rem;
+  --text-md: 1.7rem;
+  --text-lg: 2.2rem;
+  --text-xl: 2.6rem;
 
-  --radius-sm: 0px;
-  --radius-md: 0px;
+  /* Rams does not round corners: 2px is a manufacturing tolerance. */
+  --radius-sm: 2px;
+  --radius-md: 2px;
 
   --ease: cubic-bezier(0.2, 0, 0, 1);
-  --duration: 100ms;
+  --duration: 140ms;
 }
 
+/* Every label in the interface is set this way: mono, uppercase, spaced. */
+@utility label {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+/* Numerals are data: mono, tabular. */
+@utility num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: var(--tracking-meta);
+}
+
+/* Dark is not an inversion: a dimmed instrument panel in warm graphite, with
+   the signal red lifted so it stays a signal. */
 [data-theme="dark"] {
-  --color-canvas: #17181b;
-  --color-raised: #212328;
-  --color-recessed: #121315;
-  --color-scrim: rgba(0, 0, 0, 0.65);
-  --color-line: #2e3138;
-  --color-line-strong: #f0f0ee;
-  --color-ink: #f0f0ee;
-  --color-ink-muted: #9c9da1;
-  --color-ink-faint: #68696e;
-  --color-ink-inverse: #111111;
-  --color-accent: #ffc400;
-  --color-accent-hover: #ffd133;
-  --color-accent-wash: #382b00;
-  --color-accent-wash-ink: #ffc400;
-  --color-accent-ink: #111111;
-  --color-danger: #e04545;
-  --color-focus: #ffc400;
-  --color-beos-blue: #4a8ec9;
-  --color-drop-target: #2d2614;
+  --color-recessed: #100f0e;
+  --color-canvas: #171613;
+  --color-raised: #201f1b;
+  --color-scrim: rgba(0, 0, 0, 0.55);
+  --color-line: #33312b;
+  --color-line-strong: #4c4940;
+  --color-ink: #e9e5da;
+  --color-ink-muted: #918c7f;
+  --color-ink-faint: #6a6558;
+  --color-ink-inverse: #171613;
+  --color-accent: #e04a2e;
+  --color-accent-hover: #ef5c3f;
+  --color-accent-wash: rgba(224, 74, 46, 0.14);
+  --color-accent-wash-ink: #e04a2e;
+  --color-accent-ink: #171613;
+  --color-danger: #e04a2e;
+  --color-focus: #e9e5da;
+  --color-drop-target: #100f0e;
+  color-scheme: dark;
 }
 
 :root {
@@ -104,8 +134,12 @@
   }
 
   ::placeholder {
-    /* The browser default placeholder grey (Chrome: #757575). */
-    color: #757575;
+    color: var(--color-ink-faint);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
   }
 
   html {
@@ -141,7 +175,7 @@
   .prose {
     font-family: var(--font-serif);
     font-size: var(--rl-article-font-size, 16px);
-    line-height: 1.7;
+    line-height: 1.65;
     color: var(--color-ink);
   }
 
@@ -157,14 +191,55 @@
     color: var(--color-ink);
   }
 
+  .prose h1,
+  .prose h2,
+  .prose h3 {
+    letter-spacing: var(--tracking-tight);
+    line-height: 1.25;
+  }
+
   .prose img {
     max-width: 100%;
     border-radius: var(--radius-md);
   }
 
+  /* Links stay ink: the red is reserved for signals. */
   .prose a {
-    color: var(--color-beos-blue);
+    color: var(--color-ink);
     text-decoration: underline;
+    text-decoration-color: var(--color-line-strong);
+    text-underline-offset: 0.2em;
+  }
+
+  .prose a:hover {
+    text-decoration-color: var(--color-ink);
+  }
+
+  .prose blockquote {
+    border-left: 2px solid var(--color-line-strong);
+    padding-left: 1em;
+    color: var(--color-ink-muted);
+  }
+
+  .prose code,
+  .prose pre {
+    background: var(--color-recessed);
+    border-radius: var(--radius-sm);
+  }
+
+  .prose code {
+    padding: 0.1em 0.3em;
+    font-size: 0.88em;
+  }
+
+  .prose pre {
+    padding: 0.8em 1em;
+    overflow-x: auto;
+  }
+
+  .prose pre code {
+    padding: 0;
+    background: none;
   }
 
   /* Preflight strips element defaults; articles keep the browser's classic
@@ -214,7 +289,10 @@
     list-style: circle;
   }
 
-  .prose blockquote,
+  .prose blockquote {
+    margin: 1em 0;
+  }
+
   .prose figure {
     margin: 1em 40px;
   }
@@ -227,7 +305,7 @@
   .prose pre,
   .prose kbd,
   .prose samp {
-    font-family: monospace;
+    font-family: var(--font-mono);
   }
 
   .prose hr {

@@ -34,26 +34,14 @@ async function onSubmit() {
 
 <template>
   <form class="mx-auto max-w-320 px-24 py-40" @submit.prevent="onSubmit">
-    <p class="m-0 mb-4 text-center text-lg font-medium text-ink">Read Later</p>
+    <p class="m-0 mb-4 text-center text-lg font-medium tracking-tight text-ink">Read Later</p>
     <p class="m-0 mb-24 text-center text-sm text-ink-muted">Sign in to your archive</p>
 
-    <label class="mb-4 block text-xs text-ink-muted" for="email">Email</label>
-    <Input
-      id="email"
-      v-model="email"
-      type="email"
-      placeholder="you@example.com"
-      class="mb-12 bg-raised"
-    />
+    <label class="label mb-6 block text-ink-muted" for="email">Email</label>
+    <Input id="email" v-model="email" type="email" placeholder="you@example.com" class="mb-12" />
 
-    <label class="mb-4 block text-xs text-ink-muted" for="password">Password</label>
-    <Input
-      id="password"
-      v-model="password"
-      type="password"
-      placeholder="••••••••"
-      class="mb-12 bg-raised"
-    />
+    <label class="label mb-6 block text-ink-muted" for="password">Password</label>
+    <Input id="password" v-model="password" type="password" placeholder="••••••••" class="mb-12" />
 
     <Message v-if="error" tone="accent" test-id="error" class="-mt-4 mb-12">{{ error }}</Message>
 

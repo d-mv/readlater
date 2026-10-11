@@ -479,3 +479,12 @@ more than it saves. Check that Tailwind's preflight doesn't break
      dialogs, public view).
 
 Effort L. Minor version bump for `app`.
+
+---
+
+## Braun redesign — done (app 0.7.0)
+
+Replaced the Flat BeOS pixel style with the Braun / Dieter Rams language of
+kairos-v2, drive_read and forth-circle-ims. Spec and deviations:
+[`redesign/README.md`](redesign/README.md).
+

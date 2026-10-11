@@ -23,11 +23,11 @@ describe("Tabs", () => {
 
   test("underline and segmented variants style the active option differently", () => {
     const underline = mount(Tabs, { props: { options, modelValue: "all" } }).findAll("button");
-    expect(underline[0]?.classes()).toContain("border-b-accent");
+    expect(underline[0]?.classes()).toContain("border-b-ink");
     const segmented = mount(Tabs, {
       props: { options, modelValue: "all", variant: "segmented" },
     }).findAll("button");
-    expect(segmented[0]?.classes()).toContain("bg-accent");
-    expect(segmented[1]?.classes()).not.toContain("bg-accent");
+    expect(segmented[0]?.classes()).toContain("bg-ink");
+    expect(segmented[1]?.classes()).not.toContain("bg-ink");
   });
 });

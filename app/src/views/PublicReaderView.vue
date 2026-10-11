@@ -25,7 +25,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="mx-auto max-w-680 bg-recessed p-20 sm:border-x sm:border-line">
+  <main class="mx-auto max-w-680 bg-raised p-20 sm:border-x sm:border-line">
     <div
       v-if="loading"
       data-testid="status-placeholder"
@@ -41,10 +41,13 @@ onMounted(async () => {
       <p class="m-0 font-sans text-base">Not found</p>
     </div>
     <template v-else>
-      <h1 data-testid="title" class="m-0 mb-8 font-sans text-xl leading-[1.3] font-medium text-ink">
+      <h1
+        data-testid="title"
+        class="m-0 mb-8 font-sans text-xl leading-[1.2] font-medium tracking-tight text-ink"
+      >
         {{ bookmark.title }}
       </h1>
-      <p v-if="readerByline(bookmark)" class="m-0 mb-20 font-mono text-xs text-ink-faint">
+      <p v-if="readerByline(bookmark)" class="label m-0 mb-20 text-ink-muted">
         {{ readerByline(bookmark) }}
       </p>
       <ArticleContent

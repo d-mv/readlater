@@ -232,7 +232,7 @@ async function confirmDuplicate() {
       />
 
       <template v-if="mode === 'url'">
-        <label class="mb-4 block text-xs text-ink-muted" for="bookmark-url">URL</label>
+        <label class="label mb-6 block text-ink-muted" for="bookmark-url">URL</label>
         <Input
           id="bookmark-url"
           v-model="url"
@@ -243,7 +243,7 @@ async function confirmDuplicate() {
         />
       </template>
       <template v-else-if="mode === 'snippet'">
-        <label class="mb-4 block text-xs text-ink-muted" for="bookmark-snippet">Snippet</label>
+        <label class="label mb-6 block text-ink-muted" for="bookmark-snippet">Snippet</label>
         <Input
           id="bookmark-snippet"
           v-model="snippetText"
@@ -254,14 +254,14 @@ async function confirmDuplicate() {
         />
       </template>
       <template v-else>
-        <label class="mb-4 block text-xs text-ink-muted" for="bookmark-file">File</label>
+        <label class="label mb-6 block text-ink-muted" for="bookmark-file">File</label>
         <div
           data-testid="dropzone"
           :class="
             cn(
-              'box-border flex min-h-140 w-full cursor-pointer flex-col items-center justify-center gap-4 rounded-none border border-dashed border-line bg-canvas px-16 py-20 text-center text-ink-muted transition-[border-color,background] duration-150 hover:border-accent focus-visible:border-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent',
-              isDragging && 'border-solid border-accent bg-drop-target',
-              selectedFile && 'border-solid border-accent',
+              'box-border flex min-h-140 w-full cursor-pointer flex-col items-center justify-center gap-4 rounded-sm border border-dashed border-line-strong bg-canvas px-16 py-20 text-center text-ink-muted transition-[border-color,background] duration-(--duration) hover:border-ink focus-visible:border-ink',
+              isDragging && 'border-solid border-ink bg-drop-target',
+              selectedFile && 'border-solid border-ink',
             )
           "
           :data-dragging="isDragging || undefined"
@@ -288,7 +288,7 @@ async function confirmDuplicate() {
             @click.stop
           />
           <svg
-            :class="cn('mb-4 text-ink-muted', (selectedFile || isDragging) && 'text-accent')"
+            :class="cn('mb-4 text-ink-muted', (selectedFile || isDragging) && 'text-ink')"
             width="28"
             height="28"
             viewBox="0 0 24 24"
@@ -307,7 +307,8 @@ async function confirmDuplicate() {
             {{ selectedFile.name }}
           </p>
           <p v-else class="m-0 text-sm">
-            <span class="font-medium text-accent">Click to upload</span> or drag and drop
+            <span class="font-medium text-ink underline underline-offset-2">Click to upload</span>
+            or drag and drop
           </p>
           <p class="mx-0 mt-8 mb-0 text-2xs text-ink-muted">
             Markdown (.md, up to 500KB), Word (.docx, up to 5MB), or PDF (up to 20MB)

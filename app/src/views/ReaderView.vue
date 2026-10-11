@@ -392,7 +392,7 @@ watch(
 <template>
   <main
     v-if="bookmark"
-    class="mx-auto flex h-full max-w-680 flex-col bg-recessed sm:border-x sm:border-line"
+    class="mx-auto flex h-full max-w-680 flex-col bg-raised sm:border-x sm:border-line"
   >
     <ReaderProgressBar :progress="progress" />
     <ReaderHeader
@@ -417,7 +417,7 @@ watch(
         <h1
           data-testid="title"
           v-if="!editing"
-          class="m-0 mb-8 font-sans text-xl leading-[1.3] font-medium text-ink"
+          class="m-0 mb-8 font-sans text-xl leading-[1.2] font-medium tracking-tight text-ink"
         >
           {{ bookmark.title }}
         </h1>
@@ -425,11 +425,11 @@ watch(
           data-testid="title-input"
           v-else
           v-model="draftTitle"
-          class="m-0 mb-12 w-full rounded-none border border-line bg-recessed px-10 py-8 font-sans text-xl leading-[normal] font-medium text-ink focus:border-ink focus:outline-1 focus:outline-accent"
+          class="m-0 mb-12 w-full rounded-sm border border-line bg-recessed px-10 py-8 font-sans text-xl leading-[normal] font-medium tracking-tight text-ink focus:border-ink focus:outline-none"
           type="text"
           placeholder="Title"
         />
-        <p v-if="byline && !editing" class="m-0 mb-20 font-mono text-xs text-ink-faint">
+        <p v-if="byline && !editing" class="label m-0 mb-20 text-ink-muted">
           {{ byline }}
         </p>
         <div v-if="editing" class="m-0 mb-12 flex justify-end gap-8">
@@ -441,14 +441,14 @@ watch(
         <div
           v-if="!editing && imagesNotCachedNote"
           data-testid="images-not-cached"
-          class="m-0 mb-16 rounded-none border border-line bg-canvas px-10 py-8 font-sans text-sm text-ink-muted"
+          class="m-0 mb-16 rounded-sm border border-line bg-canvas px-10 py-8 font-sans text-sm text-ink-muted"
         >
           {{ imagesNotCachedNote }}
         </div>
         <div
           data-testid="translate-bar"
           v-if="!editing && (translating || translateError || bookmark.translated_content_md)"
-          class="m-0 mb-16 flex items-center gap-10 rounded-none border border-line bg-canvas px-10 py-8 font-sans text-sm"
+          class="m-0 mb-16 flex items-center gap-10 rounded-sm border border-line bg-canvas px-10 py-8 font-sans text-sm"
         >
           <span v-if="translating" class="text-ink-muted">Translating…</span>
           <span v-else-if="translateError" class="text-danger">{{ translateError }}</span>
@@ -456,7 +456,7 @@ watch(
             <span class="text-ink-muted">{{ showOriginal ? "Original" : "Translated" }}</span>
             <button
               data-testid="translate-toggle"
-              class="cursor-pointer border-0 bg-transparent p-0 font-sans text-sm leading-[normal] text-accent"
+              class="cursor-pointer border-0 bg-transparent p-0 font-sans text-sm leading-[normal] text-ink underline underline-offset-2"
               type="button"
               @click="onToggleOriginal"
             >
@@ -467,14 +467,14 @@ watch(
         <div
           data-testid="pdf-view-bar"
           v-if="!editing && canTogglePdfView"
-          class="m-0 mb-16 flex items-center gap-10 rounded-none border border-line bg-canvas px-10 py-8 font-sans text-sm"
+          class="m-0 mb-16 flex items-center gap-10 rounded-sm border border-line bg-canvas px-10 py-8 font-sans text-sm"
         >
           <span class="text-ink-muted">{{
             pdfEffectiveViewMode === "original" ? "Original PDF" : "Markdown"
           }}</span>
           <button
             data-testid="pdf-view-toggle"
-            class="cursor-pointer border-0 bg-transparent p-0 font-sans text-sm leading-[normal] text-accent"
+            class="cursor-pointer border-0 bg-transparent p-0 font-sans text-sm leading-[normal] text-ink underline underline-offset-2"
             type="button"
             @click="onTogglePdfView"
           >
@@ -505,7 +505,7 @@ watch(
         </p>
         <button
           data-testid="retry-btn"
-          class="mt-8 inline-flex cursor-pointer items-center gap-8 rounded-none border border-line bg-raised px-14 py-8 font-sans text-sm leading-[normal] text-ink hover:bg-canvas active:translate-x-px active:translate-y-px"
+          class="mt-8 inline-flex cursor-pointer items-center gap-8 rounded-sm border border-line-strong bg-transparent px-14 py-8 font-mono text-xs uppercase tracking-meta leading-[normal] text-ink transition-colors duration-(--duration) hover:bg-recessed"
           type="button"
           @click="onRetry"
         >
@@ -538,16 +538,16 @@ watch(
   <div
     v-else-if="!awaitingBody"
     data-testid="not-found"
-    class="mx-auto flex h-full min-h-screen max-w-680 flex-col items-center justify-center gap-16 bg-recessed px-16 text-center text-ink-faint sm:border-x sm:border-line"
+    class="mx-auto flex h-full min-h-screen max-w-680 flex-col items-center justify-center gap-16 bg-raised px-16 text-center text-ink-faint sm:border-x sm:border-line"
   >
     <IconAlertTriangle :size="32" class="text-ink-muted" />
-    <p class="m-0 font-sans text-base font-semibold text-ink">Article not available offline</p>
+    <p class="m-0 font-sans text-base font-medium text-ink">Article not available offline</p>
     <p class="m-0 max-w-360 font-mono text-xs text-ink-muted">
       This bookmark is not cached locally. Connect to the internet to read it.
     </p>
     <button
       data-testid="back-to-list-btn"
-      class="mt-8 inline-flex cursor-pointer items-center gap-8 rounded-none border border-line bg-raised px-14 py-8 font-sans text-sm leading-[normal] text-ink hover:bg-canvas active:translate-x-px active:translate-y-px"
+      class="mt-8 inline-flex cursor-pointer items-center gap-8 rounded-sm border border-line-strong bg-transparent px-14 py-8 font-mono text-xs uppercase tracking-meta leading-[normal] text-ink transition-colors duration-(--duration) hover:bg-recessed"
       type="button"
       @click="onBack"
     >
@@ -557,7 +557,7 @@ watch(
   <div
     v-else
     data-testid="loading-placeholder"
-    class="mx-auto flex h-full min-h-screen max-w-680 flex-col items-center justify-center gap-12 bg-recessed px-16 text-center text-ink-faint sm:border-x sm:border-line"
+    class="mx-auto flex h-full min-h-screen max-w-680 flex-col items-center justify-center gap-12 bg-raised px-16 text-center text-ink-faint sm:border-x sm:border-line"
   >
     <IconLoader2 :size="28" class="animate-spin text-ink-muted" />
     <p class="m-0 font-sans text-base">Loading…</p>
