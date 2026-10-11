@@ -232,13 +232,16 @@ fetching; block redirects into them. Effort S–M.
 `app/src/lib/offlineDb.ts:84` creates `blob:` URLs for cached images and never
 revokes them. Revoke on reader unmount / article change. Effort S.
 
-### 3.4 Offline image caching fails silently on CORS
+### 3.4 Offline image caching fails silently on CORS — done
 `offlineCache.ts` `fetch(url)` for hot-linked source images fails under CORS
 and is swallowed — the offline copy lacks images with no signal. Options:
 `mode: "no-cors"` opaque blobs (renderable via `blob:`? verify), proxy through
 the worker, or surface "images not cached". Effort M.
 **Decision (2026-10-11):** surface "images not cached" — no proxy, no opaque
-blobs. Not yet implemented.
+blobs. **Status:** done (app 0.6.0) — failed downloads (rejected *or* non-OK
+response) are recorded per article; the list row's offline icon turns into a
+"photo off" icon with a count in its title, and the reader shows a note while
+offline.
 
 ### 3.5 Offline mode broken: service worker registration crash & reader missing offline fallback
 **Status:** done (app 0.4.2).

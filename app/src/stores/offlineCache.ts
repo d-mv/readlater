@@ -14,18 +14,27 @@ function extractImageUrls(contentMd: string, thumbnailUrl: string | null): strin
   return [...urls];
 }
 
-async function downloadImages(urls: string[]): Promise<{ url: string; blob: Blob }[]> {
-  const images = await Promise.all(
+// Hot-linked source images often refuse cross-origin reads (CORS), and an
+// error response is not the image either; both are reported as missing so the
+// UI can say the offline copy is incomplete.
+async function downloadImages(
+  urls: string[],
+): Promise<{ images: offlineDb.CachedImage[]; missing: string[] }> {
+  const results = await Promise.all(
     urls.map(async (url) => {
       try {
-        const blob = await fetch(url).then((response) => response.blob());
-        return { url, blob };
+        const response = await fetch(url);
+        if (!response.ok) return { url, blob: null };
+        return { url, blob: await response.blob() };
       } catch {
-        return null;
+        return { url, blob: null };
       }
     }),
   );
-  return images.filter((image): image is { url: string; blob: Blob } => image !== null);
+  return {
+    images: results.filter((r): r is offlineDb.CachedImage => r.blob !== null),
+    missing: results.filter((r) => r.blob === null).map((r) => r.url),
+  };
 }
 
 export const useOfflineCacheStore = defineStore("offlineCache", () => {
@@ -38,6 +47,9 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
   // learns it has been superseded.
   const inFlight = new Map<string, Promise<void>>();
 
+  // How many images each saved article's offline copy lacks; absent = none.
+  const missing = shallowRef<ReadonlyMap<string, number>>(new Map());
+
   const cachedIds = computed(
     () => new Set([...entries.value].filter(([, state]) => state === "saved").map(([id]) => id)),
   );
@@ -49,12 +61,27 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
     entries.value = next;
   }
 
+  function setMissing(id: string, count: number) {
+    if ((missing.value.get(id) ?? 0) === count) return;
+    const next = new Map(missing.value);
+    if (count > 0) next.set(id, count);
+    else next.delete(id);
+    missing.value = next;
+  }
+
   async function init() {
-    const ids = await offlineDb.listCachedArticleIds();
+    const articles = await offlineDb.listCachedArticles();
     // Rebuild from IndexedDB, but keep saves that haven't been written yet.
-    const next = new Map<string, "saving" | "saved">(ids.map((id) => [id, "saved"]));
+    const next = new Map<string, "saving" | "saved">(articles.map((a) => [a.id, "saved"]));
     for (const [id, state] of entries.value) if (state === "saving") next.set(id, state);
     entries.value = next;
+    missing.value = new Map(
+      articles.filter((a) => a.missingImages > 0).map((a) => [a.id, a.missingImages]),
+    );
+  }
+
+  function missingImageCount(id: string): number {
+    return missing.value.get(id) ?? 0;
   }
 
   function isCached(id: string): boolean {
@@ -94,7 +121,9 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
           }
         }
 
-        const images = await downloadImages(extractImageUrls(contentMd, bookmark.thumbnail_url));
+        const { images, missing: missingImages } = await downloadImages(
+          extractImageUrls(contentMd, bookmark.thumbnail_url),
+        );
         if (!isCurrent()) return;
 
         await offlineDb.putArticle({
@@ -102,6 +131,7 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
           content_md: contentMd,
           translated_content_md: bookmark.translated_content_md ?? null,
           images,
+          missingImages,
           cachedAt: new Date().toISOString(),
           bookmark: meta,
         });
@@ -112,6 +142,7 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
           return;
         }
         setEntry(id, "saved");
+        setMissing(id, missingImages.length);
       } catch (err) {
         if (isCurrent()) setEntry(id, null);
         throw err;
@@ -129,10 +160,20 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
   async function removeCachedBookmark(id: string): Promise<void> {
     inFlight.delete(id);
     setEntry(id, null);
+    setMissing(id, 0);
     await offlineDb.deleteArticle(id);
   }
 
-  return { cachedIds, init, isCached, cacheBookmark, refreshCached, removeCachedBookmark };
+  return {
+    cachedIds,
+    missingImageCounts: missing,
+    init,
+    isCached,
+    missingImageCount,
+    cacheBookmark,
+    refreshCached,
+    removeCachedBookmark,
+  };
 });
 
 if (import.meta.hot) {

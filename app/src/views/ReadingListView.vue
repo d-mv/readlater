@@ -162,6 +162,7 @@ function onToggleTag(tagId: string) {
     <BookmarkList
       :bookmarks="store.visibleBookmarks"
       :cached-ids="offlineCache.cachedIds"
+      :missing-image-counts="offlineCache.missingImageCounts"
       @open="onOpen"
       @toggle-offline="onToggleOffline"
     />

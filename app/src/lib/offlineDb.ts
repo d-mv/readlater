@@ -20,6 +20,10 @@ export interface CachedArticle {
   // Optional: records written before this field existed don't have it.
   translated_content_md?: string | null;
   images: CachedImage[];
+  // Image URLs that could not be downloaded (mostly CORS-blocked hot links),
+  // so the offline copy shows them broken. Optional: records written before
+  // this field existed don't have it.
+  missingImages?: string[];
   cachedAt: string;
   bookmark?: OfflineBookmarkMeta;
 }
@@ -97,9 +101,10 @@ export async function deleteArticle(id: string): Promise<void> {
   revokeObjectUrls(id);
 }
 
-export async function listCachedArticleIds(): Promise<string[]> {
+export async function listCachedArticles(): Promise<{ id: string; missingImages: number }[]> {
   const db = await getDb();
-  return db.getAllKeys("articles");
+  const articles = await db.getAll("articles");
+  return articles.map((a) => ({ id: a.id, missingImages: a.missingImages?.length ?? 0 }));
 }
 
 export async function getAllArticles(): Promise<CachedArticle[]> {

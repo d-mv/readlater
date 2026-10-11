@@ -71,4 +71,15 @@ describe("BookmarkList", () => {
     });
     expect(wrapper.find('[data-testid="offline-toggle"]').attributes("aria-pressed")).toBe("true");
   });
+
+  test("passes each row its missing-image count", () => {
+    const wrapper = mount(BookmarkList, {
+      props: {
+        bookmarks: [makeBookmark({ id: "xyz", archived: false, read_at: null })],
+        cachedIds: new Set(["xyz"]),
+        missingImageCounts: new Map([["xyz", 1]]),
+      },
+    });
+    expect(wrapper.find('[data-testid="images-not-cached"]').exists()).toBe(true);
+  });
 });

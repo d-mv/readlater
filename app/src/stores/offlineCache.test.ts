@@ -2,11 +2,11 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import type { Bookmark } from "../lib/supabase";
 
-const { putArticle, deleteArticle, listCachedArticleIds, getArticle, putBookmarkMeta } = vi.hoisted(
+const { putArticle, deleteArticle, listCachedArticles, getArticle, putBookmarkMeta } = vi.hoisted(
   () => ({
     putArticle: vi.fn(),
     deleteArticle: vi.fn(),
-    listCachedArticleIds: vi.fn(),
+    listCachedArticles: vi.fn(),
     getArticle: vi.fn(),
     putBookmarkMeta: vi.fn(),
   }),
@@ -14,7 +14,7 @@ const { putArticle, deleteArticle, listCachedArticleIds, getArticle, putBookmark
 vi.mock("../lib/offlineDb", () => ({
   putArticle,
   deleteArticle,
-  listCachedArticleIds,
+  listCachedArticles,
   getArticle,
   putBookmarkMeta,
   stripContentMd: (b: any) => {
@@ -61,18 +61,73 @@ describe("useOfflineCacheStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
-    listCachedArticleIds.mockResolvedValue([]);
+    listCachedArticles.mockResolvedValue([]);
     putArticle.mockResolvedValue(undefined);
     deleteArticle.mockResolvedValue(undefined);
     getArticle.mockResolvedValue(undefined);
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({ blob: () => Promise.resolve(new Blob(["x"])) }),
+      vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) }),
     );
   });
 
+  describe("images that could not be saved", () => {
+    test("a rejected or non-OK image download is recorded on the cached article", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: string) =>
+          url.endsWith("a.png")
+            ? Promise.reject(new TypeError("CORS"))
+            : Promise.resolve({ ok: false, blob: () => Promise.resolve(new Blob(["404"])) }),
+        ),
+      );
+
+      const store = useOfflineCacheStore();
+      await store.cacheBookmark(makeBookmark());
+
+      expect(putArticle).toHaveBeenCalledWith(
+        expect.objectContaining({
+          images: [],
+          missingImages: ["https://cdn.example.com/a.png", "https://cdn.example.com/thumb.png"],
+        }),
+      );
+      expect(store.missingImageCount("1")).toBe(2);
+      expect(store.missingImageCounts.get("1")).toBe(2);
+    });
+
+    test("a fully saved article reports none missing", async () => {
+      const store = useOfflineCacheStore();
+      await store.cacheBookmark(makeBookmark());
+
+      expect(putArticle).toHaveBeenCalledWith(expect.objectContaining({ missingImages: [] }));
+      expect(store.missingImageCount("1")).toBe(0);
+    });
+
+    test("init restores missing-image counts from earlier sessions", async () => {
+      listCachedArticles.mockResolvedValue([{ id: "1", missingImages: 3 }]);
+
+      const store = useOfflineCacheStore();
+      await store.init();
+
+      expect(store.missingImageCount("1")).toBe(3);
+    });
+
+    test("removing the offline copy clears its count", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("CORS")));
+      const store = useOfflineCacheStore();
+      await store.cacheBookmark(makeBookmark());
+
+      await store.removeCachedBookmark("1");
+
+      expect(store.missingImageCount("1")).toBe(0);
+    });
+  });
+
   test("init loads already-cached ids so isCached reflects prior sessions", async () => {
-    listCachedArticleIds.mockResolvedValue(["1", "2"]);
+    listCachedArticles.mockResolvedValue([
+      { id: "1", missingImages: 0 },
+      { id: "2", missingImages: 0 },
+    ]);
 
     const store = useOfflineCacheStore();
     await store.init();
@@ -228,7 +283,7 @@ describe("useOfflineCacheStore", () => {
 
     test("init while a save is in flight doesn't lose the article once it finishes", async () => {
       const { release } = heldFetch();
-      listCachedArticleIds.mockResolvedValue([]);
+      listCachedArticles.mockResolvedValue([]);
       const store = useOfflineCacheStore();
 
       const saving = store.cacheBookmark(makeBookmark());

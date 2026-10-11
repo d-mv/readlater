@@ -106,4 +106,27 @@ describe("BookmarkRow", () => {
     });
     expect(wrapper.find('[data-testid="offline-toggle"]').attributes("aria-pressed")).toBe("true");
   });
+
+  test("a cached copy missing images says so on the offline toggle", () => {
+    const wrapper = mount(BookmarkRow, {
+      props: {
+        bookmark: makeBookmark({ archived: false, read_at: null }),
+        isCached: true,
+        missingImages: 2,
+      },
+    });
+    const toggle = wrapper.find('[data-testid="offline-toggle"]');
+    expect(toggle.attributes("title")).toBe("Saved offline without 2 images — remove offline copy");
+    expect(wrapper.find('[data-testid="images-not-cached"]').exists()).toBe(true);
+  });
+
+  test("a complete cached copy shows the plain cached state", () => {
+    const wrapper = mount(BookmarkRow, {
+      props: { bookmark: makeBookmark({ archived: false, read_at: null }), isCached: true },
+    });
+    expect(wrapper.find('[data-testid="offline-toggle"]').attributes("title")).toBe(
+      "Remove offline copy",
+    );
+    expect(wrapper.find('[data-testid="images-not-cached"]').exists()).toBe(false);
+  });
 });

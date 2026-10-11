@@ -133,9 +133,29 @@ function onPageHide() {
   flushProgress();
 }
 
-onMounted(() => window.addEventListener("pagehide", onPageHide));
+// Offline, the reader shows the cached copy; images it couldn't save
+// (CORS-blocked hot links) render broken, so say how many up front.
+const online = ref(typeof navigator === "undefined" || navigator.onLine);
+function onConnectivityChange() {
+  online.value = navigator.onLine;
+}
+const imagesNotCachedNote = computed(() => {
+  const count = online.value ? 0 : offlineCache.missingImageCount(props.id);
+  if (count === 0) return null;
+  return count === 1
+    ? "1 image wasn't saved for offline reading."
+    : `${count} images weren't saved for offline reading.`;
+});
+
+onMounted(() => {
+  window.addEventListener("pagehide", onPageHide);
+  window.addEventListener("online", onConnectivityChange);
+  window.addEventListener("offline", onConnectivityChange);
+});
 onUnmounted(() => {
   window.removeEventListener("pagehide", onPageHide);
+  window.removeEventListener("online", onConnectivityChange);
+  window.removeEventListener("offline", onConnectivityChange);
   flushProgress();
 });
 
@@ -417,6 +437,13 @@ watch(
             Cancel
           </Button>
           <Button test-id="save-edit-btn" @click="onSaveEdit">Save</Button>
+        </div>
+        <div
+          v-if="!editing && imagesNotCachedNote"
+          data-testid="images-not-cached"
+          class="m-0 mb-16 rounded-none border border-line bg-canvas px-10 py-8 font-sans text-sm text-ink-muted"
+        >
+          {{ imagesNotCachedNote }}
         </div>
         <div
           data-testid="translate-bar"

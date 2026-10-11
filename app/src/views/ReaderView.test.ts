@@ -29,6 +29,7 @@ vi.mock("vue-router", () => ({ useRouter: () => ({ push: pushMock }) }));
 
 const { default: ReaderView } = await import("./ReaderView.vue");
 const { useBookmarksStore } = await import("../stores/bookmarks");
+const { useOfflineCacheStore } = await import("../stores/offlineCache");
 
 function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
   return {
@@ -131,6 +132,49 @@ describe("ReaderView", () => {
     expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
       "already here",
     );
+  });
+
+  describe("images missing from the offline copy", () => {
+    function mountCachedArticle(missing: number) {
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", status: "ready", content_md: "body" })];
+      vi.spyOn(useOfflineCacheStore(), "missingImageCount").mockReturnValue(missing);
+      return mount(ReaderView, { props: { id: "1" } });
+    }
+
+    afterEach(() => vi.restoreAllMocks());
+
+    test("are called out while reading offline", async () => {
+      vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+      const wrapper = mountCachedArticle(3);
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="images-not-cached"]').text()).toBe(
+        "3 images weren't saved for offline reading.",
+      );
+    });
+
+    test("are not mentioned online, where the images load normally", async () => {
+      vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+      const wrapper = mountCachedArticle(3);
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="images-not-cached"]').exists()).toBe(false);
+    });
+
+    test("the note appears when the connection drops mid-read", async () => {
+      const onLine = vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+      const wrapper = mountCachedArticle(1);
+      await flushPromises();
+
+      onLine.mockReturnValue(false);
+      window.dispatchEvent(new Event("offline"));
+      await nextTick();
+
+      expect(wrapper.find('[data-testid="images-not-cached"]').text()).toBe(
+        "1 image wasn't saved for offline reading.",
+      );
+    });
   });
 
   test("shows not found / offline unavailable state when bookmark cannot be loaded", async () => {

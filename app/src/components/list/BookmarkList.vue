@@ -7,8 +7,9 @@ withDefaults(
   defineProps<{
     bookmarks: Bookmark[];
     cachedIds?: Set<string>;
+    missingImageCounts?: ReadonlyMap<string, number>;
   }>(),
-  { cachedIds: () => new Set() },
+  { cachedIds: () => new Set(), missingImageCounts: () => new Map() },
 );
 
 const emit = defineEmits<{
@@ -27,6 +28,7 @@ const emit = defineEmits<{
       :key="bookmark.id"
       :bookmark="bookmark"
       :is-cached="cachedIds.has(bookmark.id)"
+      :missing-images="missingImageCounts.get(bookmark.id) ?? 0"
       @open="emit('open', $event)"
       @toggle-offline="emit('toggleOffline', $event)"
     />

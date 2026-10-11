@@ -7,6 +7,7 @@ import {
   IconAlertTriangle,
   IconDownload,
   IconCheck,
+  IconPhotoOff,
   IconWorld,
   IconLanguageHiragana,
 } from "@tabler/icons-vue";
@@ -19,8 +20,10 @@ const props = withDefaults(
   defineProps<{
     bookmark: Bookmark;
     isCached?: boolean;
+    // Images the offline copy couldn't save (CORS-blocked hot links etc.).
+    missingImages?: number;
   }>(),
-  { isCached: false },
+  { isCached: false, missingImages: 0 },
 );
 
 const emit = defineEmits<{
@@ -38,6 +41,13 @@ const isPending = computed(
 );
 const isFailed = computed(() => props.bookmark.status === "failed");
 const isUnread = computed(() => !props.bookmark.archived && !isRead.value);
+const isIncomplete = computed(() => props.isCached && props.missingImages > 0);
+const offlineTitle = computed(() => {
+  if (!props.isCached) return "Save offline";
+  if (!isIncomplete.value) return "Remove offline copy";
+  const images = props.missingImages === 1 ? "1 image" : `${props.missingImages} images`;
+  return `Saved offline without ${images} — remove offline copy`;
+});
 // Driven by translated_lang rather than translated_content_md: the list query
 // omits the translation body, and the two columns are always written together.
 const isTranslated = computed(() => props.bookmark.translated_lang !== null);
@@ -102,12 +112,13 @@ const displayTitle = computed(() => {
     <IconButton
       v-if="isUnread"
       test-id="offline-toggle"
-      :title="isCached ? 'Remove offline copy' : 'Save offline'"
+      :title="offlineTitle"
       :pressed="isCached"
       :class="cn('size-28 shrink-0 text-ink-faint hover:text-ink', isCached && 'text-accent')"
       @click="emit('toggleOffline', bookmark.id)"
     >
-      <IconCheck v-if="isCached" :size="16" />
+      <IconPhotoOff v-if="isIncomplete" data-testid="images-not-cached" :size="16" />
+      <IconCheck v-else-if="isCached" :size="16" />
       <IconDownload v-else :size="16" />
     </IconButton>
   </div>

@@ -73,11 +73,12 @@ describe("offlineDb", () => {
     expect(await offlineDb.getArticle("1")).toBeUndefined();
   });
 
-  test("listCachedArticleIds returns the ids of every cached article", async () => {
+  test("listCachedArticles summarises every cached article with its missing-image count", async () => {
     await offlineDb.putArticle({
       id: "1",
       content_md: "x",
       images: [],
+      missingImages: ["https://cdn.example.com/a.png"],
       cachedAt: "2026-01-01T00:00:00Z",
     });
     await offlineDb.putArticle({
@@ -86,7 +87,13 @@ describe("offlineDb", () => {
       images: [],
       cachedAt: "2026-01-01T00:00:00Z",
     });
-    expect(await offlineDb.listCachedArticleIds()).toEqual(expect.arrayContaining(["1", "2"]));
+    // Records cached before missingImages existed count as none missing.
+    expect(await offlineDb.listCachedArticles()).toEqual(
+      expect.arrayContaining([
+        { id: "1", missingImages: 1 },
+        { id: "2", missingImages: 0 },
+      ]),
+    );
   });
 
   test("getAllArticles returns all cached articles including metadata", async () => {

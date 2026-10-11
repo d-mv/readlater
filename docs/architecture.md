@@ -621,7 +621,9 @@ DB):
   (`offlineCache.refreshCached()`), so the offline copy tracks the latest
   body and translation. Every image referenced in the markdown (plus the
   thumbnail) is fetched and stored as a blob — mostly hot-linked source
-  images, so CORS failures are skipped silently — and swapped to `blob:` URLs
+  images; a CORS-blocked or non-OK download is recorded in the record's
+`missingImages` and surfaced — the row's offline icon becomes a "photo off"
+icon with the count in its title, and the reader notes it while offline — and swapped to `blob:` URLs
   at render time when offline (one object URL per cached image, reused
   across offline loads and revoked when the article is re-cached or
   evicted). An already-cached id is not re-cached. The
