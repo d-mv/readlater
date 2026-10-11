@@ -41,6 +41,9 @@ const isPending = computed(
 );
 const isFailed = computed(() => props.bookmark.status === "failed");
 const isUnread = computed(() => !props.bookmark.archived && !isRead.value);
+// Saving offline is offered only for what's still to be read, but an existing
+// offline copy stays removable after the item is read or archived.
+const showOfflineToggle = computed(() => isUnread.value || props.isCached);
 const isIncomplete = computed(() => props.isCached && props.missingImages > 0);
 const offlineTitle = computed(() => {
   if (!props.isCached) return "Save offline";
@@ -110,7 +113,7 @@ const displayTitle = computed(() => {
       </span>
     </button>
     <IconButton
-      v-if="isUnread"
+      v-if="showOfflineToggle"
       test-id="offline-toggle"
       :title="offlineTitle"
       :pressed="isCached"

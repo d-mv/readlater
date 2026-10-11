@@ -91,6 +91,19 @@ describe("BookmarkRow", () => {
     expect(wrapper.find('[data-testid="offline-toggle"]').exists()).toBe(false);
   });
 
+  test("a read or archived row with an offline copy can still remove it", () => {
+    for (const bookmark of [
+      makeBookmark({ read_at: "2026-01-02T00:00:00Z" }),
+      makeBookmark({ archived: true, read_at: null }),
+    ]) {
+      const toggle = mount(BookmarkRow, { props: { bookmark, isCached: true } }).find(
+        '[data-testid="offline-toggle"]',
+      );
+      expect(toggle.exists()).toBe(true);
+      expect(toggle.attributes("title")).toBe("Remove offline copy");
+    }
+  });
+
   test("emits toggleOffline with the bookmark id without triggering open", async () => {
     const wrapper = mount(BookmarkRow, {
       props: { bookmark: makeBookmark({ id: "abc", archived: false, read_at: null }) },
