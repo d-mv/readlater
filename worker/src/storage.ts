@@ -1,18 +1,47 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { HttpStatusError, UnsupportedContentTypeError } from "./errors";
+import { MAX_IMAGE_BYTES, mediaType, readBodyCapped, USER_AGENT } from "./http";
+import { assertPublicUrl, type LookupAll } from "./urlGuard";
 
 const BUCKET = "bookmark-assets";
 
-export function makeThumbnailUploader(supabase: SupabaseClient) {
+// Raster formats only: the stored object is served publicly from Storage, so
+// an SVG (which can carry script) or an arbitrary "image/*" isn't accepted.
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/avif": "avif",
+};
+
+export function makeThumbnailUploader(
+  supabase: SupabaseClient,
+  deps: { fetchImpl?: typeof fetch; lookup?: LookupAll } = {},
+) {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+
   return async function uploadThumbnail(thumbnailUrl: string): Promise<string> {
-    const res = await fetch(thumbnailUrl, {
+    // The thumbnail URL comes from a third-party oEmbed response, so it gets
+    // the same SSRF check as an article URL. Redirects are refused rather
+    // than followed, since a redirect target would skip the check.
+    await assertPublicUrl(thumbnailUrl, deps.lookup);
+    const res = await fetchImpl(thumbnailUrl, {
+      redirect: "error",
       signal: AbortSignal.timeout(15_000),
+      headers: { "User-Agent": USER_AGENT },
     });
     if (!res.ok) {
-      throw new Error(`Failed to fetch thumbnail: HTTP ${res.status}`);
+      await res.body?.cancel().catch(() => {});
+      throw new HttpStatusError(res.status, res.statusText);
     }
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    const contentType = res.headers.get("content-type") ?? "image/jpeg";
-    const ext = contentType.split("/")[1]?.split(";")[0] ?? "jpg";
+    const contentType = mediaType(res);
+    const ext = IMAGE_EXTENSIONS[contentType];
+    if (!ext) {
+      await res.body?.cancel().catch(() => {});
+      throw new UnsupportedContentTypeError(contentType || "(none)");
+    }
+    const bytes = await readBodyCapped(res, MAX_IMAGE_BYTES);
     const path = `youtube/${crypto.randomUUID()}.${ext}`;
 
     // Path is a fresh UUID per upload and never overwritten, so the object is

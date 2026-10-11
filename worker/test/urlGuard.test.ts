@@ -26,16 +26,37 @@ describe("isPrivateAddress", () => {
     "fe80::1",
     "::ffff:127.0.0.1",
     "::ffff:10.0.0.1",
+    // IPv4-compatible (::a.b.c.d) — deprecated, refused whatever it embeds
+    "::127.0.0.1",
+    "::7f00:1",
+    "::8.8.8.8",
+    "::a00:1",
+    // NAT64 well-known prefix with a private IPv4 inside
+    "64:ff9b::127.0.0.1",
+    "64:ff9b::7f00:1",
+    "64:ff9b::a9fe:a9fe",
+    // local-use NAT64, 6to4, Teredo, IPv4-translated
+    "64:ff9b:1::1",
+    "64:ff9b:1:abcd::808:808",
+    "2002:7f00:1::1",
+    "2002:808:808::1",
+    "2001:0:4136:e378::1",
+    "::ffff:0:7f00:1",
   ])("%s is not public", (ip) => {
     expect(isPrivateAddress(ip)).toBe(true);
   });
 
-  test.each(["93.184.216.34", "172.32.0.1", "8.8.8.8", "2606:4700::1111", "::ffff:8.8.8.8"])(
-    "%s is public",
-    (ip) => {
-      expect(isPrivateAddress(ip)).toBe(false);
-    },
-  );
+  test.each([
+    "93.184.216.34",
+    "172.32.0.1",
+    "8.8.8.8",
+    "2606:4700::1111",
+    "::ffff:8.8.8.8",
+    "64:ff9b::8.8.8.8",
+    "2001:4860:4860::8888",
+  ])("%s is public", (ip) => {
+    expect(isPrivateAddress(ip)).toBe(false);
+  });
 });
 
 describe("assertPublicUrl", () => {
@@ -49,6 +70,8 @@ describe("assertPublicUrl", () => {
     ["a loopback literal", "http://127.0.0.1:8080/"],
     ["an IPv6 loopback literal", "http://[::1]/"],
     ["the cloud metadata address", "http://169.254.169.254/latest/meta-data/"],
+    ["an IPv4-compatible loopback literal", "http://[::127.0.0.1]/"],
+    ["a NAT64 metadata literal", "http://[64:ff9b::169.254.169.254]/"],
   ])("rejects %s without resolving", async (_label, url) => {
     let lookups = 0;
     const lookup = async () => {

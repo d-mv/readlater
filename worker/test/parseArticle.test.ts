@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { createFetchHtml, parseArticle } from "../src/parseArticle";
 import { BlockedUrlError } from "../src/urlGuard";
+import { CircuitBreakerOpenError } from "../src/circuitBreaker";
+import { HttpStatusError, ResponseTooLargeError, UnsupportedContentTypeError } from "../src/errors";
+import { MAX_HTML_BYTES } from "../src/http";
 
 const FIXTURE_HTML = `
 <!doctype html>
@@ -152,10 +155,140 @@ describe("parseArticle", () => {
     ).rejects.toBeInstanceOf(BlockedUrlError);
     expect(rendered).toBe(0);
   });
+
+  test.each([
+    ["a non-HTML resource", new UnsupportedContentTypeError("application/pdf")],
+    ["an oversized page", new ResponseTooLargeError(MAX_HTML_BYTES)],
+  ])("does not fall back to the browser for %s", async (_label, error) => {
+    let rendered = 0;
+    await expect(
+      parseArticle(
+        "https://example.com/file",
+        async () => {
+          throw error;
+        },
+        async () => {
+          rendered += 1;
+          return FIXTURE_HTML;
+        },
+      ),
+    ).rejects.toBe(error);
+    expect(rendered).toBe(0);
+  });
+
+  test("surfaces an open browser breaker (transient) instead of a generic extraction failure", async () => {
+    const open = new CircuitBreakerOpenError("playwright-browser", 10_000);
+    await expect(
+      parseArticle(
+        "https://example.com/spa",
+        async () => '<html><body><div id="app"></div></body></html>',
+        async () => {
+          throw open;
+        },
+      ),
+    ).rejects.toBe(open);
+  });
+
+  test("surfaces a 5xx from the plain fetch when the fallback can't help either", async () => {
+    await expect(
+      parseArticle(
+        "https://example.com/down",
+        async () => {
+          throw new HttpStatusError(503, "Service Unavailable");
+        },
+        async () => "<html><body><nav>Home</nav></body></html>",
+      ),
+    ).rejects.toBeInstanceOf(HttpStatusError);
+  });
+
+  test("a 404 with nothing extractable fails with the status in the message", async () => {
+    await expect(
+      parseArticle(
+        "https://example.com/gone",
+        async () => {
+          throw new HttpStatusError(404, "Not Found");
+        },
+        async () => "<html><body><nav>Home</nav></body></html>",
+      ),
+    ).rejects.toThrow(/could not extract.*HTTP 404 Not Found/);
+  });
 });
 
 describe("createFetchHtml", () => {
   const publicDns = async () => ["93.184.216.34"];
+
+  test("rejects a non-HTML content type without reading the body", async () => {
+    const fetchImpl = (async () =>
+      new Response("%PDF-1.7", {
+        headers: { "content-type": "application/pdf" },
+      })) as unknown as typeof fetch;
+
+    await expect(
+      createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/paper.pdf"),
+    ).rejects.toBeInstanceOf(UnsupportedContentTypeError);
+  });
+
+  test("accepts HTML with a charset parameter, and a response with no content type", async () => {
+    const withCharset = (async () =>
+      new Response("<html>a</html>", {
+        headers: { "content-type": "text/html; charset=utf-8" },
+      })) as unknown as typeof fetch;
+    const untyped = (async () =>
+      new Response(new Blob(["<html>b</html>"]).stream())) as unknown as typeof fetch;
+
+    expect(
+      await createFetchHtml({ fetchImpl: withCharset, lookup: publicDns })("https://example.com/"),
+    ).toBe("<html>a</html>");
+    expect(
+      await createFetchHtml({ fetchImpl: untyped, lookup: publicDns })("https://example.com/"),
+    ).toBe("<html>b</html>");
+  });
+
+  test("rejects a body that streams past the size cap", async () => {
+    let pulled = 0;
+    const chunk = new Uint8Array(1024 * 1024);
+    const endless = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        controller.enqueue(chunk);
+      },
+    });
+    const fetchImpl = (async () =>
+      new Response(endless, {
+        headers: { "content-type": "text/html" },
+      })) as unknown as typeof fetch;
+
+    await expect(
+      createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/huge"),
+    ).rejects.toBeInstanceOf(ResponseTooLargeError);
+    // Stopped right after crossing 5 MB rather than reading forever.
+    expect(pulled).toBeLessThanOrEqual(7);
+  });
+
+  test("rejects a declared Content-Length over the cap up front", async () => {
+    const fetchImpl = (async () =>
+      new Response("<html></html>", {
+        headers: { "content-type": "text/html", "content-length": String(MAX_HTML_BYTES + 1) },
+      })) as unknown as typeof fetch;
+
+    await expect(
+      createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/huge"),
+    ).rejects.toBeInstanceOf(ResponseTooLargeError);
+  });
+
+  test("throws an HttpStatusError carrying the status for a non-2xx response", async () => {
+    const fetchImpl = (async () =>
+      new Response("busy", {
+        status: 503,
+        statusText: "Service Unavailable",
+      })) as unknown as typeof fetch;
+
+    const err = await createFetchHtml({ fetchImpl, lookup: publicDns })(
+      "https://example.com/",
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpStatusError);
+    expect((err as HttpStatusError).status).toBe(503);
+  });
 
   test("follows a redirect to another public URL", async () => {
     const requested: string[] = [];

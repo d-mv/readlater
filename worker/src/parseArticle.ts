@@ -1,13 +1,20 @@
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
-import { USER_AGENT } from "./http";
+import {
+  HttpStatusError,
+  isTransientError,
+  ResponseTooLargeError,
+  UnsupportedContentTypeError,
+} from "./errors";
+import { MAX_HTML_BYTES, mediaType, readBodyCapped, USER_AGENT } from "./http";
 import { readingTimeFromWordCount, wordCount } from "./reading";
 import { assertPublicUrl, BlockedUrlError, type LookupAll } from "./urlGuard";
 
 export type FetchHtml = (url: string) => Promise<string>;
 
 const MAX_REDIRECTS = 5;
+const HTML_TYPES = new Set(["text/html", "application/xhtml+xml"]);
 
 // Plain HTTP fetch of a page, with every hop (the URL and each redirect
 // target) checked against the SSRF guard — redirects are followed by hand so
@@ -32,13 +39,23 @@ export function createFetchHtml(
       });
       const location = res.headers.get("location");
       if (res.status >= 300 && res.status < 400 && location) {
+        await res.body?.cancel().catch(() => {});
         current = new URL(location, current).toString();
         continue;
       }
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status} ${res.statusText}`);
+        await res.body?.cancel().catch(() => {});
+        throw new HttpStatusError(res.status, res.statusText);
       }
-      return res.text();
+      // A missing Content-Type is let through (Readability will just find
+      // nothing in a non-HTML body); a declared non-HTML one is refused before
+      // its body is read.
+      const type = mediaType(res);
+      if (type && !HTML_TYPES.has(type)) {
+        await res.body?.cancel().catch(() => {});
+        throw new UnsupportedContentTypeError(type);
+      }
+      return new TextDecoder().decode(await readBodyCapped(res, MAX_HTML_BYTES));
     }
     throw new Error(`Too many redirects fetching ${url}`);
   };
@@ -121,30 +138,43 @@ export async function parseArticle(
   fetchHtml: FetchHtml = defaultFetchHtml,
   renderHtml?: FetchHtml,
 ): Promise<ParsedArticle> {
-  let html = "";
   let article = null;
+  let fetchError: unknown = null;
+  let renderError: unknown = null;
 
   try {
-    html = await fetchHtml(url);
-    article = extractArticle(html, url);
+    article = extractArticle(await fetchHtml(url), url);
   } catch (err) {
-    // A URL refused by the SSRF guard must not get a second chance through
-    // the browser. Anything else (e.g. 403 Forbidden or a network error)
-    // falls through to the renderHtml fallback below.
-    if (err instanceof BlockedUrlError) throw err;
+    // A URL refused by the SSRF guard, a non-HTML resource or an oversized
+    // page gets no second chance through the browser — rendering would hit
+    // the same wall at a much higher cost. Anything else (e.g. 403 Forbidden
+    // or a network error) falls through to the renderHtml fallback below.
+    if (
+      err instanceof BlockedUrlError ||
+      err instanceof UnsupportedContentTypeError ||
+      err instanceof ResponseTooLargeError
+    ) {
+      throw err;
+    }
+    fetchError = err;
   }
 
   if (!article && renderHtml) {
     try {
-      const rendered = await renderHtml(url);
-      article = extractArticle(rendered, url);
-    } catch {
-      // browser rendering also failed
+      article = extractArticle(await renderHtml(url), url);
+    } catch (err) {
+      renderError = err;
     }
   }
 
   if (!article) {
-    throw new Error(`Readability could not extract article content from ${url}`);
+    // If either attempt failed for a reason that may clear up (an open
+    // breaker, a timeout, a 5xx), surface that so the bookmark is retried
+    // later instead of failed for good.
+    const transient = [renderError, fetchError].find(isTransientError);
+    if (transient) throw transient;
+    const reason = fetchError instanceof Error ? ` (${fetchError.message})` : "";
+    throw new Error(`Readability could not extract article content from ${url}${reason}`);
   }
 
   const rawContentMd = createTurndownService().turndown(article.content ?? "");

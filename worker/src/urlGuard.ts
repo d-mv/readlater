@@ -77,15 +77,21 @@ function isPrivateV6(ip: string): boolean {
   const [g0 = 0, g1 = 0, g2 = 0, g3 = 0, g4 = 0, g5 = 0, g6 = 0, g7 = 0] = g;
   const embeddedV4 = `${g6 >>> 8}.${g6 & 0xff}.${g7 >>> 8}.${g7 & 0xff}`;
 
-  if (g.every((group) => group === 0)) return true; // ::
-  if (g.slice(0, 7).every((group) => group === 0) && g7 === 1) return true; // ::1
-  // IPv4-mapped (::ffff:a.b.c.d) and NAT64 (64:ff9b::a.b.c.d) carry an IPv4 address.
-  if (g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0xffff) {
-    return isPrivateV4(embeddedV4);
-  }
+  const zeroPrefix = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0;
+  // ::/96 — the unspecified address (::), loopback (::1) and the deprecated
+  // IPv4-compatible form (::a.b.c.d, e.g. ::7f00:1 = ::127.0.0.1). None of it
+  // is routable public unicast, so the whole block is refused.
+  if (zeroPrefix && g4 === 0 && g5 === 0) return true;
+  // IPv4-mapped (::ffff:a.b.c.d) and NAT64 well-known prefix 64:ff9b::/96
+  // (64:ff9b::a.b.c.d) carry an IPv4 address: judge that address.
+  if (zeroPrefix && g4 === 0 && g5 === 0xffff) return isPrivateV4(embeddedV4);
   if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
     return isPrivateV4(embeddedV4);
   }
+  if (zeroPrefix && g4 === 0xffff && g5 === 0) return true; // ::ffff:0:0/96 IPv4-translated (SIIT)
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 1) return true; // 64:ff9b:1::/48 local-use NAT64
+  if (g0 === 0x2002) return true; // 2002::/16 6to4 (embeds an arbitrary IPv4 address)
+  if (g0 === 0x2001 && g1 === 0) return true; // 2001::/32 Teredo (embeds an obfuscated IPv4 address)
   if ((g0 & 0xfe00) === 0xfc00) return true; // fc00::/7 unique local
   if ((g0 & 0xffc0) === 0xfe80) return true; // fe80::/10 link-local
   if ((g0 & 0xff00) === 0xff00) return true; // ff00::/8 multicast
