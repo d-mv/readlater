@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import {
   IconArchive,
   IconDotsVertical,
@@ -72,13 +72,51 @@ const canTrashOriginalPdf = computed(
 
 const open = ref(false);
 const menuRef = useTemplateRef<HTMLDivElement>("menuRef");
+const panelRef = useTemplateRef<HTMLDivElement>("panelRef");
+const triggerRef = useTemplateRef<HTMLButtonElement>("triggerRef");
 
-function toggle() {
+function menuItems(): HTMLElement[] {
+  return Array.from(panelRef.value?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? []);
+}
+
+async function toggle() {
   open.value = !open.value;
+  if (!open.value) return;
+  // Menu-button pattern: opening moves focus to the first item, so the arrow
+  // keys work straight away.
+  await nextTick();
+  menuItems()[0]?.focus();
 }
 
 function close() {
   open.value = false;
+}
+
+// Up/Down/Home/End move focus between the items (wrapping), as a role="menu"
+// promises. Tab still reaches the font-size buttons, which aren't items.
+function onPanelKeydown(event: KeyboardEvent) {
+  const items = menuItems();
+  if (items.length === 0) return;
+  const current = items.indexOf(document.activeElement as HTMLElement);
+  let next: number;
+  switch (event.key) {
+    case "ArrowDown":
+      next = current < 0 ? 0 : (current + 1) % items.length;
+      break;
+    case "ArrowUp":
+      next = current < 0 ? items.length - 1 : (current - 1 + items.length) % items.length;
+      break;
+    case "Home":
+      next = 0;
+      break;
+    case "End":
+      next = items.length - 1;
+      break;
+    default:
+      return;
+  }
+  event.preventDefault();
+  items[next]?.focus();
 }
 
 function select(action: () => void) {
@@ -105,7 +143,12 @@ function onClickOutside(event: MouseEvent) {
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape") close();
+  if (event.key !== "Escape" || !open.value) return;
+  // Only reclaim focus if it was inside the menu; Escape pressed elsewhere
+  // shouldn't yank it to the trigger.
+  const focusWasInside = !!menuRef.value?.contains(document.activeElement);
+  close();
+  if (focusWasInside) triggerRef.value?.focus();
 }
 
 onMounted(() => {
@@ -122,6 +165,7 @@ onUnmounted(() => {
 <template>
   <div ref="menuRef" class="relative">
     <button
+      ref="triggerRef"
       data-testid="menu-trigger"
       class="inline-flex cursor-pointer border-0 bg-transparent p-0 text-ink-muted"
       type="button"
@@ -134,9 +178,12 @@ onUnmounted(() => {
     </button>
     <div
       v-if="open"
+      ref="panelRef"
       data-testid="menu-panel"
       class="absolute top-[calc(100%+8px)] right-0 z-50 flex min-w-200 flex-col rounded-sm border border-line-strong bg-raised p-6"
       role="menu"
+      aria-label="Article actions"
+      @keydown="onPanelKeydown"
     >
       <div class="flex items-center justify-between px-10 py-8">
         <span class="label">Font size</span>

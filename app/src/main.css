@@ -29,8 +29,12 @@
   --color-line: #cfcaba;
   --color-line-strong: #afa997;
   --color-ink: #1c1b18;
-  --color-ink-muted: #6d695e;
-  --color-ink-faint: #999487;
+  /* Muted and faint are text colours, so both clear WCAG AA (4.5:1) on every
+     surface, recessed included, as a ~14 / 7 / 5 step ladder below ink:
+     muted 6.2-7.4:1, faint 4.5-5.4:1. Same warm hue as kairos-v2's sheet,
+     only darker (its faint was ~2.5:1). */
+  --color-ink-muted: #524f47;
+  --color-ink-faint: #676358;
   --color-ink-inverse: #edeae1;
   /* Signal red — the single accent: reading progress, destructive actions,
      the one primary actuator per screen. Nothing else. */
@@ -101,8 +105,9 @@
   --color-line: #33312b;
   --color-line-strong: #4c4940;
   --color-ink: #e9e5da;
-  --color-ink-muted: #918c7f;
-  --color-ink-faint: #6a6558;
+  /* AA on every dark surface too: muted 6.5-7.6:1, faint 4.7-5.4:1. */
+  --color-ink-muted: #a7a398;
+  --color-ink-faint: #8f8878;
   --color-ink-inverse: #171613;
   --color-accent: #e04a2e;
   --color-accent-hover: #ef5c3f;

@@ -65,7 +65,9 @@ describe("ReadingListView", () => {
     const wrapper = mount(ReadingListView);
     await flushPromises();
     expect(wrapper.text()).toContain("Read Later");
-    expect(wrapper.find('input[data-testid="search-input"]').exists()).toBe(true);
+    expect(wrapper.get('input[data-testid="search-input"]').attributes("aria-label")).toBe(
+      "Search bookmarks",
+    );
   });
 
   test("saves scroll position on window scroll and restores it on remount", async () => {

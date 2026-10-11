@@ -50,6 +50,7 @@ function onSubmit() {
       class="min-w-80 flex-1 border-0 bg-transparent px-2 py-1 font-mono text-xs leading-[normal] text-ink focus:outline-none"
       type="text"
       placeholder="Add tag…"
+      aria-label="Add tag"
       @keydown.enter.prevent="onSubmit"
     />
   </div>

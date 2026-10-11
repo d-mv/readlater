@@ -5,6 +5,11 @@ import TagInput from "./TagInput.vue";
 const tags = [{ id: "1", name: "vue", color: "#888888" }];
 
 describe("TagInput", () => {
+  test("the draft input has an accessible name beyond its placeholder", () => {
+    const wrapper = mount(TagInput, { props: { tags: [] } });
+    expect(wrapper.get('[data-testid="tag-draft-input"]').attributes("aria-label")).toBe("Add tag");
+  });
+
   test("renders existing tags", () => {
     const wrapper = mount(TagInput, { props: { tags } });
     expect(wrapper.text()).toContain("vue");

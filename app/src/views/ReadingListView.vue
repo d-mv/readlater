@@ -192,6 +192,7 @@ function onToggleTag(tagId: string) {
         test-id="search-input"
         type="search"
         placeholder="Search…"
+        aria-label="Search bookmarks"
         :maxlength="200"
         class="mx-16 my-8 block h-34 w-[calc(100%-32px)] bg-recessed"
         @update:model-value="onSearchInput"

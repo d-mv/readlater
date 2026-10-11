@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import ReaderMenu from "./ReaderMenu.vue";
 import type { Bookmark } from "../../lib/supabase";
 
@@ -293,6 +293,55 @@ describe("ReaderMenu", () => {
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     await wrapper.vm.$nextTick();
     expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
+  });
+
+  describe("keyboard navigation", () => {
+    function focusedTestId() {
+      return (document.activeElement as HTMLElement | null)?.dataset.testid;
+    }
+
+    test("opening focuses the first item; Up/Down/Home/End move between items, wrapping", async () => {
+      const wrapper = mount(ReaderMenu, {
+        props: { bookmark: makeBookmark() },
+        attachTo: document.body,
+      });
+      await openMenu(wrapper);
+      await flushPromises();
+      const items = wrapper
+        .findAll('[role="menuitem"]')
+        .map((item) => (item.element as HTMLElement).dataset.testid);
+      const panel = wrapper.get('[data-testid="menu-panel"]');
+
+      expect(focusedTestId()).toBe(items[0]);
+      await panel.trigger("keydown", { key: "ArrowDown" });
+      expect(focusedTestId()).toBe(items[1]);
+      await panel.trigger("keydown", { key: "ArrowUp" });
+      await panel.trigger("keydown", { key: "ArrowUp" });
+      expect(focusedTestId()).toBe(items.at(-1));
+      await panel.trigger("keydown", { key: "ArrowDown" });
+      expect(focusedTestId()).toBe(items[0]);
+      await panel.trigger("keydown", { key: "End" });
+      expect(focusedTestId()).toBe(items.at(-1));
+      await panel.trigger("keydown", { key: "Home" });
+      expect(focusedTestId()).toBe(items[0]);
+      wrapper.unmount();
+    });
+
+    test("Escape from inside the menu returns focus to the trigger", async () => {
+      const wrapper = mount(ReaderMenu, {
+        props: { bookmark: makeBookmark() },
+        attachTo: document.body,
+      });
+      await openMenu(wrapper);
+      await flushPromises();
+      document.activeElement?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      await flushPromises();
+      expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
+      expect(focusedTestId()).toBe("menu-trigger");
+      wrapper.unmount();
+    });
   });
 
   test("closes the menu on an outside click", async () => {
