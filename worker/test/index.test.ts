@@ -3,22 +3,9 @@ import {
   recoverStaleProcessing,
   processBookmark,
   pollOnce,
-  withTimeout,
   formatErrorMessage,
   type Bookmark,
 } from "../src/index";
-
-describe("withTimeout", () => {
-  test("resolves if promise completes before timeout", async () => {
-    const res = await withTimeout(Promise.resolve("ok"), 1000, "timed out");
-    expect(res).toBe("ok");
-  });
-
-  test("rejects with error if promise exceeds timeout", async () => {
-    const slowPromise = new Promise((resolve) => setTimeout(resolve, 200));
-    await expect(withTimeout(slowPromise, 50, "timed out")).rejects.toThrow("timed out");
-  });
-});
 
 describe("formatErrorMessage", () => {
   test("extracts message from Error object and strips null bytes", () => {

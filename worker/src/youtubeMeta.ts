@@ -1,4 +1,6 @@
 import { CircuitBreaker } from "./circuitBreaker";
+import { USER_AGENT } from "./http";
+import { log } from "./logger";
 import type { YoutubeMeta } from "./parseYoutube";
 
 export const youtubeCircuitBreaker = new CircuitBreaker({
@@ -6,7 +8,7 @@ export const youtubeCircuitBreaker = new CircuitBreaker({
   failureThreshold: 3,
   resetTimeoutMs: 30_000,
   onStateChange: (from, to) => {
-    console.warn(`[CircuitBreaker] youtube-oembed state changed: ${from} -> ${to}`);
+    log.warn("circuit breaker state changed", { breaker: "youtube-oembed", from, to });
   },
 });
 
@@ -26,8 +28,7 @@ export async function fetchMeta(url: string): Promise<YoutubeMeta> {
     const response = await fetch(oembedUrl, {
       signal: AbortSignal.timeout(15_000),
       headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; ReadLater/1.0)",
+        "User-Agent": USER_AGENT,
       },
     });
     if (!response.ok) throw new Error(`oEmbed request failed: ${response.status}`);

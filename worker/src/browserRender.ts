@@ -1,6 +1,8 @@
 import { chromium, type Browser } from "playwright";
 import { CircuitBreaker } from "./circuitBreaker";
 import type { FetchHtml } from "./parseArticle";
+import { log } from "./logger";
+import { withTimeout } from "./timeout";
 import { routeIfPublic } from "./urlGuard";
 
 let browserPromise: Promise<Browser> | null = null;
@@ -11,22 +13,6 @@ export const PAGE_GOTO_TIMEOUT_MS = 15_000;
 export const PAGE_CONTENT_TIMEOUT_MS = 5_000;
 export const CONTEXT_CLOSE_TIMEOUT_MS = 3_000;
 export const TOTAL_RENDER_TIMEOUT_MS = 25_000;
-
-export async function promiseWithTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  errorMessage: string,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(errorMessage)), timeoutMs);
-  });
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
 
 export async function getBrowser(): Promise<Browser> {
   if (browserPromise) {
@@ -53,7 +39,7 @@ export async function getBrowser(): Promise<Browser> {
     ],
   });
 
-  browserPromise = promiseWithTimeout(
+  browserPromise = withTimeout(
     launchPromise,
     BROWSER_LAUNCH_TIMEOUT_MS,
     `Browser launch timed out after ${BROWSER_LAUNCH_TIMEOUT_MS}ms`,
@@ -71,16 +57,12 @@ export async function closeBrowser(): Promise<void> {
 
   if (currentPromise) {
     try {
-      const browser = await promiseWithTimeout(
+      const browser = await withTimeout(
         currentPromise,
         BROWSER_CLOSE_TIMEOUT_MS,
         "Browser launch resolution timed out during close",
       );
-      await promiseWithTimeout(
-        browser.close(),
-        BROWSER_CLOSE_TIMEOUT_MS,
-        "Browser close timed out",
-      );
+      await withTimeout(browser.close(), BROWSER_CLOSE_TIMEOUT_MS, "Browser close timed out");
     } catch {
       // ignore errors on close
     }
@@ -92,7 +74,7 @@ export const browserCircuitBreaker = new CircuitBreaker({
   failureThreshold: 3,
   resetTimeoutMs: 30_000,
   onStateChange: (from, to) => {
-    console.warn(`[CircuitBreaker] playwright-browser state changed: ${from} -> ${to}`);
+    log.warn("circuit breaker state changed", { breaker: "playwright-browser", from, to });
     if (to === "OPEN") {
       closeBrowser().catch(() => {});
     }
@@ -101,7 +83,7 @@ export const browserCircuitBreaker = new CircuitBreaker({
 
 export const renderWithBrowser: FetchHtml = async (url) => {
   return browserCircuitBreaker.execute(async () => {
-    return promiseWithTimeout(
+    return withTimeout(
       (async () => {
         let browser: Browser;
         try {
@@ -113,7 +95,7 @@ export const renderWithBrowser: FetchHtml = async (url) => {
 
         let context;
         try {
-          context = await promiseWithTimeout(
+          context = await withTimeout(
             browser.newContext(),
             5_000,
             "Creating browser context timed out",
@@ -127,11 +109,7 @@ export const renderWithBrowser: FetchHtml = async (url) => {
           // Every request the page makes (navigation, redirects, subresources)
           // must target a public address.
           await context.route("**/*", (route) => routeIfPublic(route));
-          const page = await promiseWithTimeout(
-            context.newPage(),
-            5_000,
-            "Creating new page timed out",
-          );
+          const page = await withTimeout(context.newPage(), 5_000, "Creating new page timed out");
           page.setDefaultTimeout(PAGE_GOTO_TIMEOUT_MS);
 
           let gotoFailed = false;
@@ -147,7 +125,7 @@ export const renderWithBrowser: FetchHtml = async (url) => {
             }
           }
 
-          const content = await promiseWithTimeout(
+          const content = await withTimeout(
             page.content(),
             PAGE_CONTENT_TIMEOUT_MS,
             "Extracting page content timed out",
@@ -163,7 +141,7 @@ export const renderWithBrowser: FetchHtml = async (url) => {
           closeBrowser().catch(() => {});
           throw err;
         } finally {
-          await promiseWithTimeout(
+          await withTimeout(
             context.close(),
             CONTEXT_CLOSE_TIMEOUT_MS,
             "Context close timed out",

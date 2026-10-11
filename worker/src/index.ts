@@ -5,6 +5,8 @@ import { parseYoutube, type ParsedYoutube } from "./parseYoutube";
 import { fetchMeta } from "./youtubeMeta";
 import { makeThumbnailUploader } from "./storage";
 import { closeBrowser, renderWithBrowser } from "./browserRender";
+import { log } from "./logger";
+import { withTimeout } from "./timeout";
 
 export { CircuitBreaker, CircuitBreakerOpenError };
 
@@ -33,7 +35,7 @@ export const supabaseCircuitBreaker = new CircuitBreaker({
   failureThreshold: 3,
   resetTimeoutMs: 60_000,
   onStateChange: (from, to) => {
-    console.warn(`[CircuitBreaker] supabase-db state changed: ${from} -> ${to}`);
+    log.warn("circuit breaker state changed", { breaker: "supabase-db", from, to });
   },
 });
 
@@ -72,7 +74,6 @@ export async function transition(
   return { moved: (data?.length ?? 0) > 0, error: null };
 }
 
-let isPolling = false;
 let pollCycleCount = 0;
 
 function sanitizeValue(val: unknown): unknown {
@@ -95,22 +96,6 @@ export function formatErrorMessage(err: unknown): string {
   return raw.replace(/\u0000/g, "").slice(0, ERROR_MESSAGE_MAX_LENGTH) || "Unknown error";
 }
 
-export async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  message: string,
-): Promise<T> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
-  });
-  try {
-    return await Promise.race([promise, timeoutPromise]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-  }
-}
-
 // Mark bookmarks stuck in 'processing' (e.g. from an ungraceful container restart or worker crash) as 'failed'
 // so they do not loop forever or block the queue.
 export async function recoverStaleProcessing(client: SupabaseClient = supabase) {
@@ -126,7 +111,7 @@ export async function recoverStaleProcessing(client: SupabaseClient = supabase) 
     .or(`processed_at.is.null,processed_at.lt.${staleThreshold}`);
 
   if (error) {
-    console.error("recoverStaleProcessing error:", error.message);
+    log.error("stale-processing recovery failed", { err: error.message });
   }
 }
 
@@ -160,11 +145,11 @@ export async function processBookmark(
   });
   if (claim.error) {
     // Still pending — the next cycle retries it.
-    console.error(`Failed to claim bookmark ${bookmark.id}:`, claim.error);
+    log.error("failed to claim bookmark", { bookmarkId: bookmark.id, err: claim.error });
     return;
   }
   if (!claim.moved) {
-    console.warn(`Bookmark ${bookmark.id} is no longer pending; skipping.`);
+    log.warn("bookmark is no longer pending; skipping", { bookmarkId: bookmark.id });
     return;
   }
 
@@ -191,16 +176,21 @@ export async function processBookmark(
     });
     if (done.error) throw new Error(`Database update failed: ${done.error}`);
     if (!done.moved) {
-      console.warn(`Bookmark ${bookmark.id} changed while processing; dropping the result.`);
+      log.warn("bookmark changed while processing; dropping the result", {
+        bookmarkId: bookmark.id,
+      });
     }
   } catch (err) {
-    console.error(`Error processing bookmark ${bookmark.id} (${bookmark.url}):`, err);
+    log.error("bookmark processing failed", { bookmarkId: bookmark.id, url: bookmark.url, err });
     const failed = await transition(client, bookmark.id, "processing", "failed", {
       error_message: formatErrorMessage(err),
       processed_at: new Date().toISOString(),
     });
     if (failed.error) {
-      console.error(`Failed to mark bookmark ${bookmark.id} as failed:`, failed.error);
+      log.error("failed to mark bookmark as failed", {
+        bookmarkId: bookmark.id,
+        err: failed.error,
+      });
     }
   }
 }
@@ -215,12 +205,10 @@ export async function pollOnce(
     renderHtmlFn?: typeof renderWithBrowser;
   } = {},
 ): Promise<number> {
-  if (isPolling) return 0;
   if (supabaseCircuitBreaker.getState() === "OPEN") {
-    console.warn("Supabase database circuit breaker is OPEN. Skipping poll cycle.");
+    log.warn("supabase-db circuit breaker is open; skipping poll cycle");
     return 0;
   }
-  isPolling = true;
   let pendingCount = 0;
   try {
     await supabaseCircuitBreaker.execute(async () => {
@@ -244,18 +232,16 @@ export async function pollOnce(
         try {
           await processBookmark(bookmark, client, runners);
         } catch (err) {
-          console.error(`Unexpected failure processing bookmark ${bookmark.id}:`, err);
+          log.error("unexpected failure processing bookmark", { bookmarkId: bookmark.id, err });
         }
       }
     });
   } catch (err) {
     if (err instanceof CircuitBreakerOpenError) {
-      console.warn(`[pollOnce] ${err.message}`);
+      log.warn("poll cycle skipped", { err });
     } else {
-      console.error("Poll cycle error:", err);
+      log.error("poll cycle failed", { err });
     }
-  } finally {
-    isPolling = false;
   }
   return pendingCount;
 }
@@ -270,7 +256,7 @@ if (import.meta.main) {
     try {
       pending = await pollOnce();
     } catch (err) {
-      console.error("Poll cycle failed", err);
+      log.error("poll cycle failed", { err });
     }
     interval = pending > 0 ? POLL_INTERVAL_MS : Math.min(interval * 2, MAX_POLL_INTERVAL_MS);
     setTimeout(loop, interval);
@@ -287,5 +273,5 @@ if (import.meta.main) {
     process.exit(0);
   });
 
-  console.log(`worker started, polling every ${POLL_INTERVAL_MS / 1000}s`);
+  log.info("worker started", { pollIntervalMs: POLL_INTERVAL_MS });
 }

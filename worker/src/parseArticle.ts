@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
+import { USER_AGENT } from "./http";
 import { readingTimeFromWordCount, wordCount } from "./reading";
 import { assertPublicUrl, BlockedUrlError, type LookupAll } from "./urlGuard";
 
@@ -25,8 +26,7 @@ export function createFetchHtml(
         redirect: "manual",
         signal: AbortSignal.timeout(15_000),
         headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 (compatible; ReadLater/1.0)",
+          "User-Agent": USER_AGENT,
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         },
       });
