@@ -13,6 +13,19 @@ vi.mock("./auth", () => ({ useAuthStore: () => authState }));
 
 const { useDataTransferStore } = await import("./dataTransfer");
 
+type PageResponse = { data: unknown[] | null; error: { message: string } | null };
+
+// Chainable stub for `select(...).order(...).order(...).range(from, to)`.
+// `range` resolves to the page at index from / 1000 (an empty page past the end).
+function pagedQuery(pages: PageResponse[]) {
+  const range = vi.fn(
+    async (from: number, _to: number): Promise<PageResponse> =>
+      pages[from / 1000] ?? { data: [], error: null },
+  );
+  const query = { order: vi.fn(() => query), range };
+  return query;
+}
+
 describe("useDataTransferStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -51,8 +64,8 @@ describe("useDataTransferStore", () => {
           view_mode: null,
         },
       ];
-      const order = vi.fn().mockResolvedValue({ data: rows, error: null });
-      const select = vi.fn(() => ({ order }));
+      const query = pagedQuery([{ data: rows, error: null }]);
+      const select = vi.fn(() => query);
       from.mockReturnValue({ select });
 
       const store = useDataTransferStore();
@@ -60,20 +73,80 @@ describe("useDataTransferStore", () => {
 
       expect(from).toHaveBeenCalledWith("bookmarks");
       expect(select).toHaveBeenCalledWith(expect.stringContaining("tags"));
+      expect(query.order).toHaveBeenCalledWith("created_at", { ascending: false });
+      expect(query.order).toHaveBeenCalledWith("id");
+      expect(query.range).toHaveBeenCalledTimes(1);
+      expect(query.range).toHaveBeenCalledWith(0, 999);
       expect(result.error).toBeNull();
       expect(result.payload?.version).toBe(EXPORT_VERSION);
       expect(result.payload?.bookmarks).toHaveLength(1);
     });
 
     test("surfaces a query error", async () => {
-      const order = vi.fn().mockResolvedValue({ data: null, error: { message: "network down" } });
-      from.mockReturnValue({ select: () => ({ order }) });
+      const query = pagedQuery([{ data: null, error: { message: "network down" } }]);
+      from.mockReturnValue({ select: () => query });
 
       const store = useDataTransferStore();
       const result = await store.exportBookmarks();
 
       expect(result.payload).toBeNull();
       expect(result.error).toBe("network down");
+    });
+
+    test("pages past the 1000-row cap and returns every row in order", async () => {
+      const rows = Array.from({ length: 2500 }, (_, i) => ({
+        id: `id-${i}`,
+        url: `https://ex.com/${i}`,
+        type: "article",
+        status: "ready",
+        title: `Article ${i}`,
+        content_md: "body",
+        tags: [],
+        created_at: "2026-01-01T00:00:00Z",
+      }));
+      const query = pagedQuery([
+        { data: rows.slice(0, 1000), error: null },
+        { data: rows.slice(1000, 2000), error: null },
+        { data: rows.slice(2000), error: null },
+      ]);
+      from.mockReturnValue({ select: () => query });
+
+      const store = useDataTransferStore();
+      const result = await store.exportBookmarks();
+
+      expect(result.error).toBeNull();
+      expect(query.range.mock.calls).toEqual([
+        [0, 999],
+        [1000, 1999],
+        [2000, 2999],
+      ]);
+      expect(result.payload?.bookmarks).toHaveLength(2500);
+      expect(result.payload?.bookmarks.map((b) => b.url)).toEqual(rows.map((r) => r.url));
+    });
+
+    test("surfaces an error on a later page instead of a truncated export", async () => {
+      const firstPage = Array.from({ length: 1000 }, (_, i) => ({
+        id: `id-${i}`,
+        url: `https://ex.com/${i}`,
+        type: "article",
+        status: "ready",
+        title: `Article ${i}`,
+        content_md: "body",
+        tags: [],
+        created_at: "2026-01-01T00:00:00Z",
+      }));
+      const query = pagedQuery([
+        { data: firstPage, error: null },
+        { data: null, error: { message: "timeout on page 2" } },
+      ]);
+      from.mockReturnValue({ select: () => query });
+
+      const store = useDataTransferStore();
+      const result = await store.exportBookmarks();
+
+      expect(query.range).toHaveBeenCalledTimes(2);
+      expect(result.payload).toBeNull();
+      expect(result.error).toBe("timeout on page 2");
     });
   });
 
@@ -129,10 +202,9 @@ describe("useDataTransferStore", () => {
       };
       const duplicate = { ...bookmark, url: "https://arc90.com/x", title: "Existing", tags: [] };
 
-      const existingSelect = vi.fn().mockResolvedValue({
-        data: [{ url_normalized: "https://arc90.com/x" }],
-        error: null,
-      });
+      const existingQuery = pagedQuery([
+        { data: [{ url_normalized: "https://arc90.com/x" }], error: null },
+      ]);
 
       const insertSelect = vi.fn().mockResolvedValue({ data: [{ id: "new-1" }], error: null });
       const insert = vi.fn((_rows: unknown[]) => ({ select: insertSelect }));
@@ -146,7 +218,7 @@ describe("useDataTransferStore", () => {
 
       from.mockImplementation((table: string) => {
         if (table === "bookmarks") {
-          return { select: () => existingSelect(), insert };
+          return { select: () => existingQuery, insert };
         }
         if (table === "tags") {
           return { upsert: tagUpsert };
@@ -195,13 +267,13 @@ describe("useDataTransferStore", () => {
       const noTags = { url: null, type: "note", status: "ready", title: "Note", content_md: "n" };
       const malformed = { url: 7, type: "article", status: "ready", title: "Broken" };
 
-      const existingSelect = vi.fn().mockResolvedValue({ data: [], error: null });
+      const existingQuery = pagedQuery([{ data: [], error: null }]);
       const insertSelect = vi
         .fn()
         .mockResolvedValue({ data: [{ id: "new-1" }, { id: "new-2" }], error: null });
       const insert = vi.fn((_rows: unknown[]) => ({ select: insertSelect }));
       from.mockImplementation((table: string) => {
-        if (table === "bookmarks") return { select: () => existingSelect(), insert };
+        if (table === "bookmarks") return { select: () => existingQuery, insert };
         throw new Error(`unexpected table ${table}`);
       });
 
@@ -246,14 +318,14 @@ describe("useDataTransferStore", () => {
         tags: [],
       };
 
-      const existingSelect = vi.fn().mockResolvedValue({ data: [], error: null });
+      const existingQuery = pagedQuery([{ data: [], error: null }]);
       const insertSelect = vi
         .fn()
         .mockResolvedValue({ data: null, error: { message: "constraint violated" } });
       const insert = vi.fn(() => ({ select: insertSelect }));
 
       from.mockImplementation((table: string) => {
-        if (table === "bookmarks") return { select: () => existingSelect(), insert };
+        if (table === "bookmarks") return { select: () => existingQuery, insert };
         throw new Error(`unexpected table ${table}`);
       });
 
@@ -264,6 +336,44 @@ describe("useDataTransferStore", () => {
       expect(result.skipped).toEqual([
         { url: "https://new.example/y", title: "New", reason: "constraint violated" },
       ]);
+    });
+
+    test("sees an existing URL that is only on the second page of the duplicate check", async () => {
+      const bookmark = {
+        url: "https://arc90.com/x",
+        type: "article",
+        status: "ready",
+        title: "Existing",
+        content_md: "body",
+        tags: [],
+      };
+      const firstPage = Array.from({ length: 1000 }, (_, i) => ({
+        url_normalized: `https://ex.com/${i}`,
+      }));
+      const existingQuery = pagedQuery([
+        { data: firstPage, error: null },
+        { data: [{ url_normalized: "https://arc90.com/x" }], error: null },
+      ]);
+      const insert = vi.fn();
+      from.mockImplementation((table: string) => {
+        if (table === "bookmarks") return { select: () => existingQuery, insert };
+        throw new Error(`unexpected table ${table}`);
+      });
+
+      const store = useDataTransferStore();
+      const result = await store.importBookmarks(validPayload([bookmark]));
+
+      expect(existingQuery.order).toHaveBeenCalledWith("id");
+      expect(existingQuery.range.mock.calls).toEqual([
+        [0, 999],
+        [1000, 1999],
+      ]);
+      expect(result.error).toBeNull();
+      expect(result.imported).toBe(0);
+      expect(result.skipped).toEqual([
+        { url: "https://arc90.com/x", title: "Existing", reason: "already exists" },
+      ]);
+      expect(insert).not.toHaveBeenCalled();
     });
 
     test("imports many bookmarks in a fixed number of queries", async () => {
@@ -308,7 +418,7 @@ describe("useDataTransferStore", () => {
 
       from.mockImplementation((table: string) => {
         if (table === "bookmarks") {
-          return { select: () => ({ data: [], error: null }), insert };
+          return { select: () => pagedQuery([{ data: [], error: null }]), insert };
         }
         if (table === "tags") return { upsert: tagUpsert };
         if (table === "bookmark_tags") return { upsert: bookmarkTagsUpsert };

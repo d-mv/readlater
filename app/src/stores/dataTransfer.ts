@@ -12,6 +12,31 @@ import {
 
 const BOOKMARK_SELECT = "*, tags(id, name, color)";
 
+// PostgREST caps every response at `max_rows` (1000, see supabase/config.toml),
+// so whole-library reads must be paged or they silently truncate.
+const PAGE_SIZE = 1000;
+
+interface PageResult<T> {
+  data: T[] | null;
+  error: { message: string } | null;
+}
+
+// Fetches consecutive `.range()` pages until one comes back short. The query
+// must have a stable, unique ordering so pages neither overlap nor skip rows.
+// Stops at the first error and returns it along with the rows read so far.
+async function fetchAllPages<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
+): Promise<PageResult<T>> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await fetchPage(from, from + PAGE_SIZE - 1);
+    if (error) return { data: rows, error };
+    const page = data ?? [];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return { data: rows, error: null };
+  }
+}
+
 export interface ExportResult {
   payload: ExportPayload | null;
   error: string | null;
@@ -25,10 +50,14 @@ export interface ImportResult {
 
 export const useDataTransferStore = defineStore("dataTransfer", () => {
   async function exportBookmarks(): Promise<ExportResult> {
-    const { data, error } = await supabase
-      .from("bookmarks")
-      .select(BOOKMARK_SELECT)
-      .order("created_at", { ascending: false });
+    const { data, error } = await fetchAllPages<Bookmark>((from, to) =>
+      supabase
+        .from("bookmarks")
+        .select(BOOKMARK_SELECT)
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(from, to),
+    );
     if (error) return { payload: null, error: error.message };
     return { payload: buildExportPayload((data ?? []) as Bookmark[]), error: null };
   }
@@ -47,10 +76,12 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
 
     // Loaded once up front rather than per-row: this is a personal-library-scale,
     // one-shot operation, so an O(1)-query in-memory Set beats N duplicate queries.
-    const { data: existingRows } = await supabase.from("bookmarks").select("url_normalized");
+    const { data: existingRows } = await fetchAllPages<{ url_normalized: string | null }>(
+      (from, to) => supabase.from("bookmarks").select("url_normalized").order("id").range(from, to),
+    );
     const existingNormalizedUrls = new Set(
       (existingRows ?? [])
-        .map((row: { url_normalized: string | null }) => row.url_normalized)
+        .map((row) => row.url_normalized)
         .filter((value: string | null): value is string => value !== null),
     );
 

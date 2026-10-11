@@ -12,6 +12,12 @@ vi.mock("vue-router", () => ({ useRouter: () => ({ push }) }));
 
 const { default: SettingsView } = await import("./SettingsView.vue");
 
+// Chainable stub for the store's paged `select(...).order(...).range(from, to)`.
+function singlePageQuery(response: { data: unknown[] | null; error: { message: string } | null }) {
+  const query = { order: () => query, range: vi.fn().mockResolvedValue(response) };
+  return query;
+}
+
 describe("SettingsView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -38,8 +44,7 @@ describe("SettingsView", () => {
   });
 
   test("Export downloads a JSON file built from every bookmark", async () => {
-    const order = vi.fn().mockResolvedValue({ data: [], error: null });
-    from.mockReturnValue({ select: () => ({ order }) });
+    from.mockReturnValue({ select: () => singlePageQuery({ data: [], error: null }) });
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 
     const wrapper = mount(SettingsView);
@@ -54,8 +59,9 @@ describe("SettingsView", () => {
   });
 
   test("shows an error when export fails", async () => {
-    const order = vi.fn().mockResolvedValue({ data: null, error: { message: "network down" } });
-    from.mockReturnValue({ select: () => ({ order }) });
+    from.mockReturnValue({
+      select: () => singlePageQuery({ data: null, error: { message: "network down" } }),
+    });
 
     const wrapper = mount(SettingsView);
     await wrapper.get('[data-testid="export-btn"]').trigger("click");
@@ -65,7 +71,7 @@ describe("SettingsView", () => {
   });
 
   test("importing a file reports the imported count and any skipped rows", async () => {
-    const existingSelect = vi.fn().mockResolvedValue({
+    const existingQuery = singlePageQuery({
       data: [{ url_normalized: "https://arc90.com/x" }],
       error: null,
     });
@@ -73,7 +79,7 @@ describe("SettingsView", () => {
       select: vi.fn().mockResolvedValue({ data: [{ id: "new-1" }], error: null }),
     }));
     from.mockImplementation((table: string) => {
-      if (table === "bookmarks") return { select: () => existingSelect(), insert };
+      if (table === "bookmarks") return { select: () => existingQuery, insert };
       throw new Error(`unexpected table ${table}`);
     });
 
