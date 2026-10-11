@@ -184,6 +184,10 @@ export async function processBookmark(
       ...sanitizeFields(result as unknown as Record<string, unknown>),
       error_message: null,
       processed_at: new Date().toISOString(),
+      // A refresh re-parses the page; a translation of the previous body would
+      // otherwise keep showing (the reader prefers the translation).
+      translated_content_md: null,
+      translated_lang: null,
     });
     if (done.error) throw new Error(`Database update failed: ${done.error}`);
     if (!done.moved) {

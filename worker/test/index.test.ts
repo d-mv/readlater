@@ -146,6 +146,18 @@ describe("processBookmark", () => {
     expect(updates[1]?.filters).toEqual({ id: "bm-1", status: "processing" });
   });
 
+  test("clears a translation of the previous body when a refresh finishes", async () => {
+    const { client, updates } = fakeClient();
+
+    await processBookmark(article, client, { parseArticleFn: parsed });
+
+    expect(updates[1]?.payload).toMatchObject({
+      status: "ready",
+      translated_content_md: null,
+      translated_lang: null,
+    });
+  });
+
   test("marks bookmark as failed (only while still processing) when parsing throws", async () => {
     const { client, updates } = fakeClient();
 
