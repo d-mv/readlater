@@ -385,6 +385,24 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks[0]?.content_md).toBe("loaded body");
   });
 
+  test("a Realtime UPDATE keeps the local updated_at so the next delta sync refetches the row", async () => {
+    const seedRows = [makeBookmark({ id: "1", updated_at: "2026-10-01T00:00:00Z", tags: [] })];
+    from.mockReturnValue({ select: () => listQuery(seedRows) });
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    store.subscribeToChanges();
+
+    // A tag attached on another device bumps updated_at; the payload has no tags.
+    emitRealtime({
+      eventType: "UPDATE",
+      new: { id: "1", title: "Tagged elsewhere", updated_at: "2026-10-02T00:00:00Z" },
+    });
+
+    expect(store.bookmarks[0]?.title).toBe("Tagged elsewhere");
+    expect(store.bookmarks[0]?.updated_at).toBe("2026-10-01T00:00:00Z");
+  });
+
   test("visibleBookmarks shows non-archived rows on the 'all' filter", async () => {
     const rows = [
       makeBookmark({ id: "1", archived: false }),

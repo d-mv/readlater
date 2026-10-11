@@ -481,7 +481,15 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // Merge, don't replace: the payload has no body columns, so a body the
       // reader already loaded for this row must survive. tags is a join, never
       // in a Realtime payload, so it is preserved too.
-      if (existing) Object.assign(existing, row);
+      //
+      // updated_at is NOT taken from the payload: the merged row may still
+      // carry stale tags (attach/detach bumps updated_at) or a stale body, and
+      // keeping the old stamp makes the next delta sync see a change and
+      // replace the row with the server's full projection.
+      if (existing) {
+        const { updated_at: _changedAt, ...fields } = row;
+        Object.assign(existing, fields);
+      }
     } else if (payload.eventType === "DELETE") {
       const id = (payload.old as { id?: string }).id;
       if (id) bookmarks.value = bookmarks.value.filter((b) => b.id !== id);
