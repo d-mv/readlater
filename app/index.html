@@ -11,20 +11,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Read Later" />
     <title>Read Later</title>
-    <script>
-      (function () {
-        // "light"/"dark" are explicit choices; anything else ("system" or
-        // nothing stored) follows the OS — mirrors stores/theme.ts.
-        var stored = localStorage.getItem("theme");
-        var theme =
-          stored === "light" || stored === "dark"
-            ? stored
-            : matchMedia("(prefers-color-scheme: dark)").matches
-              ? "dark"
-              : "light";
-        document.documentElement.dataset.theme = theme;
-      })();
-    </script>
+    <!-- Classic blocking script: the theme must be set before first paint. -->
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="app"></div>
