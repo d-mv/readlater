@@ -68,7 +68,8 @@ schema_paths = []
 enabled = true
 # Specifies an ordered list of seed files to load during db reset.
 # Supports glob patterns relative to supabase directory: "./seeds/*.sql"
-sql_paths = ["./seed.sql"]
+# No seed file exists (the single account is created by hand), so none is listed.
+sql_paths = []
 
 [db.network_restrictions]
 # Enable management of network restrictions.
@@ -173,13 +174,17 @@ enable_refresh_token_rotation = true
 # Requires enable_refresh_token_rotation = true.
 refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
+# Local only: production MUST have signups disabled (Dashboard → Authentication →
+# Sign In / Providers → "Allow new users to sign up" off). This is a single-owner
+# app whose account is created by hand; any extra account would get its own
+# RLS-scoped data, its own rate limits, and spend the shared DeepL quota.
 enable_signup = true
 # Allow/disallow anonymous sign-ins to your project.
 enable_anonymous_sign_ins = false
 # Allow/disallow testing manual linking of accounts
 enable_manual_linking = false
 # Passwords shorter than this value will be rejected as weak. Minimum 6, recommended 8 or more.
-minimum_password_length = 6
+minimum_password_length = 12
 # Passwords that do not meet the following requirements will be rejected as weak. Supported values
 # are: `letters_digits`, `lower_upper_letters_digits`, `lower_upper_letters_digits_symbols`
 password_requirements = ""
@@ -440,3 +445,11 @@ verify_jwt = true
 
 [functions.pdf-import]
 verify_jwt = true
+
+# storage-sweep removes Storage objects no bookmark references. It checks the
+# bearer token against the service-role key itself (constant-time, like
+# capture's CAPTURE_KEY check), so gateway JWT verification is off — it's
+# meant to be called by a pg_cron job (see 20261011171000_audit_hardening.sql),
+# never by the app.
+[functions.storage-sweep]
+verify_jwt = false
