@@ -42,6 +42,17 @@ class FakeIntersectionObserver {
 
 const { default: ReadingListView } = await import("./ReadingListView.vue");
 
+// The mount-time fetch falls back to the IndexedDB snapshot (no session in
+// tests), which can resolve after a single flush and reset hasMore — wait it
+// out before arranging list state.
+async function mountSettled() {
+  const wrapper = mount(ReadingListView);
+  const store = useBookmarksStore();
+  await vi.waitFor(() => expect(store.loading).toBe(false));
+  await flushPromises();
+  return { wrapper, store };
+}
+
 describe("ReadingListView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -134,9 +145,7 @@ describe("ReadingListView", () => {
   });
 
   test("the load-more sentinel calls store.loadMore when it scrolls into view", async () => {
-    mount(ReadingListView);
-    await flushPromises();
-    const store = useBookmarksStore();
+    const { store } = await mountSettled();
     const loadMoreSpy = vi.spyOn(store, "loadMore").mockResolvedValue(undefined);
 
     // Simulate an unfiltered list with a full first page and more to come.
@@ -163,11 +172,114 @@ describe("ReadingListView", () => {
     expect(loadMoreSpy).not.toHaveBeenCalled();
   });
 
+  test("keeps paging while the sentinel stays in range (a sparse tab adds no visible rows)", async () => {
+    const { store } = await mountSettled();
+    store.bookmarks = [{ id: "1", archived: false, tags: [] } as never];
+    store.hasMore = true;
+    await flushPromises();
+
+    // Each page brings only archived rows, invisible on this tab; the third
+    // page is the last.
+    let calls = 0;
+    const loadMoreSpy = vi.spyOn(store, "loadMore").mockImplementation(async () => {
+      calls += 1;
+      store.bookmarks = [
+        ...store.bookmarks,
+        { id: `archived-${calls}`, archived: true, tags: [] } as never,
+      ];
+      store.hasMore = calls < 3;
+    });
+
+    FakeIntersectionObserver.instances.at(-1)?.trigger(true);
+    await flushPromises();
+
+    expect(loadMoreSpy).toHaveBeenCalledTimes(3);
+  });
+
+  test("stops paging when a page brings nothing (failed request), instead of spinning", async () => {
+    const { store } = await mountSettled();
+    store.bookmarks = [{ id: "1", archived: false, tags: [] } as never];
+    store.hasMore = true;
+    await flushPromises();
+    const loadMoreSpy = vi.spyOn(store, "loadMore").mockResolvedValue(undefined);
+
+    FakeIntersectionObserver.instances.at(-1)?.trigger(true);
+    await flushPromises();
+
+    expect(loadMoreSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("offers a Load more button whenever older pages exist, even on an empty tab", async () => {
+    const { wrapper, store } = await mountSettled();
+    // Only archived rows loaded so far: nothing visible on the default tab.
+    store.bookmarks = [{ id: "1", archived: true, tags: [] } as never];
+    store.hasMore = true;
+    await flushPromises();
+    const loadMoreSpy = vi.spyOn(store, "loadMore").mockResolvedValue(undefined);
+
+    await wrapper.get('[data-testid="load-more"]').trigger("click");
+
+    expect(loadMoreSpy).toHaveBeenCalled();
+  });
+
+  test("no Load more button once the list is exhausted", async () => {
+    const { wrapper, store } = await mountSettled();
+    store.bookmarks = [{ id: "1", archived: false, tags: [] } as never];
+    store.hasMore = false;
+    await flushPromises();
+    expect(wrapper.find('[data-testid="load-more"]').exists()).toBe(false);
+  });
+
+  describe("refetch on return to the app", () => {
+    function setVisibility(state: DocumentVisibilityState) {
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue(state);
+      document.dispatchEvent(new Event("visibilitychange"));
+    }
+
+    test("refetches when the app becomes visible again, at most once per 30s", async () => {
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000_000);
+      const wrapper = mount(ReadingListView);
+      await flushPromises();
+      const store = useBookmarksStore();
+      const fetchSpy = vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+
+      // Right after mount the list is fresh.
+      setVisibility("visible");
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      now.mockReturnValue(1_000_000 + 31_000);
+      setVisibility("visible");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      now.mockReturnValue(1_000_000 + 40_000);
+      setVisibility("visible");
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+      wrapper.unmount();
+      now.mockRestore();
+    });
+
+    test("going to the background does not refetch, and listeners go away on unmount", async () => {
+      const now = vi.spyOn(Date, "now").mockReturnValue(2_000_000);
+      const wrapper = mount(ReadingListView);
+      await flushPromises();
+      const store = useBookmarksStore();
+      const fetchSpy = vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+      now.mockReturnValue(2_000_000 + 60_000);
+
+      setVisibility("hidden");
+      expect(fetchSpy).not.toHaveBeenCalled();
+
+      wrapper.unmount();
+      setVisibility("visible");
+      expect(fetchSpy).not.toHaveBeenCalled();
+      now.mockRestore();
+    });
+  });
+
   test("toggling offline on a bookmark without body fetches the body and caches it", async () => {
     const { useOfflineCacheStore } = await import("../stores/offlineCache");
-    const wrapper = mount(ReadingListView);
-    await flushPromises();
-    const store = useBookmarksStore();
+    const { wrapper, store } = await mountSettled();
     const offlineCache = useOfflineCacheStore();
 
     const listRow = {
