@@ -50,6 +50,16 @@ const LIST_COLUMNS = [
 ].join(", ");
 const LIST_SELECT = `${LIST_COLUMNS}, tags(id, name, color)`;
 const UNIQUE_VIOLATION = "23505";
+// PostgREST's answer to a JWT it no longer accepts (expired past refresh,
+// revoked). A list read that gets it ends the login rather than falling back
+// to the offline snapshot as if the network were down.
+const UNAUTHORIZED = 401;
+
+class SessionExpiredError extends Error {
+  constructor() {
+    super("Session expired");
+  }
+}
 
 // What a store write reports back: null on success, otherwise a message for
 // the user. Local state only changes once the server accepted the write, so a
@@ -278,7 +288,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (opts.before) query = query.lt("created_at", opts.before);
     if (opts.limit) query = query.limit(opts.limit);
 
-    const { data, error } = await query.order("created_at", { ascending: false });
+    const { data, error, status } = await query.order("created_at", { ascending: false });
+    if (status === UNAUTHORIZED) throw new SessionExpiredError();
     if (error) throw error;
     return (data ?? []) as unknown as Bookmark[];
   }
@@ -299,6 +310,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         .gte("deleted_at", since)
         .order("deleted_at", { ascending: true }),
     ]);
+    if (changed.status === UNAUTHORIZED || deleted.status === UNAUTHORIZED) {
+      throw new SessionExpiredError();
+    }
     if (changed.error) throw changed.error;
     if (deleted.error) throw deleted.error;
     return {
@@ -383,10 +397,14 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     // Snapshot the query: the input can change while this request is in flight.
     const query = searchQuery.value.trim();
     loading.value = true;
+    const auth = useAuthStore();
     try {
-      const auth = useAuthStore();
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
-      if (isOffline || !auth.userId || !auth.session) {
+      // No session in memory while online: either the token refresh failed
+      // for now, or the session is over — checkSession() tells them apart
+      // and, for the latter, ends the login (the router then shows /login)
+      // instead of leaving the offline snapshot up indefinitely.
+      if (isOffline || !auth.userId || (!auth.session && !(await auth.checkSession()))) {
         throw new Error("Offline or session unavailable");
       }
       if (!query && (await syncRecent(isCurrent))) return;
@@ -405,8 +423,12 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         hasMore.value = page.length === PAGE_SIZE;
         persistOfflineList();
       }
-    } catch {
+    } catch (err) {
       if (!isCurrent()) return;
+      if (err instanceof SessionExpiredError) auth.sessionExpired();
+      // Signed out (just now, or the check above found the session over):
+      // the router is leaving for /login — don't put the snapshot up.
+      if (!auth.userId) return;
       const offlineBookmarks = await loadOfflineBookmarks();
       if (!isCurrent()) return;
       const needle = query.toLowerCase();
@@ -525,6 +547,21 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (!channel) return;
     supabase.removeChannel(channel);
     channel = undefined;
+  }
+
+  // Sign-out: back to the empty state a fresh load starts from. Bumping the
+  // generation discards any fetch or page still in flight, so the previous
+  // account's rows can't land after the reset.
+  function reset() {
+    listGeneration += 1;
+    listSession = { kind: "recent", cursor: null, watermark: null };
+    bookmarks.value = [];
+    filter.value = "all";
+    loading.value = false;
+    loadingMore.value = false;
+    hasMore.value = false;
+    searchQuery.value = "";
+    activeTagIds.value = [];
   }
 
   async function add(url: string, options?: { title?: string }): Promise<AddBookmarkResult> {
@@ -1009,6 +1046,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     loadMore,
     subscribeToChanges,
     unsubscribeFromChanges,
+    reset,
     add,
     addNote,
     addSnippet,

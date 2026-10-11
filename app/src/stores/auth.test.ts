@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 
 const { signInWithPassword, signOut, getSession, onAuthStateChange } = vi.hoisted(() => ({
@@ -14,14 +14,154 @@ vi.mock("../lib/supabase", () => ({
   },
 }));
 
+const { calls, unsubscribeFromChanges, resetBookmarks, resetOfflineCache, clearAll } = vi.hoisted(
+  () => {
+    const calls: string[] = [];
+    const record = (name: string) => vi.fn(() => void calls.push(name));
+    return {
+      calls,
+      unsubscribeFromChanges: record("unsubscribe"),
+      resetBookmarks: record("resetBookmarks"),
+      resetOfflineCache: record("resetOfflineCache"),
+      clearAll: vi.fn(async () => void calls.push("clearAll")),
+    };
+  },
+);
+vi.mock("./bookmarks", () => ({
+  useBookmarksStore: () => ({ unsubscribeFromChanges, reset: resetBookmarks }),
+}));
+vi.mock("./offlineCache", () => ({
+  useOfflineCacheStore: () => ({ reset: resetOfflineCache }),
+}));
+vi.mock("../lib/offlineDb", () => ({ clearAll }));
+
+const { AuthRetryableFetchError, AuthApiError } = await import("@supabase/supabase-js");
 const { useAuthStore } = await import("./auth");
+
+function storeOfflineUser() {
+  localStorage.setItem(
+    "rl-auth-user",
+    JSON.stringify({ id: "offline-user-1", email: "off@example.com" }),
+  );
+}
 
 describe("useAuthStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
+    calls.length = 0;
     localStorage.clear();
     getSession.mockResolvedValue({ data: { session: null } });
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("signOut drops Realtime, the in-memory list and IndexedDB before signing out", async () => {
+    storeOfflineUser();
+    signOut.mockImplementation(async () => {
+      calls.push("signOut");
+      return { error: null };
+    });
+
+    const store = useAuthStore();
+    await store.signOut();
+
+    expect(calls).toEqual([
+      "unsubscribe",
+      "resetBookmarks",
+      "resetOfflineCache",
+      "clearAll",
+      "signOut",
+    ]);
+    expect(store.isAuthenticated).toBe(false);
+  });
+
+  test("signOut still signs out when clearing IndexedDB fails", async () => {
+    clearAll.mockRejectedValueOnce(new Error("quota"));
+    signOut.mockResolvedValue({ error: null });
+
+    const store = useAuthStore();
+    await store.signOut();
+
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(store.isAuthenticated).toBe(false);
+  });
+
+  test("online, init with no stored session ends the cached offline login", async () => {
+    storeOfflineUser();
+
+    const store = useAuthStore();
+    expect(store.isAuthenticated).toBe(true);
+    await store.init();
+
+    expect(store.isAuthenticated).toBe(false);
+    expect(localStorage.getItem("rl-auth-user")).toBeNull();
+  });
+
+  test("online, a refresh token the server rejects ends the cached offline login", async () => {
+    storeOfflineUser();
+    getSession.mockResolvedValue({
+      data: { session: null },
+      error: new AuthApiError("Invalid Refresh Token", 400, "refresh_token_not_found"),
+    });
+
+    const store = useAuthStore();
+    await store.init();
+
+    expect(store.isAuthenticated).toBe(false);
+  });
+
+  test("a refresh that couldn't reach the server keeps the cached offline login", async () => {
+    storeOfflineUser();
+    getSession.mockResolvedValue({
+      data: { session: null },
+      error: new AuthRetryableFetchError("Failed to fetch", 0),
+    });
+
+    const store = useAuthStore();
+    await store.init();
+
+    expect(store.isAuthenticated).toBe(true);
+    expect(store.userId).toBe("offline-user-1");
+  });
+
+  test("offline, no session keeps the cached offline login", async () => {
+    storeOfflineUser();
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+
+    const store = useAuthStore();
+    await store.init();
+
+    expect(store.isAuthenticated).toBe(true);
+  });
+
+  test("checkSession loads a session supabase-js still has", async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: "u1" } } } });
+
+    const store = useAuthStore();
+    await expect(store.checkSession()).resolves.toBe(true);
+    expect(store.session).not.toBeNull();
+  });
+
+  test("checkSession reports a session that is over and ends the login", async () => {
+    storeOfflineUser();
+
+    const store = useAuthStore();
+    await expect(store.checkSession()).resolves.toBe(false);
+    expect(store.isAuthenticated).toBe(false);
+  });
+
+  test("sessionExpired ends the login", () => {
+    storeOfflineUser();
+
+    const store = useAuthStore();
+    store.sessionExpired();
+
+    expect(store.isAuthenticated).toBe(false);
+    expect(localStorage.getItem("rl-auth-user")).toBeNull();
   });
 
   test("starts unauthenticated with no session", () => {

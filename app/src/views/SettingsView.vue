@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { shallowRef, useTemplateRef } from "vue";
 import { useRouter } from "vue-router";
-import { IconArrowLeft, IconDownload, IconUpload } from "@tabler/icons-vue";
+import { IconArrowLeft, IconDownload, IconLogout, IconUpload } from "@tabler/icons-vue";
+import { useAuthStore } from "../stores/auth";
 import { useDataTransferStore } from "../stores/dataTransfer";
 import type { SkippedRow } from "../utils/dataTransfer";
 import Button from "../shared/ui/Button.vue";
@@ -20,6 +21,18 @@ const importedCount = shallowRef<number | null>(null);
 const skippedRows = shallowRef<SkippedRow[]>([]);
 
 const fileInput = useTemplateRef<HTMLInputElement>("fileInput");
+
+const auth = useAuthStore();
+const signingOut = shallowRef(false);
+
+// The store clears this device's copy of the library (list, downloads,
+// sync state) along with the session; there's nothing to report back —
+// sign-out always ends on the login screen.
+async function onSignOut() {
+  signingOut.value = true;
+  await auth.signOut();
+  await router.replace({ name: "login" });
+}
 
 function onBack() {
   router.push({ name: "list" });
@@ -132,6 +145,17 @@ async function onFileSelected(event: Event) {
           {{ row.title || row.url || "Untitled" }} — {{ row.reason }}
         </li>
       </ul>
+    </section>
+
+    <section class="mb-16 rounded-sm border border-line bg-raised p-20">
+      <h2 class="label m-0 mb-12">Account</h2>
+      <p class="m-0 mb-16 text-sm leading-[1.5] text-ink-muted">
+        Signing out also removes the reading list and downloaded articles stored on this device.
+      </p>
+      <Button variant="secondary" test-id="sign-out-btn" :disabled="signingOut" @click="onSignOut">
+        <IconLogout :size="16" />
+        {{ signingOut ? "Signing out…" : "Sign out" }}
+      </Button>
     </section>
   </main>
 </template>

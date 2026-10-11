@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { flushPromises } from "@vue/test-utils";
 
 const { getSession, onAuthStateChange } = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -58,5 +59,19 @@ describe("router auth guard", () => {
     expect(router.currentRoute.value.name).toBe("capture");
     expect(router.currentRoute.value.query.url).toBe("https://example.com");
     expect(router.currentRoute.value.query.title).toBe("Example");
+  });
+
+  test("a login that ends mid-visit leaves the protected page for login", async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: "u1" } } } });
+    await router.push("/settings");
+    expect(router.currentRoute.value.name).toBe("settings");
+
+    const [onChange] = onAuthStateChange.mock.calls.at(-1) as unknown as [
+      (event: string, session: null) => void,
+    ];
+    onChange("SIGNED_OUT", null);
+    await flushPromises();
+
+    expect(router.currentRoute.value.name).toBe("login");
   });
 });

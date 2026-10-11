@@ -31,6 +31,8 @@ const {
     authState: {
       userId: "user-1" as string | null,
       session: { user: { id: "user-1" } } as unknown,
+      checkSession: vi.fn(),
+      sessionExpired: vi.fn(),
     },
   };
 });
@@ -151,6 +153,7 @@ describe("useBookmarksStore", () => {
     vi.clearAllMocks();
     authState.userId = "user-1";
     authState.session = { user: { id: "user-1" } };
+    authState.checkSession.mockResolvedValue(true);
     replaceBookmarksList.mockResolvedValue(undefined);
     getBookmarksList.mockResolvedValue([]);
     getAllArticles.mockResolvedValue([]);
@@ -191,6 +194,88 @@ describe("useBookmarksStore", () => {
     expect(requestedColumns).not.toBe("*, tags(id, name, color)");
     expect(requestedColumns).toContain("tags(id, name, color)");
     expect(requestedColumns).toContain("translated_lang");
+  });
+
+  describe("an ended session", () => {
+    test("online with no session in memory, a session supabase-js still has is used", async () => {
+      authState.session = null;
+      authState.checkSession.mockResolvedValue(true);
+      from.mockReturnValue({ select: () => listQuery([makeBookmark({ id: "live" })]) });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(authState.checkSession).toHaveBeenCalledOnce();
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["live"]);
+    });
+
+    test("a session that is over shows no offline snapshot (the router leaves for login)", async () => {
+      authState.session = null;
+      authState.checkSession.mockImplementation(async () => {
+        authState.userId = null;
+        return false;
+      });
+      getBookmarksList.mockResolvedValue([makeBookmark({ id: "cached" })]);
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(from).not.toHaveBeenCalled();
+      expect(store.bookmarks).toEqual([]);
+      expect(store.loading).toBe(false);
+    });
+
+    test("a 401 from the list query ends the login instead of falling back offline", async () => {
+      const query = listQuery(null, { message: "JWT expired", code: "PGRST301" });
+      query.order.mockResolvedValue({ data: null, error: { message: "JWT expired" }, status: 401 });
+      from.mockReturnValue({ select: () => query });
+      authState.sessionExpired.mockImplementation(() => {
+        authState.userId = null;
+      });
+      getBookmarksList.mockResolvedValue([makeBookmark({ id: "cached" })]);
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(authState.sessionExpired).toHaveBeenCalledOnce();
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("an ordinary network error still falls back to the offline snapshot", async () => {
+      from.mockReturnValue({ select: () => listQuery(null, { message: "Failed to fetch" }) });
+      getBookmarksList.mockResolvedValue([makeBookmark({ id: "cached" })]);
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(authState.sessionExpired).not.toHaveBeenCalled();
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["cached"]);
+    });
+  });
+
+  test("reset empties the list and discards a fetch still in flight", async () => {
+    from.mockReturnValueOnce({ select: () => listQuery([makeBookmark({ id: "a" })]) });
+    const store = useBookmarksStore();
+    await store.fetch();
+    store.setSearchQuery("x");
+    store.setFilter("archived");
+    store.setActiveTagIds(["t1"]);
+
+    let resolveOrder!: (value: unknown) => void;
+    const slow = listQuery();
+    slow.order.mockReturnValue(new Promise((r) => (resolveOrder = r)));
+    from.mockReturnValueOnce({ select: () => slow });
+    const inFlight = store.fetch();
+
+    store.reset();
+    resolveOrder({ data: [makeBookmark({ id: "late" })], error: null });
+    await inFlight;
+
+    expect(store.bookmarks).toEqual([]);
+    expect(store.searchQuery).toBe("");
+    expect(store.filter).toBe("all");
+    expect(store.activeTagIds).toEqual([]);
+    expect(store.hasMore).toBe(false);
   });
 
   describe("pagination", () => {

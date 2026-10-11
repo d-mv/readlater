@@ -158,6 +158,17 @@ export async function deleteBookmarkMeta(id: string): Promise<void> {
   await db.delete("bookmarksList", id);
 }
 
+// Sign-out: empties every object store (whatever stores a later schema adds)
+// in one transaction and releases the blob: URLs handed out for images.
+export async function clearAll(): Promise<void> {
+  const db = await getDb();
+  const names = Array.from(db.objectStoreNames);
+  const tx = db.transaction(names, "readwrite");
+  await Promise.all(names.map((name) => tx.objectStore(name).clear()));
+  await tx.done;
+  for (const id of objectUrls.keys()) revokeObjectUrls(id);
+}
+
 export function hydrateArticleContent(
   article: Pick<CachedArticle, "id" | "content_md" | "images">,
   createObjectUrl: (blob: Blob) => string = (blob) => URL.createObjectURL(blob),

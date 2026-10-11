@@ -272,6 +272,26 @@ describe("offlineDb", () => {
       expect(revoked.sort()).toEqual(["blob:1", "blob:2"]);
     });
 
+    test("clearAll empties every store and revokes every object URL", async () => {
+      await offlineDb.putArticle(article("1"));
+      await offlineDb.putArticle(article("2"));
+      await offlineDb.replaceBookmarksList([makeMeta({ id: "1" })], {
+        watermark: "2026-10-01T00:00:00Z",
+        cursor: null,
+        hasMore: false,
+      });
+      let minted = 0;
+      offlineDb.hydrateArticleContent(article("1"), () => `blob:${++minted}`);
+      offlineDb.hydrateArticleContent(article("2"), () => `blob:${++minted}`);
+
+      await offlineDb.clearAll();
+
+      expect(await offlineDb.getAllArticles()).toEqual([]);
+      expect(await offlineDb.getBookmarksList()).toEqual([]);
+      expect(await offlineDb.getSyncState()).toBeUndefined();
+      expect(revoked.sort()).toEqual(["blob:1", "blob:2", "blob:3", "blob:4"]);
+    });
+
     test("re-caching an article revokes the object URLs of its previous copy", async () => {
       let minted = 0;
       offlineDb.hydrateArticleContent(article(), () => `blob:${++minted}`);

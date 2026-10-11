@@ -1,7 +1,10 @@
 import { defineStore } from "pinia";
 import { computed, shallowRef } from "vue";
-import type { Session } from "@supabase/supabase-js";
+import { isAuthRetryableFetchError, type AuthError, type Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import * as offlineDb from "../lib/offlineDb";
+import { useBookmarksStore } from "./bookmarks";
+import { useOfflineCacheStore } from "./offlineCache";
 
 const OFFLINE_AUTH_KEY = "rl-auth-user";
 
@@ -30,6 +33,19 @@ function saveOfflineUser(user: StoredUser | null) {
   } catch {}
 }
 
+function isOnline(): boolean {
+  return typeof navigator === "undefined" || navigator.onLine;
+}
+
+// getSession() comes back without a session in two very different cases: the
+// session is really over (signed out elsewhere, refresh token expired or
+// revoked), or the token refresh just couldn't reach the server. Only the
+// first may end the cached offline login — the second is what using the app
+// offline looks like.
+function sessionIsGone(error: AuthError | null): boolean {
+  return isOnline() && (error === null || !isAuthRetryableFetchError(error));
+}
+
 export const useAuthStore = defineStore("auth", () => {
   const session = shallowRef<Session | null>(null);
   const offlineUser = shallowRef<StoredUser | null>(loadOfflineUser());
@@ -47,6 +63,24 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
+  // Drops the session and the cached offline login, which flips
+  // isAuthenticated — the router sends a protected page to login on that.
+  function forgetUser() {
+    session.value = null;
+    offlineUser.value = null;
+    saveOfflineUser(null);
+  }
+
+  async function loadSession(): Promise<boolean> {
+    const { data, error } = await supabase.auth.getSession();
+    if (data?.session) {
+      syncUser(data.session);
+      return true;
+    }
+    if (sessionIsGone(error ?? null)) forgetUser();
+    return false;
+  }
+
   // Memoized: main.ts calls this once at boot, but the router guard also
   // calls it on every navigation to make sure it never checks
   // isAuthenticated before the session has actually loaded (a real race on a
@@ -58,16 +92,11 @@ export const useAuthStore = defineStore("auth", () => {
     if (!initPromise) {
       initPromise = (async () => {
         try {
-          const { data } = await supabase.auth.getSession();
-          if (data?.session) {
-            syncUser(data.session);
-          }
+          await loadSession();
 
           supabase.auth.onAuthStateChange((event, newSession) => {
             if (event === "SIGNED_OUT") {
-              session.value = null;
-              offlineUser.value = null;
-              saveOfflineUser(null);
+              forgetUser();
             } else if (newSession) {
               syncUser(newSession);
             }
@@ -80,6 +109,24 @@ export const useAuthStore = defineStore("auth", () => {
     return initPromise;
   }
 
+  // Asks supabase-js again whether a session exists (it refreshes an expired
+  // access token on the way). Called when a request finds none in memory:
+  // true once one is loaded; otherwise false, and — if the session is really
+  // over rather than unreachable — the cached login is dropped too.
+  async function checkSession(): Promise<boolean> {
+    try {
+      return await loadSession();
+    } catch {
+      return false;
+    }
+  }
+
+  // The API refused the session's token (401): it's over, whatever the
+  // client still holds.
+  function sessionExpired() {
+    forgetUser();
+  }
+
   async function signIn(email: string, password: string): Promise<{ error: string | null }> {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) return { error: error.message };
@@ -87,14 +134,30 @@ export const useAuthStore = defineStore("auth", () => {
     return { error: null };
   }
 
+  // Leaves nothing of this account on the device: the live channel, the
+  // in-memory list and every IndexedDB store (list, sync state, downloaded
+  // articles) go before the session itself. Local cleanup is best-effort and
+  // never blocks the sign-out.
   async function signOut() {
-    offlineUser.value = null;
-    saveOfflineUser(null);
+    const bookmarks = useBookmarksStore();
+    bookmarks.unsubscribeFromChanges();
+    bookmarks.reset();
+    useOfflineCacheStore().reset();
+    await offlineDb.clearAll().catch(() => {});
+    forgetUser();
     try {
       await supabase.auth.signOut();
     } catch {}
-    session.value = null;
   }
 
-  return { session, isAuthenticated, userId, init, signIn, signOut };
+  return {
+    session,
+    isAuthenticated,
+    userId,
+    init,
+    checkSession,
+    sessionExpired,
+    signIn,
+    signOut,
+  };
 });

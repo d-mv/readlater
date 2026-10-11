@@ -266,6 +266,25 @@ describe("useOfflineCacheStore", () => {
       expect(store.isCached("1")).toBe(false);
     });
 
+    test("reset forgets every entry, and a save in flight never commits after it", async () => {
+      listCachedArticles.mockResolvedValue([{ id: "1", missingImages: 2 }]);
+      const store = useOfflineCacheStore();
+      await store.init();
+      expect(store.isCached("1")).toBe(true);
+      const { release } = heldFetch();
+
+      const saving = store.cacheBookmark(makeBookmark({ id: "2" }));
+      await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+      store.reset();
+      release();
+      await saving;
+
+      expect(store.isCached("1")).toBe(false);
+      expect(store.isCached("2")).toBe(false);
+      expect(putArticle).not.toHaveBeenCalled();
+      expect(store.missingImageCount("1")).toBe(0);
+    });
+
     test("a second save of the same article reuses the one in flight", async () => {
       const { fetchMock, release } = heldFetch();
       const store = useOfflineCacheStore();

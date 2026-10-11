@@ -5,10 +5,11 @@ import { EXPORT_VERSION } from "../utils/dataTransfer";
 
 const { from } = vi.hoisted(() => ({ from: vi.fn() }));
 vi.mock("../lib/supabase", () => ({ supabase: { from } }));
-vi.mock("../stores/auth", () => ({ useAuthStore: () => ({ userId: "user-1" }) }));
+const { signOut } = vi.hoisted(() => ({ signOut: vi.fn() }));
+vi.mock("../stores/auth", () => ({ useAuthStore: () => ({ userId: "user-1", signOut }) }));
 
-const { push } = vi.hoisted(() => ({ push: vi.fn() }));
-vi.mock("vue-router", () => ({ useRouter: () => ({ push }) }));
+const { push, replace } = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
+vi.mock("vue-router", () => ({ useRouter: () => ({ push, replace }) }));
 
 const { default: SettingsView } = await import("./SettingsView.vue");
 
@@ -41,6 +42,24 @@ describe("SettingsView", () => {
     await wrapper.get('button[aria-label="Back"]').trigger("click");
 
     expect(push).toHaveBeenCalledWith({ name: "list" });
+  });
+
+  test("Sign out signs out through the store, then routes to login", async () => {
+    const order: string[] = [];
+    signOut.mockImplementation(async () => {
+      order.push("signOut");
+    });
+    replace.mockImplementation(async () => {
+      order.push("replace");
+    });
+
+    const wrapper = mount(SettingsView);
+    await wrapper.get('[data-testid="sign-out-btn"]').trigger("click");
+    await flushPromises();
+
+    expect(signOut).toHaveBeenCalledOnce();
+    expect(replace).toHaveBeenCalledWith({ name: "login" });
+    expect(order).toEqual(["signOut", "replace"]);
   });
 
   test("Export downloads a JSON file built from every bookmark", async () => {

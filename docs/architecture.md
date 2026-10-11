@@ -668,7 +668,15 @@ Single-user app — no signup flow. The one account is created directly in the
 Supabase dashboard; the PWA just needs a login form
 (`supabase.auth.signInWithPassword`). `supabase-js` persists the session and
 silently refreshes the token, so once logged in on a device it stays logged
-in — correct for something installed to a homescreen. See §3 for the
+in — correct for something installed to a homescreen. The last user is also
+cached in localStorage so the app opens offline; that cached login ends when,
+online, `getSession()` finds no session (or a refresh the server rejected,
+as opposed to one that couldn't reach it) or a list read gets a 401 — a
+router watcher on `isAuthenticated` then sends any protected page to
+`/login`. **Sign out** (Settings) unsubscribes Realtime, resets the list
+and offline-cache stores, clears every IndexedDB store
+(`offlineDb.clearAll()`, revoking image blob URLs) and only then calls
+`supabase.auth.signOut()`. See §3 for the
 capture-path auth model (bookmarklet/share-target/worker/public-view each
 use a different mechanism, on purpose).
 

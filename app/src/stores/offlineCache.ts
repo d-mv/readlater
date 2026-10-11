@@ -157,6 +157,14 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
     return save;
   }
 
+  // Sign-out: forgets every entry and supersedes in-flight saves, so none of
+  // them commits (or reports "saved") after the database was cleared.
+  function reset() {
+    inFlight.clear();
+    entries.value = new Map();
+    missing.value = new Map();
+  }
+
   async function removeCachedBookmark(id: string): Promise<void> {
     inFlight.delete(id);
     setEntry(id, null);
@@ -173,6 +181,7 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
     cacheBookmark,
     refreshCached,
     removeCachedBookmark,
+    reset,
   };
 });
 
