@@ -111,16 +111,17 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
       return { imported: 0, skipped, error: null };
     }
 
-    // 2. One bulk upsert of every distinct tag, then map name -> id.
-    const tagsByName = new Map<string, { name: string; color: string }>();
+    // 2. One bulk upsert of every distinct tag, then map name -> id. Tags are
+    //    per user (unique on user_id, name), so each row carries the owner.
+    const tagsByName = new Map<string, { name: string; color: string; user_id: string }>();
     for (const bookmark of toImport) {
-      for (const tag of bookmark.tags) tagsByName.set(tag.name, tag);
+      for (const tag of bookmark.tags) tagsByName.set(tag.name, { ...tag, user_id: userId });
     }
     const tagIdByName = new Map<string, string>();
     if (tagsByName.size > 0) {
       const { data: tagRows } = await supabase
         .from("tags")
-        .upsert([...tagsByName.values()], { onConflict: "name", ignoreDuplicates: false })
+        .upsert([...tagsByName.values()], { onConflict: "user_id,name", ignoreDuplicates: false })
         .select("id, name");
       for (const row of (tagRows ?? []) as { id: string; name: string }[]) {
         tagIdByName.set(row.name, row.id);

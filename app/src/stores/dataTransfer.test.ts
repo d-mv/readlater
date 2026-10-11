@@ -244,10 +244,11 @@ describe("useDataTransferStore", () => {
       expect(insert.mock.calls[0][0][0]).not.toHaveProperty("tags");
       // One bulk tag upsert, one bulk join upsert.
       expect(tagUpsert).toHaveBeenCalledTimes(1);
-      expect(tagUpsert).toHaveBeenCalledWith([{ name: "reading", color: "#888888" }], {
-        onConflict: "name",
-        ignoreDuplicates: false,
-      });
+      // Tags are per user: the owner is on every row and in the conflict target.
+      expect(tagUpsert).toHaveBeenCalledWith(
+        [{ name: "reading", color: "#888888", user_id: "user-1" }],
+        { onConflict: "user_id,name", ignoreDuplicates: false },
+      );
       expect(bookmarkTagsUpsert).toHaveBeenCalledTimes(1);
       expect(bookmarkTagsUpsert).toHaveBeenCalledWith([{ bookmark_id: "new-1", tag_id: "tag-1" }], {
         onConflict: "bookmark_id,tag_id",

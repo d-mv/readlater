@@ -786,13 +786,17 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return { error: null };
   }
 
+  // `text` is the body the reader is showing. It is not sent: the translate
+  // function loads the article itself by bookmark_id (so a client can't have
+  // arbitrary text translated and cached on a row). It is kept to notice an
+  // edit that lands while the translation is in flight.
   async function translateBookmark(
     id: string,
     text: string,
     targetLang: string,
   ): Promise<{ translatedText: string | null; error: string | null }> {
     const { data, error } = await supabase.functions.invoke("translate", {
-      body: { bookmark_id: id, text, target_lang: targetLang },
+      body: { bookmark_id: id, target_lang: targetLang },
     });
     if (error) return { translatedText: null, error: error.message };
 
@@ -959,9 +963,17 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const trimmed = name.trim();
     if (!trimmed) return writeResult(null);
 
+    const userId = useAuthStore().userId;
+    if (!userId) return { error: "You must be signed in." };
+
+    // Tags are per user — unique on (user_id, name) — so the owner goes in
+    // the row and the conflict target.
     const { data: tag, error: tagError } = await supabase
       .from("tags")
-      .upsert({ name: trimmed }, { onConflict: "name", ignoreDuplicates: false })
+      .upsert(
+        { name: trimmed, user_id: userId },
+        { onConflict: "user_id,name", ignoreDuplicates: false },
+      )
       .select("id, name, color")
       .single();
     if (tagError || !tag) return writeResult(tagError ?? "no tag");

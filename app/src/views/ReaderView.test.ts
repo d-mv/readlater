@@ -338,7 +338,7 @@ describe("ReaderView", () => {
       await flushPromises();
 
       expect(invoke).toHaveBeenCalledWith("translate", {
-        body: { bookmark_id: "1", text: "Bonjour le monde", target_lang: expect.any(String) },
+        body: { bookmark_id: "1", target_lang: expect.any(String) },
       });
       expect(wrapper.text()).toContain("Translated");
       expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(

@@ -1273,8 +1273,9 @@ describe("useBookmarksStore", () => {
     await store.fetch();
     const result = await store.translateBookmark("1", "Bonjour", "EN");
 
+    // The function loads the article text itself; the body is never sent.
     expect(invoke).toHaveBeenCalledWith("translate", {
-      body: { bookmark_id: "1", text: "Bonjour", target_lang: "EN" },
+      body: { bookmark_id: "1", target_lang: "EN" },
     });
     expect(result).toEqual({ translatedText: "Hello", error: null });
     expect(store.bookmarks[0]?.translated_content_md).toBe("Hello");
@@ -1595,15 +1596,26 @@ describe("useBookmarksStore", () => {
     await store.fetch();
     await store.addTag("1", "vue");
 
+    // Tags are per user: the owner is in the row and the conflict target.
     expect(tagUpsert).toHaveBeenCalledWith(
-      { name: "vue" },
-      { onConflict: "name", ignoreDuplicates: false },
+      { name: "vue", user_id: "user-1" },
+      { onConflict: "user_id,name", ignoreDuplicates: false },
     );
     expect(joinUpsert).toHaveBeenCalledWith(
       { bookmark_id: "1", tag_id: "tag-1" },
       { onConflict: "bookmark_id,tag_id" },
     );
     expect(store.bookmarks[0]?.tags).toEqual([tag]);
+  });
+
+  test("addTag signed out reports an error without writing", async () => {
+    authState.userId = null;
+
+    const store = useBookmarksStore();
+    const result = await store.addTag("1", "vue");
+
+    expect(result.error).toBeTruthy();
+    expect(from).not.toHaveBeenCalled();
   });
 
   test("removeTag unlinks the tag and updates local state", async () => {

@@ -521,7 +521,9 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   (`ReaderMenu.vue`) rather than a row of separate icon buttons. Delete and
   trash-original both ask for confirmation (`window.confirm`); share opens
   `ShareDialog.vue`. Tagging is
-  `TagInput.vue`, create-on-type against the `tags` table via upsert.
+  `TagInput.vue`, create-on-type against the `tags` table via upsert
+  (`{ name, user_id }`, `onConflict: "user_id,name"` — tags are per user;
+  import upserts the same way).
   `ReaderProgressBar.vue` tracks scroll position.
 - **Reading progress** — scroll position is persisted to `bookmarks.progress`
   (0..1) and restored on open. Writes are coalesced: 2s debounce, only when
@@ -540,7 +542,9 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   client-side and sets `content_edited = true`.
 - **Translation** — for anything with a body (notes and articles), "Translate" calls `store.translateBookmark()` →
   `translate` edge function (DeepL, `DEEPL_API_KEY`), which stores
-  `translated_content_md`/`translated_lang` on the row. A cached translation is
+  `translated_content_md`/`translated_lang` on the row. The request carries
+  only `bookmark_id` and `target_lang`; the function loads the article text
+  server-side. A cached translation is
   shown by default with a translated/original toggle. Long articles are split
   at paragraph boundaries into ≤60 KB requests (DeepL caps a request at
   128 KiB) and reassembled. Bookmarks with a URL also offer "Translate page",
