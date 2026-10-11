@@ -56,18 +56,31 @@ function emitRealtime(payload: Record<string, unknown>) {
 }
 
 /**
- * Chainable stand-in for a PostgREST list query: .textSearch()/.lt()/.gte()/.limit()
- * return self, .order() resolves with { data, error }.
+ * Chainable stand-in for a PostgREST list query: every builder method returns
+ * self, and awaiting it resolves with whatever `result` returns — by default
+ * { data, error }.
  */
 function listQuery(rows: unknown = [], error: unknown = null) {
   const self = {
     textSearch: vi.fn(() => self),
-    lt: vi.fn(() => self),
+    or: vi.fn(() => self),
     gte: vi.fn(() => self),
     limit: vi.fn(() => self),
-    order: vi.fn().mockResolvedValue({ data: rows, error }),
+    order: vi.fn(() => self),
+    result: vi.fn<() => Promise<unknown>>().mockResolvedValue({ data: rows, error }),
+    // A PostgREST builder is itself a thenable (awaiting it sends the
+    // request), which is exactly what this stand-in has to mirror.
+    // oxlint-disable-next-line unicorn/no-thenable
+    then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+      return self.result().then(onFulfilled, onRejected);
+    },
   };
   return self;
+}
+
+/** The PostgREST filter for "after this keyset cursor" in (created_at, id) desc order. */
+function afterCursor(createdAt: string, id: string) {
+  return `created_at.lt."${createdAt}",and(created_at.eq."${createdAt}",id.lt."${id}")`;
 }
 
 const {
@@ -227,7 +240,11 @@ describe("useBookmarksStore", () => {
 
     test("a 401 from the list query ends the login instead of falling back offline", async () => {
       const query = listQuery(null, { message: "JWT expired", code: "PGRST301" });
-      query.order.mockResolvedValue({ data: null, error: { message: "JWT expired" }, status: 401 });
+      query.result.mockResolvedValue({
+        data: null,
+        error: { message: "JWT expired" },
+        status: 401,
+      });
       from.mockReturnValue({ select: () => query });
       authState.sessionExpired.mockImplementation(() => {
         authState.userId = null;
@@ -263,7 +280,7 @@ describe("useBookmarksStore", () => {
 
     let resolveOrder!: (value: unknown) => void;
     const slow = listQuery();
-    slow.order.mockReturnValue(new Promise((r) => (resolveOrder = r)));
+    slow.result.mockReturnValue(new Promise((r) => (resolveOrder = r)));
     from.mockReturnValueOnce({ select: () => slow });
     const inFlight = store.fetch();
 
@@ -308,7 +325,7 @@ describe("useBookmarksStore", () => {
       expect(store.hasMore).toBe(false);
     });
 
-    test("loadMore appends the next page keyed off the oldest loaded created_at", async () => {
+    test("loadMore appends the next page keyed off the oldest loaded (created_at, id)", async () => {
       const first = listQuery(page(50));
       const second = listQuery(page(3, 50));
       from.mockReturnValueOnce({ select: () => first }).mockReturnValueOnce({
@@ -319,9 +336,31 @@ describe("useBookmarksStore", () => {
       await store.fetch();
       await store.loadMore();
 
-      expect(second.lt).toHaveBeenCalledWith("created_at", "2026-01-01T00:00:49Z");
+      expect(second.or).toHaveBeenCalledWith(afterCursor("2026-01-01T00:00:49Z", "b49"));
+      expect(second.order.mock.calls).toEqual([
+        ["created_at", { ascending: false }],
+        ["id", { ascending: false }],
+      ]);
       expect(store.bookmarks).toHaveLength(53);
       expect(store.hasMore).toBe(false);
+    });
+
+    test("a page boundary inside a batch stamped with one instant pages on by id", async () => {
+      const sameInstant = "2026-03-01T00:00:00.123456+00:00";
+      const batch = Array.from({ length: 50 }, (_, i) =>
+        makeBookmark({ id: `id-${String(99 - i).padStart(2, "0")}`, created_at: sameInstant }),
+      );
+      const second = listQuery([makeBookmark({ id: "id-49", created_at: sameInstant })]);
+      from
+        .mockReturnValueOnce({ select: () => listQuery(batch) })
+        .mockReturnValueOnce({ select: () => second });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+      await store.loadMore();
+
+      expect(second.or).toHaveBeenCalledWith(afterCursor(sameInstant, "id-50"));
+      expect(store.bookmarks.at(-1)?.id).toBe("id-49");
     });
 
     test("loadMore is a no-op when a search is active", async () => {
@@ -338,20 +377,14 @@ describe("useBookmarksStore", () => {
 
     /** A list query whose response the test resolves by hand. */
     function deferredListQuery() {
+      const query = listQuery();
       let resolve!: (rows: unknown) => void;
-      const self = {
-        textSearch: vi.fn(() => self),
-        lt: vi.fn(() => self),
-        limit: vi.fn(() => self),
-        order: vi.fn(
-          () =>
-            new Promise((r) => {
-              resolve = (rows) => r({ data: rows, error: null });
-            }),
-        ),
-        resolve: (rows: unknown) => resolve(rows),
-      };
-      return self;
+      query.result.mockReturnValue(
+        new Promise((r) => {
+          resolve = (rows) => r({ data: rows, error: null });
+        }),
+      );
+      return Object.assign(query, { resolve: (rows: unknown) => resolve(rows) });
     }
 
     test("a loadMore that resolves after a search does not leak unfiltered rows into the results", async () => {
@@ -421,7 +454,7 @@ describe("useBookmarksStore", () => {
       from.mockReturnValueOnce({ select: () => more });
       await store.loadMore();
 
-      expect(more.lt).toHaveBeenCalledWith("created_at", "2026-01-01T00:00:49Z");
+      expect(more.or).toHaveBeenCalledWith(afterCursor("2026-01-01T00:00:49Z", "b49"));
     });
 
     test("a search loads the whole result set unpaged", async () => {
@@ -854,7 +887,7 @@ describe("useBookmarksStore", () => {
 
   test("fetch falls back to the offline cache when the network request fails", async () => {
     const query = listQuery();
-    query.order.mockRejectedValue(new Error("offline"));
+    query.result.mockRejectedValue(new Error("offline"));
     from.mockReturnValue({ select: () => query });
     getBookmarksList.mockResolvedValue([
       {
@@ -1696,7 +1729,7 @@ describe("useBookmarksStore", () => {
 
       expect(replaceBookmarksList).toHaveBeenLastCalledWith(expect.any(Array), {
         watermark: "2026-10-09T00:00:00Z",
-        cursor: "2026-10-01T00:00:00Z",
+        cursor: { created_at: "2026-10-01T00:00:00Z", id: "a" },
         hasMore: false,
       });
     });
@@ -1765,10 +1798,54 @@ describe("useBookmarksStore", () => {
       expect(store.bookmarks.some((b) => b.id === "old")).toBe(false);
     });
 
+    test("a changed row stamped with the cursor's instant is in the window only if it sorts before the cursor", async () => {
+      const page = Array.from({ length: 50 }, (_, i) =>
+        row(
+          `p${String(i).padStart(2, "0")}`,
+          String(30 - Math.floor(i / 5)).padStart(2, "0"),
+          "20",
+        ),
+      );
+      tables(listQuery(page));
+      const store = useBookmarksStore();
+      await store.fetch();
+      // Cursor: (2026-10-21, "p49").
+
+      tables(listQuery([row("q-after", "21", "22"), row("a-past", "21", "22")]));
+      await store.fetch();
+
+      expect(store.bookmarks.some((b) => b.id === "q-after")).toBe(true);
+      expect(store.bookmarks.some((b) => b.id === "a-past")).toBe(false);
+    });
+
+    test("rows within one millisecond keep the server's microsecond order", async () => {
+      tables(listQuery([row("x", "01", "01")]));
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      tables(
+        listQuery([
+          makeBookmark({
+            id: "z-earlier",
+            created_at: "2026-10-05T00:00:00.123400+00:00",
+            updated_at: "2026-10-09T00:00:00Z",
+          }),
+          makeBookmark({
+            id: "a-later",
+            created_at: "2026-10-05T00:00:00.1239+00:00",
+            updated_at: "2026-10-09T00:00:00Z",
+          }),
+        ]),
+      );
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["a-later", "z-earlier", "x"]);
+    });
+
     test("a cold start shows the persisted window, then patches it by delta", async () => {
       getSyncState.mockResolvedValue({
         watermark: "2026-10-09T00:00:00Z",
-        cursor: "2026-10-05T00:00:00Z",
+        cursor: { created_at: "2026-10-05T00:00:00Z", id: "a" },
         hasMore: true,
       });
       getBookmarksList.mockResolvedValue([

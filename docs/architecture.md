@@ -94,6 +94,7 @@ create table bookmarks (
 );
 
 create index bookmarks_status_idx on bookmarks (status) where status = 'pending';
+-- replaced by (user_id, created_at desc, id desc) in 20261011172000 for (created_at, id) keyset paging
 create index bookmarks_user_created_idx on bookmarks (user_id, created_at desc);
 create index bookmarks_search_idx on bookmarks using gin(search_vector);
 create unique index bookmarks_url_normalized_uniq on bookmarks (url_normalized);
@@ -488,7 +489,8 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   (match-all); no query on toggle.
 - **Delta sync** — the unfiltered list is persisted to IndexedDB with a sync
   state (`watermark` = newest `updated_at`/`deleted_at` it reflects, plus the
-  keyset `cursor`/`hasMore`), written in one transaction with the list.
+  `(created_at, id)` keyset `cursor`/`hasMore`), written in one transaction
+  with the list.
   `fetch()` without a search then asks only for rows with `updated_at >=
   watermark − 5 min` (overlap for late-committing transactions) and for
   `bookmark_deletions` tombstones since then, instead of re-reading the first
@@ -706,8 +708,12 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
 
 - **Paging vs. derived state.** `bookmarks.fetch()` loads the first page (50
   rows, newest first); an IntersectionObserver sentinel drives
-  `store.loadMore()`, which pages older rows with a `created_at < cursor`
-  keyset. A search loads its whole (bounded) result set unpaged. The unread
+  `store.loadMore()`, which pages older rows on a `(created_at, id)` keyset
+  (`created_at < X or (created_at = X and id < Y)`, ordered `created_at desc,
+  id desc`; index `(user_id, created_at desc, id desc)`) — `created_at` alone
+  skipped rows when an import stamped a batch with one instant. A persisted
+  cursor from before that (a bare `created_at`) is read back as that instant
+  with the max uuid, so the next page re-covers it. A search loads its whole (bounded) result set unpaged. The unread
   badge, tag bar and tag filter derive from the loaded set, so they reflect
   only the pages loaded so far. The load-more sentinel is `v-if`'d on
   `visibleBookmarks.length > 0` so an empty Archived tab doesn't auto-page the

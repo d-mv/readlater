@@ -243,9 +243,21 @@ describe("offlineDb", () => {
   describe("list sync state", () => {
     const state = {
       watermark: "2026-10-01T00:00:00Z",
-      cursor: "2026-09-01T00:00:00Z",
+      cursor: { created_at: "2026-09-01T00:00:00Z", id: "b" },
       hasMore: true,
     };
+
+    test("a cursor stored as a bare created_at reads back covering that whole instant", async () => {
+      await offlineDb.replaceBookmarksList([makeMeta({ id: "1" })], state);
+      const db = await openDB("read-later-offline");
+      await db.put("syncState", { ...state, cursor: "2026-09-01T00:00:00Z" }, "list");
+      db.close();
+
+      expect(await offlineDb.getSyncState()).toEqual({
+        ...state,
+        cursor: { created_at: "2026-09-01T00:00:00Z", id: "ffffffff-ffff-ffff-ffff-ffffffffffff" },
+      });
+    });
 
     test("is absent until a list is persisted with one", async () => {
       await offlineDb.replaceBookmarksList([makeMeta({ id: "1" })]);

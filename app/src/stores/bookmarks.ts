@@ -89,8 +89,32 @@ function stripContentMd(bookmark: Bookmark): offlineDb.OfflineBookmarkMeta {
   return offlineDb.stripContentMd(bookmark);
 }
 
+// PostgREST returns created_at with microseconds, which Date.parse drops —
+// and rows an import stamped within the same millisecond differ only there.
+function microseconds(timestamp: string): number {
+  const fraction = /\.(\d+)/.exec(timestamp)?.[1] ?? "";
+  return Number(fraction.slice(3, 6).padEnd(3, "0"));
+}
+
+function compareTimestamps(a: string, b: string): number {
+  return Date.parse(a) - Date.parse(b) || microseconds(a) - microseconds(b);
+}
+
+// The list's keyset order, (created_at, id) — the order the server pages in,
+// so the window a cursor bounds here matches the one it bounds there.
+// Canonical lowercase uuids compare as strings the way Postgres compares them.
+function compareKeys(a: offlineDb.ListCursor, b: offlineDb.ListCursor): number {
+  const byTime = compareTimestamps(a.created_at, b.created_at);
+  if (byTime !== 0) return byTime;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
 function byCreatedAtDesc(a: Bookmark, b: Bookmark) {
-  return Date.parse(b.created_at) - Date.parse(a.created_at);
+  return compareKeys(b, a);
+}
+
+function cursorOf(row: Bookmark | undefined): offlineDb.ListCursor | null {
+  return row ? { created_at: row.created_at, id: row.id } : null;
 }
 
 function latest(a: string | null, b: string): string {
@@ -267,8 +291,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   // What `bookmarks` currently holds, so async results and live events can
   // tell whether they still apply:
   // - "recent": the unfiltered newest-first window, paged by `cursor` (the
-  //   created_at of the oldest *paged* row — rows added by fetchOne() or
-  //   Realtime don't move it), current as of `watermark` (the newest
+  //   (created_at, id) of the oldest *paged* row — rows added by fetchOne()
+  //   or Realtime don't move it), current as of `watermark` (the newest
   //   updated_at / deleted_at it reflects; null until a row has been seen).
   //   The only kind mirrored to the offline list.
   // - "search": a whole, unpaged full-text result set for `query`.
@@ -276,7 +300,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   // Every fetch() bumps `listGeneration`; a response (fetch or loadMore)
   // started under an older generation is discarded.
   type ListSession =
-    | { kind: "recent"; cursor: string | null; watermark: string | null }
+    | { kind: "recent"; cursor: offlineDb.ListCursor | null; watermark: string | null }
     | { kind: "search"; query: string }
     | { kind: "offline"; query: string };
   let listSession: ListSession = { kind: "recent", cursor: null, watermark: null };
@@ -284,20 +308,28 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
 
   // One page of the list, newest first. `query` applies full-text search;
   // tag filtering is resolved client-side against the loaded set (see
-  // visibleBookmarks), so it costs no query. `before` is a keyset cursor on
-  // created_at for loadMore().
+  // visibleBookmarks), so it costs no query. `before` is the keyset cursor
+  // for loadMore(): rows strictly after it in (created_at desc, id desc)
+  // order — created_at alone would skip the rest of a batch an import
+  // stamped with the cursor row's instant. Values are quoted for PostgREST's
+  // logic-tree syntax (timestamps contain `:` and `.`).
   async function queryBookmarks(
-    opts: { query?: string; limit?: number; before?: string } = {},
+    opts: { query?: string; limit?: number; before?: offlineDb.ListCursor } = {},
   ): Promise<Bookmark[]> {
     let query = supabase.from("bookmarks").select(LIST_SELECT);
 
     if (opts.query) {
       query = query.textSearch("search_vector", opts.query, { type: "websearch" });
     }
-    if (opts.before) query = query.lt("created_at", opts.before);
+    if (opts.before) {
+      const { created_at: at, id } = opts.before;
+      query = query.or(`created_at.lt."${at}",and(created_at.eq."${at}",id.lt."${id}")`);
+    }
     if (opts.limit) query = query.limit(opts.limit);
 
-    const { data, error, status } = await query.order("created_at", { ascending: false });
+    const { data, error, status } = await query
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false });
     if (status === UNAUTHORIZED) throw new SessionExpiredError();
     if (error) throw error;
     return (data ?? []) as unknown as Bookmark[];
@@ -330,10 +362,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     };
   }
 
-  // Whether a row created at `createdAt` belongs to the paged window — rows
-  // older than the cursor arrive through loadMore(), fresh.
-  function inWindow(createdAt: string, cursor: string | null, more: boolean) {
-    return !more || cursor === null || Date.parse(createdAt) >= Date.parse(cursor);
+  // Whether a row belongs to the paged window — rows past the cursor in
+  // keyset order arrive through loadMore(), fresh.
+  function inWindow(row: Bookmark, cursor: offlineDb.ListCursor | null, more: boolean) {
+    return !more || cursor === null || compareKeys(row, cursor) >= 0;
   }
 
   // Brings the "recent" list up to date by delta instead of re-reading the
@@ -342,7 +374,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   // synced list to start from, or it is too far behind — the caller then
   // loads a fresh first page.
   async function syncRecent(isCurrent: () => boolean): Promise<boolean> {
-    let cursor: string | null;
+    let cursor: offlineDb.ListCursor | null;
     let watermark: string;
     if (listSession.kind === "recent" && listSession.watermark !== null) {
       ({ cursor, watermark } = listSession);
@@ -354,7 +386,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       ({ cursor, watermark } = state);
       // Downloaded articles outside the window carry metadata of unknown age;
       // leave them for loadMore() rather than show them stale.
-      bookmarks.value = snapshot.filter((b) => inWindow(b.created_at, cursor, state.hasMore));
+      bookmarks.value = snapshot.filter((b) => inWindow(b, cursor, state.hasMore));
       listSession = { kind: "recent", cursor, watermark };
       hasMore.value = state.hasMore;
     }
@@ -374,7 +406,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // Unchanged since loaded (the overlap re-sends recent rows): keep it,
       // with any body the reader already pulled.
       if (existing?.updated_at === row.updated_at) continue;
-      if (existing || inWindow(row.created_at, cursor, hasMore.value)) byId.set(row.id, row);
+      if (existing || inWindow(row, cursor, hasMore.value)) byId.set(row.id, row);
     }
     for (const row of changed) watermark = latest(watermark, row.updated_at);
     for (const d of deleted) watermark = latest(watermark, d.deleted_at);
@@ -426,7 +458,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       } else {
         let watermark: string | null = null;
         for (const row of page) watermark = latest(watermark, row.updated_at);
-        listSession = { kind: "recent", cursor: page.at(-1)?.created_at ?? null, watermark };
+        listSession = { kind: "recent", cursor: cursorOf(page.at(-1)), watermark };
         hasMore.value = page.length === PAGE_SIZE;
         persistOfflineList();
       }
@@ -476,7 +508,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       for (const row of page) watermark = latest(watermark, row.updated_at);
       listSession = {
         kind: "recent",
-        cursor: page.at(-1)?.created_at ?? session.cursor,
+        cursor: cursorOf(page.at(-1)) ?? session.cursor,
         watermark,
       };
       hasMore.value = page.length === PAGE_SIZE;

@@ -43,18 +43,34 @@ interface OfflineDbSchema extends DBSchema {
   };
   syncState: {
     key: string;
-    value: ListSyncState;
+    value: StoredListSyncState;
   };
 }
 
 // Where the persisted list stands relative to the server: `watermark` is the
 // newest updated_at it reflects (delta sync asks only for rows changed or
-// deleted since), `cursor`/`hasMore` the created_at keyset window it covers.
+// deleted since), `cursor`/`hasMore` the (created_at, id) keyset window it
+// covers.
 export interface ListSyncState {
   watermark: string;
-  cursor: string | null;
+  cursor: ListCursor | null;
   hasMore: boolean;
 }
+
+// The oldest paged row. created_at alone isn't unique — an import stamps
+// many rows with the same instant — so id breaks the tie.
+export interface ListCursor {
+  created_at: string;
+  id: string;
+}
+
+// The largest uuid: paired with an old created_at-only cursor, it keeps
+// every row stamped at that instant inside the next page, which is where the
+// old `created_at < cursor` filter could drop them.
+const MAX_UUID = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+
+// Sync state as stored before the cursor carried an id.
+type StoredListSyncState = Omit<ListSyncState, "cursor"> & { cursor: ListCursor | string | null };
 
 const DB_NAME = "read-later-offline";
 const DB_VERSION = 3;
@@ -182,7 +198,9 @@ export async function replaceBookmarksList(
 
 export async function getSyncState(): Promise<ListSyncState | undefined> {
   const db = await getDb();
-  return db.get("syncState", SYNC_STATE_KEY);
+  const state = await db.get("syncState", SYNC_STATE_KEY);
+  if (typeof state?.cursor !== "string") return state as ListSyncState | undefined;
+  return { ...state, cursor: { created_at: state.cursor, id: MAX_UUID } };
 }
 
 export async function putBookmarkMeta(item: OfflineBookmarkMeta): Promise<void> {
