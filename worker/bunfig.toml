@@ -1,4 +1,5 @@
 [test]
+preload = ["./test/setup.ts"]
 # Coverage stays opt-in (`bun run test:coverage`); when it runs, every file
 # loaded by the suite must be fully covered or the run fails.
 coverageSkipTestFiles = true
