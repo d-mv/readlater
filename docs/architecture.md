@@ -478,9 +478,10 @@ avoids holding a websocket open just for this.
 // worker/src/index.ts — recursive setTimeout, not setInterval, so cycles
 // never overlap and the delay grows while the queue is empty.
 // 15s when there's work → doubles toward a 60s ceiling on empty cycles.
-// Each cycle takes up to 5 rows: status = 'pending' and next_attempt_at
-// null or past. Stale-'processing' recovery (> 5 min → failed) runs once
-// every 4 cycles, not every one.
+// Each cycle takes up to 5 rows, oldest created_at first (FIFO): status =
+// 'pending' and next_attempt_at null or past. Stale-'processing' recovery
+// (> 5 min) runs once every 4 cycles and uses the retry budget: back to
+// 'pending' with backoff while attempts remain, else 'failed'.
 
 // per pending row: pending → processing, parse (45 s cap), processing →
 // ready | pending (retry) | failed. Every status write is compare-and-set
@@ -584,7 +585,9 @@ const content_md = `# ${meta.title}\n\n![thumbnail](${thumbnail_url})`;
 ```
 Thumbnails are uploaded to Supabase Storage first (`worker/src/storage.ts`,
 `youtube/${crypto.randomUUID()}.<ext>`) so `content_md` references the
-Storage URL, not the original YouTube CDN URL. `word_count`/`reading_time`
+Storage URL, not the original YouTube CDN URL. A failed copy never fails the
+bookmark: it falls back to hot-linking the original (http(s) only) or to no
+thumbnail, and the markdown drops the image line. `word_count`/`reading_time`
 are `null` for YouTube bookmarks — the reader shows the embedded player
 instead of a transcript. (An earlier version shelled out to `yt-dlp` for
 metadata + auto-captions and derived reading time from duration; that was

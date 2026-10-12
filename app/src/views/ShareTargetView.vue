@@ -2,6 +2,7 @@
 import { nextTick, onMounted, ref, shallowRef, useTemplateRef } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useBookmarksStore } from "../stores/bookmarks";
+import { isHttpUrl } from "../utils/bookmarkType";
 import { isBareUrl, toCaptureOutcome, type CaptureOutcome } from "../utils/captureText";
 import Button from "../shared/ui/Button.vue";
 
@@ -13,9 +14,9 @@ const store = useBookmarksStore();
 const outcome = ref<CaptureOutcome>({ kind: "working" });
 // What Save will store: a URL (from the url param, or text that is itself a
 // bare URL), else the shared text as a note.
-const shared = shallowRef<{ kind: "url"; url: string } | { kind: "note"; text: string } | null>(
-  null,
-);
+const shared = shallowRef<
+  { kind: "url"; url: string; title?: string } | { kind: "note"; text: string } | null
+>(null);
 const confirmPanel = useTemplateRef<HTMLElement>("confirmPanel");
 
 function finish() {
@@ -32,7 +33,7 @@ async function save() {
   outcome.value = { kind: "working" };
 
   if (item.kind === "url") {
-    const next = toCaptureOutcome(await store.add(item.url));
+    const next = toCaptureOutcome(await store.add(item.url, { title: item.title }));
     if (next.kind === "saved") finish();
     else outcome.value = next;
     return;
@@ -53,9 +54,16 @@ async function onContinueRefresh() {
 onMounted(async () => {
   const url = typeof route.query.url === "string" ? route.query.url.trim() : "";
   const text = typeof route.query.text === "string" ? route.query.text.trim() : "";
+  const title = typeof route.query.title === "string" ? route.query.title.trim() : "";
   const targetUrl = url || (text && isBareUrl(text) ? text : "");
 
-  if (targetUrl) shared.value = { kind: "url", url: targetUrl };
+  // Same up-front check as /capture: a non-http(s) URL never gets a Save button.
+  if (targetUrl && !isHttpUrl(targetUrl)) {
+    outcome.value = { kind: "error", message: "Only http(s) pages can be saved." };
+    return;
+  }
+
+  if (targetUrl) shared.value = { kind: "url", url: targetUrl, title: title || undefined };
   else if (text) shared.value = { kind: "note", text };
   else {
     outcome.value = { kind: "error", message: "Nothing to save." };
@@ -78,7 +86,16 @@ onMounted(async () => {
       data-testid="confirm-panel"
       class="flex min-w-0 flex-col items-center gap-16 p-32 text-center"
     >
-      <p v-if="shared.kind === 'url'" class="m-0 text-sm break-all text-ink">{{ shared.url }}</p>
+      <template v-if="shared.kind === 'url'">
+        <p
+          v-if="shared.title"
+          data-testid="shared-title"
+          class="m-0 text-base font-medium text-ink"
+        >
+          {{ shared.title }}
+        </p>
+        <p class="m-0 text-sm break-all text-ink">{{ shared.url }}</p>
+      </template>
       <p v-else class="m-0 line-clamp-6 text-sm break-words whitespace-pre-line text-ink">
         {{ shared.text }}
       </p>

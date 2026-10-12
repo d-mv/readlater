@@ -74,6 +74,31 @@ describe("ShareTargetView", () => {
     expect(replace).toHaveBeenCalledWith({ name: "list" });
   });
 
+  test("a non-http(s) URL is refused before any Save button is offered", async () => {
+    query.url = "javascript:alert(document.domain)";
+
+    const wrapper = mount(ShareTargetView);
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="save-btn"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain("Only http(s) pages can be saved.");
+    expect(from).not.toHaveBeenCalled();
+  });
+
+  test("shows the shared title and saves it with the URL", async () => {
+    query.url = "https://arc90.com/x";
+    query.title = "  A great article ";
+    const insert = mockInsert({ id: "new", url: "https://arc90.com/x", status: "pending" });
+
+    const wrapper = mount(ShareTargetView);
+    await flushPromises();
+    expect(wrapper.get('[data-testid="shared-title"]').text()).toBe("A great article");
+    await wrapper.get('[data-testid="save-btn"]').trigger("click");
+    await flushPromises();
+
+    expect(insert).toHaveBeenCalledWith(expect.objectContaining({ title: "A great article" }));
+  });
+
   test("treats shared text that is itself a bare URL the same as a url param", async () => {
     query.text = "https://arc90.com/y";
     const insert = mockInsert({

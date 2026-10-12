@@ -27,42 +27,108 @@ describe("formatErrorMessage", () => {
 });
 
 describe("recoverStaleProcessing", () => {
-  test("marks stale bookmarks as failed instead of resetting to pending", async () => {
-    let updatedPayload: Record<string, unknown> | null = null;
-    let eqFilter: [string, unknown] | null = null;
-    let orFilter: string | null = null;
+  type Stale = { id: string; attempts: number | null };
 
-    const mockClient = {
+  // select(...).eq("status","processing").or(stale) lists the stuck rows;
+  // each is then moved with a compare-and-set on "processing".
+  function staleClient(rows: Stale[], opts: { listError?: string; moves?: boolean } = {}) {
+    const listFilters: { eq?: [string, unknown]; or?: string } = {};
+    const updates: Update[] = [];
+    const client = {
       from: (table: string) => {
         expect(table).toBe("bookmarks");
         return {
+          select: (_cols: string) => ({
+            eq: (col: string, val: unknown) => {
+              listFilters.eq = [col, val];
+              return {
+                or: (filter: string) => {
+                  listFilters.or = filter;
+                  return Promise.resolve(
+                    opts.listError
+                      ? { data: null, error: { message: opts.listError } }
+                      : { data: rows, error: null },
+                  );
+                },
+              };
+            },
+          }),
           update: (payload: Record<string, unknown>) => {
-            updatedPayload = payload;
-            return {
+            const update: Update = { payload, filters: {} };
+            updates.push(update);
+            const chain = {
               eq: (col: string, val: unknown) => {
-                eqFilter = [col, val];
-                return {
-                  or: (filterStr: string) => {
-                    orFilter = filterStr;
-                    return Promise.resolve({ error: null });
-                  },
-                };
+                update.filters[col] = val;
+                return chain;
               },
+              select: () =>
+                Promise.resolve({
+                  data: opts.moves === false ? [] : [{ id: update.filters.id }],
+                  error: null,
+                }),
             };
+            return chain;
           },
         };
       },
       // deno-lint-ignore no-explicit-any
     } as any;
+    return { client, listFilters, updates };
+  }
 
-    await recoverStaleProcessing(mockClient);
+  test("only looks at rows stuck in processing past the threshold", async () => {
+    const { client, listFilters } = staleClient([]);
 
-    expect(updatedPayload).toMatchObject({
-      status: "failed",
+    await recoverStaleProcessing(client);
+
+    expect(listFilters.eq).toEqual(["status", "processing"]);
+    expect(String(listFilters.or)).toContain("processed_at.is.null");
+    expect(String(listFilters.or)).toContain("processed_at.lt.");
+  });
+
+  test("a stuck row with attempts left goes back to pending with a backoff", async () => {
+    const { client, updates } = staleClient([{ id: "a", attempts: 0 }]);
+    const before = Date.now();
+
+    await recoverStaleProcessing(client);
+
+    expect(updates).toHaveLength(1);
+    expect(updates[0]?.filters).toEqual({ id: "a", status: "processing" });
+    expect(updates[0]?.payload).toMatchObject({
+      status: "pending",
+      attempts: 1,
       error_message: "Processing timed out or worker restarted",
     });
-    expect(eqFilter as unknown as [string, unknown]).toEqual(["status", "processing"]);
-    expect(String(orFilter)).toContain("processed_at.is.null");
+    const next = Date.parse(String(updates[0]?.payload.next_attempt_at));
+    expect(next).toBeGreaterThanOrEqual(before + RETRY_BACKOFF_MS[0]);
+  });
+
+  test("a stuck row that used its retries is marked failed", async () => {
+    const { client, updates } = staleClient([{ id: "b", attempts: RETRY_BACKOFF_MS.length }]);
+
+    await recoverStaleProcessing(client);
+
+    expect(updates[0]?.payload).toMatchObject({
+      status: "failed",
+      attempts: RETRY_BACKOFF_MS.length + 1,
+    });
+    expect(updates[0]?.payload).not.toHaveProperty("next_attempt_at");
+  });
+
+  test("a null attempts count is treated as zero", async () => {
+    const { client, updates } = staleClient([{ id: "c", attempts: null }]);
+
+    await recoverStaleProcessing(client);
+
+    expect(updates[0]?.payload).toMatchObject({ status: "pending", attempts: 1 });
+  });
+
+  test("a listing error writes nothing", async () => {
+    const { client, updates } = staleClient([{ id: "a", attempts: 0 }], { listError: "down" });
+
+    await recoverStaleProcessing(client);
+
+    expect(updates).toHaveLength(0);
   });
 });
 
@@ -82,6 +148,7 @@ function fakeClient(
 ) {
   const updates: Update[] = [];
   const pollFilters: string[] = [];
+  const pollOrders: [string, boolean][] = [];
   const client = {
     from: (_table: string) => ({
       update: (payload: Record<string, unknown>) => {
@@ -108,7 +175,12 @@ function fakeClient(
           or: (filter: string) => {
             pollFilters.push(filter);
             return {
-              limit: () => Promise.resolve({ data: opts.pending ?? [], error: null }),
+              order: (col: string, options: { ascending: boolean }) => {
+                pollOrders.push([col, options.ascending]);
+                return {
+                  limit: () => Promise.resolve({ data: opts.pending ?? [], error: null }),
+                };
+              },
             };
           },
         }),
@@ -116,7 +188,7 @@ function fakeClient(
     }),
   };
   // deno-lint-ignore no-explicit-any
-  return { client: client as any, updates, pollFilters };
+  return { client: client as any, updates, pollFilters, pollOrders };
 }
 
 const parsed = async () => ({
@@ -294,21 +366,18 @@ describe("pollOnce", () => {
     let recoveryCalls = 0;
     const mockClient = {
       from: () => ({
-        update: (payload: Record<string, unknown>) => ({
-          eq: () => ({
-            or: () => {
-              if (payload.error_message === "Processing timed out or worker restarted") {
-                recoveryCalls += 1;
-              }
-              return Promise.resolve({ error: null });
-            },
-          }),
-        }),
-        select: () => ({
-          eq: () => ({
-            or: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }),
-          }),
-        }),
+        select: (cols: string) => {
+          if (cols === "id, attempts") recoveryCalls += 1;
+          return {
+            eq: () => ({
+              or: () => ({
+                // Recovery awaits the listing directly; the poll orders and limits it.
+                then: (resolve: (v: unknown) => unknown) => resolve({ data: [], error: null }),
+                order: () => ({ limit: () => Promise.resolve({ data: [], error: null }) }),
+              }),
+            }),
+          };
+        },
       }),
       // deno-lint-ignore no-explicit-any
     } as any;
@@ -330,8 +399,10 @@ describe("pollOnce", () => {
         select: () => ({
           eq: () => ({
             or: () => ({
-              limit: () =>
-                Promise.resolve({ data: null, error: { message: "connection refused" } }),
+              order: () => ({
+                limit: () =>
+                  Promise.resolve({ data: null, error: { message: "connection refused" } }),
+              }),
             }),
           }),
         }),
@@ -439,6 +510,14 @@ describe("processBookmark retries", () => {
 });
 
 describe("pollOnce queue filter", () => {
+  test("takes the oldest saved bookmarks first (FIFO)", async () => {
+    const { client, pollOrders } = fakeClient();
+
+    await pollOnce(client);
+
+    expect(pollOrders).toEqual([["created_at", true]]);
+  });
+
   test("only picks up pending rows whose retry backoff has elapsed", async () => {
     const { client, pollFilters } = fakeClient();
     const before = new Date().toISOString();

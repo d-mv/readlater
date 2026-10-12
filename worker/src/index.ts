@@ -146,23 +146,58 @@ export function formatErrorMessage(err: unknown): string {
   return raw.replace(/\u0000/g, "").slice(0, ERROR_MESSAGE_MAX_LENGTH) || "Unknown error";
 }
 
-// Mark bookmarks stuck in 'processing' (e.g. from an ungraceful container restart or worker crash) as 'failed'
-// so they do not loop forever or block the queue.
+// Bookmarks stuck in 'processing' (an ungraceful container restart or a
+// worker crash) go through the same retry budget as a transient failure: back
+// to 'pending' with a backoff while attempts remain, 'failed' after that. Each
+// row moves with a compare-and-set on 'processing', so a row a live worker
+// finishes meanwhile is left alone.
+const STALE_MESSAGE = "Processing timed out or worker restarted";
+
 export async function recoverStaleProcessing(client: SupabaseClient = supabase) {
   const staleThreshold = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-  const { error } = await client
+  const { data, error } = await client
     .from("bookmarks")
-    .update({
-      status: "failed",
-      error_message: "Processing timed out or worker restarted",
-      processed_at: new Date().toISOString(),
-    })
+    .select("id, attempts")
     .eq("status", "processing")
     .or(`processed_at.is.null,processed_at.lt.${staleThreshold}`);
 
   if (error) {
     log.error("stale-processing recovery failed", { err: error.message });
+    return;
   }
+
+  for (const row of (data ?? []) as { id: string; attempts: number | null }[]) {
+    const attempts = (row.attempts ?? 0) + 1;
+    const fields = {
+      attempts,
+      error_message: STALE_MESSAGE,
+      processed_at: new Date().toISOString(),
+    };
+    const result =
+      attempts < MAX_ATTEMPTS
+        ? await transition(client, row.id, "processing", "pending", {
+            ...fields,
+            next_attempt_at: nextAttemptAt(attempts),
+          })
+        : await transition(client, row.id, "processing", "failed", fields);
+    if (result.error) {
+      log.error("stale-processing recovery failed for a bookmark", {
+        bookmarkId: row.id,
+        err: result.error,
+      });
+    } else if (result.moved) {
+      log.warn("recovered a stale processing bookmark", {
+        bookmarkId: row.id,
+        attempts,
+        retrying: attempts < MAX_ATTEMPTS,
+      });
+    }
+  }
+}
+
+function nextAttemptAt(attempts: number): string {
+  const delayMs = RETRY_BACKOFF_MS[attempts - 1] ?? MAX_RETRY_BACKOFF_MS;
+  return new Date(Date.now() + delayMs).toISOString();
 }
 
 export async function processBookmark(
@@ -240,18 +275,17 @@ export async function processBookmark(
     };
 
     if (retry) {
-      const delayMs = RETRY_BACKOFF_MS[attempts - 1] ?? MAX_RETRY_BACKOFF_MS;
-      const nextAttemptAt = new Date(Date.now() + delayMs).toISOString();
+      const next_attempt_at = nextAttemptAt(attempts);
       log.warn("bookmark processing failed transiently; will retry", {
         bookmarkId: bookmark.id,
         url: bookmark.url,
         attempts,
-        nextAttemptAt,
+        nextAttemptAt: next_attempt_at,
         err,
       });
       const requeued = await transition(client, bookmark.id, "processing", "pending", {
         ...fields,
-        next_attempt_at: nextAttemptAt,
+        next_attempt_at,
       });
       if (requeued.error) {
         log.error("failed to re-queue bookmark", { bookmarkId: bookmark.id, err: requeued.error });
@@ -303,6 +337,9 @@ export async function pollOnce(
         .select("id, url, type, attempts")
         .eq("status", "pending")
         .or(`next_attempt_at.is.null,next_attempt_at.lte.${new Date().toISOString()}`)
+        // FIFO: oldest saved first, so a burst of new captures can't starve
+        // an older bookmark (or one coming back from a retry backoff).
+        .order("created_at", { ascending: true })
         .limit(BATCH_SIZE);
 
       if (error) {
