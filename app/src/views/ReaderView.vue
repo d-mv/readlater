@@ -176,7 +176,11 @@ onMounted(async () => {
   // Realtime keeps the row live while the reader is open — a pending article
   // finishing on the worker lands here without polling.
   store.subscribeToChanges();
-  if (!bookmark.value || bookmark.value.content_md === undefined) {
+  // Offline, a row loaded online this session still points its images at
+  // their original hosts; re-read the downloaded copy so they come from the
+  // stored blobs instead.
+  const offlineWithCopy = !navigator.onLine && offlineCache.isCached(props.id);
+  if (!bookmark.value || bookmark.value.content_md === undefined || offlineWithCopy) {
     await loadFullRow();
   }
   if (bookmark.value?.status === "ready") {

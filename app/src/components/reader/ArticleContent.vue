@@ -73,6 +73,20 @@ const md = new MarkdownIt({ html: true });
 // re-parsing sanitized HTML, which reopens the door to mutation XSS.
 const purify = DOMPurify(window);
 
+// Offline copies swap image URLs for this page's own blob: object URLs (see
+// offlineDb.hydrateArticleContent), which DOMPurify's default URI check
+// strips. Keep exactly those: an <img src> that is a blob: URL of this origin
+// can only point at a Blob this page created.
+purify.addHook("uponSanitizeAttribute", (node, data) => {
+  if (
+    node.tagName === "IMG" &&
+    data.attrName === "src" &&
+    data.attrValue.startsWith(`blob:${window.location.origin}/`)
+  ) {
+    data.forceKeepAttr = true;
+  }
+});
+
 purify.addHook("afterSanitizeAttributes", (node) => {
   if (node.tagName === "A") {
     const href = node.getAttribute("href");

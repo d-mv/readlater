@@ -27,7 +27,12 @@ function onToggle(event: Event) {
   // bookmark by this link's id — confirm before the first share, not on
   // every re-share or on unshare.
   if (next && !props.bookmark.is_public) {
-    if (!window.confirm("Make this bookmark visible to anyone with the link?")) return;
+    if (!window.confirm("Make this bookmark visible to anyone with the link?")) {
+      // The native checkbox already flipped; `:checked` is still false, so
+      // Vue won't re-render it. Put it back by hand.
+      (event.target as HTMLInputElement).checked = false;
+      return;
+    }
   }
   emit("togglePublic", next);
 }

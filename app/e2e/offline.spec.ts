@@ -21,18 +21,9 @@ import {
  * offline and keep navigating inside the app: the data paths under test
  * (IndexedDB list snapshot, downloaded articles) are the same either way.
  *
- * KNOWN BUG (app): IndexedDB writes of rows taken from the Pinia store fail
- * with DataCloneError — they carry Vue reactive proxies (`tags`), which
- * structured clone refuses. That hits the list snapshot
- * (replaceBookmarksList) and the reader's automatic download on open
- * (cacheBookmark(bookmark.value)); the row toggle works only because it
- * caches the plain object fetchOne() returns. The affected flows are marked
- * `test.fail` so the suite stays green and flags the fix: once a test starts
- * passing, drop its `test.fail`.
+ * IndexedDB writes go through offlineDb.toPlain: rows from the Pinia store
+ * carry Vue reactive proxies, which structured clone refuses.
  */
-const OFFLINE_CACHE_BUG =
-  "offlineDb is handed reactive proxies (DataCloneError): list snapshot and open-to-download fail";
-
 // An article with one image that downloads and one that doesn't (a 404, as a
 // CORS-blocked hot link would), saved with the row toggle; the reader's code
 // is loaded on the way (there's no service worker to fetch it offline).
@@ -59,7 +50,6 @@ async function goOffline(context: BrowserContext, page: Page) {
 }
 
 test("an article opened online stays readable offline", async ({ page, context, backend }) => {
-  test.fail(true, OFFLINE_CACHE_BUG);
   backend.addBookmark({ title: "Read on the train", content_md: "Words for the tunnel." });
   backend.addBookmark({ title: "Never opened", content_md: "Not downloaded." });
   await page.goto("/");
@@ -79,7 +69,6 @@ test("offline, the list is rebuilt from IndexedDB and searched locally", async (
   context,
   backend,
 }) => {
-  test.fail(true, OFFLINE_CACHE_BUG);
   backend.addBookmark({ title: "Sourdough basics" });
   backend.addBookmark({ title: "Rust ownership" });
   await page.goto("/");
@@ -118,7 +107,8 @@ test("the row toggle downloads an article that is then read from IndexedDB offli
   await toggle.click();
   await expect(toggle).toHaveAttribute("aria-pressed", "true", { timeout: 2_000 });
   await expect(toggle).toHaveAttribute("title", "Remove offline copy");
-  expect(await offlineStoreKeys(page, "articles")).toEqual([bookmark.id]);
+  // Opening "Warm-up" downloaded it too (the reader caches what it opens).
+  expect(await offlineStoreKeys(page, "articles")).toContain(bookmark.id);
 
   await goOffline(context, page);
   // Leaving and re-entering the list makes it fetch, which offline falls back
@@ -131,7 +121,7 @@ test("the row toggle downloads an article that is then read from IndexedDB offli
   // Removing the copy works offline too.
   await page.getByTestId("back-btn").click();
   await row(page, "For later").getByTestId("offline-toggle").click();
-  await expect.poll(() => offlineStoreKeys(page, "articles")).toEqual([]);
+  await expect.poll(() => offlineStoreKeys(page, "articles")).not.toContain(bookmark.id);
 });
 
 test("a copy missing an image says so on the row and in the offline reader", async ({
@@ -167,7 +157,6 @@ test("offline, a downloaded image renders from its saved copy", async ({
   //   row in the store, so the reader never re-reads the offline copy and
   //   keeps the hot-link URLs until the list re-fetches from IndexedDB. This
   //   test opens the article both ways.
-  test.fail(true, "offline images: blob: src stripped by DOMPurify; in-session rows not hydrated");
   await downloadIllustrated(page, backend);
   await expect(row(page, "Illustrated").getByTestId("offline-toggle")).toHaveAttribute(
     "aria-pressed",

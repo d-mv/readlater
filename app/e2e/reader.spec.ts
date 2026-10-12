@@ -325,11 +325,8 @@ test("declining the first-share confirmation leaves the toggle off and the next 
   page,
   backend,
 }) => {
-  // Known bug: ShareDialog's onToggle returns early on a declined confirm,
-  // but the native checkbox has already flipped to checked and `:checked`
-  // (still false) never re-renders it — so the toggle shows "public" for a
-  // private bookmark, and the next click sends is_public=false.
-  test.fail(true, "ShareDialog leaves the checkbox checked after a declined confirm");
+  // A declined confirm must un-flip the native checkbox: `:checked` is still
+  // false, so Vue alone wouldn't re-render it.
   const bookmark = backend.addBookmark({ title: "Maybe later" });
   await page.goto(`/b/${bookmark.id}`);
   await menuAction(page, "share-item");

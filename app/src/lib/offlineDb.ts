@@ -1,3 +1,4 @@
+import { toRaw } from "vue";
 import { openDB, type DBSchema, type IDBPDatabase } from "idb";
 import type { Bookmark } from "./supabase";
 
@@ -6,6 +7,24 @@ export type OfflineBookmarkMeta = Omit<Bookmark, "content_md">;
 export function stripContentMd(bookmark: Bookmark): OfflineBookmarkMeta {
   const { content_md: _content_md, ...meta } = bookmark;
   return meta;
+}
+
+// IndexedDB stores by structured clone, which throws DataCloneError on a Vue
+// reactive proxy — and rows from the Pinia store are proxies all the way
+// down (tags, …). Every write goes through this: arrays and plain objects are
+// copied with their proxies unwrapped; anything else (Blob, Date) is kept.
+export function toPlain<T>(value: T): T {
+  const raw = toRaw(value);
+  if (Array.isArray(raw)) return raw.map((item) => toPlain(item)) as T;
+  if (raw !== null && typeof raw === "object") {
+    const proto = Object.getPrototypeOf(raw);
+    if (proto === Object.prototype || proto === null) {
+      return Object.fromEntries(
+        Object.entries(raw).map(([key, item]) => [key, toPlain(item)]),
+      ) as T;
+    }
+  }
+  return raw;
 }
 
 export interface CachedImage {
@@ -117,7 +136,7 @@ function revokeObjectUrls(id: string) {
 
 export async function putArticle(article: CachedArticle): Promise<void> {
   const db = await getDb();
-  await db.put("articles", article);
+  await db.put("articles", toPlain(article));
   revokeObjectUrls(article.id);
 }
 
@@ -200,8 +219,8 @@ export async function replaceBookmarksList(
   for (const meta of kept) if (meta) byId.set(meta.id, meta);
 
   await list.clear();
-  await Promise.all(Array.from(byId.values()).map((item) => list.put(item)));
-  if (syncState) await tx.objectStore("syncState").put(syncState, SYNC_STATE_KEY);
+  await Promise.all(Array.from(byId.values()).map((item) => list.put(toPlain(item))));
+  if (syncState) await tx.objectStore("syncState").put(toPlain(syncState), SYNC_STATE_KEY);
   await tx.done;
 }
 
@@ -214,7 +233,7 @@ export async function getSyncState(): Promise<ListSyncState | undefined> {
 
 export async function putBookmarkMeta(item: OfflineBookmarkMeta): Promise<void> {
   const db = await getDb();
-  await db.put("bookmarksList", item);
+  await db.put("bookmarksList", toPlain(item));
 }
 
 export async function getBookmarksList(): Promise<OfflineBookmarkMeta[]> {

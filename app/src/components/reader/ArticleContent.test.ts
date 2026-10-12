@@ -18,6 +18,18 @@ describe("ArticleContent", () => {
     expect(document.documentElement.style.getPropertyValue("--rl-article-font-size")).toBe("20px");
   });
 
+  test("keeps an offline copy's same-origin blob: image and drops a foreign one", () => {
+    const own = `blob:${window.location.origin}/0b1c`;
+    const wrapper = mount(ArticleContent, {
+      props: {
+        contentMd: `![saved](${own})\n\n<img alt="foreign" src="blob:https://evil.example/1">`,
+      },
+    });
+    const imgs = wrapper.findAll("img");
+    expect(imgs[0]?.attributes("src")).toBe(own);
+    expect(imgs[1]?.attributes("src")).toBeUndefined();
+  });
+
   test("renders markdown as HTML", () => {
     const wrapper = mount(ArticleContent, {
       props: { contentMd: "# Hello\n\nSome **bold** text." },

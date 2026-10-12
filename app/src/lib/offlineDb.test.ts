@@ -35,6 +35,23 @@ function makeMeta(overrides: Partial<OfflineBookmarkMeta> = {}): OfflineBookmark
   };
 }
 
+describe("toPlain", () => {
+  test("unwraps nested Vue proxies so structured clone accepts the row", async () => {
+    const { isProxy, reactive } = await import("vue");
+    const blob = new Blob(["x"]);
+    const row = reactive({ id: "1", tags: [{ id: "t", name: "A" }], image: { blob } });
+
+    const plain = offlineDb.toPlain(row);
+
+    expect(() => structuredClone(row)).toThrow();
+    expect(() => structuredClone(plain)).not.toThrow();
+    expect(isProxy(plain) || isProxy(plain.tags) || isProxy(plain.tags[0])).toBe(false);
+    expect(plain.tags).toEqual([{ id: "t", name: "A" }]);
+    // Non-plain values (Blob, Date) are kept as the same object, not copied.
+    expect(plain.image.blob).toBe(blob);
+  });
+});
+
 describe("offlineDb", () => {
   beforeEach(async () => {
     await offlineDb._resetForTests();

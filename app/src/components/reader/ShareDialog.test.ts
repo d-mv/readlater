@@ -76,6 +76,9 @@ describe("ShareDialog", () => {
     await wrapper.find('[data-testid="toggle-input"]').setValue(true);
 
     expect(wrapper.emitted("togglePublic")).toBeUndefined();
+    // The checkbox must not keep showing "public" for a private bookmark.
+    const input = wrapper.find('[data-testid="toggle-input"]').element as HTMLInputElement;
+    expect(input.checked).toBe(false);
   });
 
   test("unsharing does not prompt for confirmation", async () => {
