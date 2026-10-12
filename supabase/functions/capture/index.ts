@@ -128,7 +128,13 @@ export async function handleRefresh(
   if (limit === "limited") return json("rate limit exceeded, try again later", 429);
 
   if (!force) {
-    const { data } = await client.from("bookmarks").select("content_edited").eq("id", id).maybeSingle();
+    // Service-role client: RLS is off, so scope to the capture owner by hand.
+    const { data } = await client
+      .from("bookmarks")
+      .select("content_edited")
+      .eq("id", id)
+      .eq("user_id", ownerUserId)
+      .maybeSingle();
     if (data?.content_edited) return json({ status: "confirm_required" }, 409);
   }
 
@@ -136,6 +142,7 @@ export async function handleRefresh(
     .from("bookmarks")
     .update({ status: "pending", error_message: null, content_edited: false })
     .eq("id", id)
+    .eq("user_id", ownerUserId)
     .not("url", "is", null) // notes never dedupe, so this should never target a note; belt and suspenders.
     .select("id");
 

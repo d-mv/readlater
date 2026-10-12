@@ -29,6 +29,9 @@ function fakeSupabase(opts: {
   let lastInsertedRow: Record<string, unknown> | undefined;
   // Filters of each post-conflict duplicate lookup, by column.
   const lookups: Record<string, string>[] = [];
+  // Filters of the refresh's content_edited lookup and of its update.
+  const contentLookups: Record<string, string>[] = [];
+  const updateFilters: Record<string, string>[] = [];
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
 
   const select = (_cols: string) => {
@@ -43,6 +46,7 @@ function fakeSupabase(opts: {
           lookups.push(filters);
           return Promise.resolve({ data: opts.existing ?? null });
         }
+        contentLookups.push(filters);
         return Promise.resolve({
           data: opts.contentLookupMissing ? null : { content_edited: opts.contentEdited ?? false },
         });
@@ -57,11 +61,18 @@ function fakeSupabase(opts: {
         ? { data: null, error: opts.updateError }
         : { data: opts.updatedRows === undefined ? [{ id: BOOKMARK_ID }] : opts.updatedRows, error: null },
     );
-  const not = () => ({ select: selectAfterUpdate });
-  const eqUpdate = (_col: string, _val: string) => ({ not });
   const update = (row: Record<string, unknown>) => {
     lastUpdatedRow = row;
-    return { eq: eqUpdate };
+    const filters: Record<string, string> = {};
+    updateFilters.push(filters);
+    const chain = {
+      eq: (col: string, val: string) => {
+        filters[col] = val;
+        return chain;
+      },
+      not: () => ({ select: selectAfterUpdate }),
+    };
+    return chain;
   };
 
   const insert = (row: Record<string, unknown>) => {
@@ -83,6 +94,8 @@ function fakeSupabase(opts: {
     rpc,
     rpcCalls,
     lookups,
+    contentLookups,
+    updateFilters,
     get lastUpdatedRow() {
       return lastUpdatedRow;
     },
@@ -101,6 +114,15 @@ Deno.test("handleRefresh: resets an un-edited bookmark to pending without asking
   assertEquals(res.status, 200);
   assertEquals(body.status, "ok");
   assertEquals(supabase.lastUpdatedRow, { status: "pending", error_message: null, content_edited: false });
+});
+
+Deno.test("handleRefresh: only reads and re-queues the capture owner's bookmark", async () => {
+  const supabase = fakeSupabase({ contentEdited: false });
+  // deno-lint-ignore no-explicit-any
+  await handleRefresh(supabase as any, OWNER, BOOKMARK_ID, false);
+
+  assertEquals(supabase.contentLookups, [{ id: BOOKMARK_ID, user_id: OWNER }]);
+  assertEquals(supabase.updateFilters, [{ id: BOOKMARK_ID, user_id: OWNER }]);
 });
 
 Deno.test("handleRefresh: returns 409 confirm_required for an edited bookmark when not forced", async () => {

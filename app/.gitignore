@@ -31,3 +31,4 @@ blob-report
 
 # Vitest coverage reports
 coverage
+tsconfig.tsbuildinfo
