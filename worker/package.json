@@ -7,6 +7,7 @@
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test",
+    "test:coverage": "bun test --coverage",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src test",
     "format": "oxfmt src test",
