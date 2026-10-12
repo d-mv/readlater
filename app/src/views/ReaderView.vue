@@ -4,6 +4,7 @@ import {
   nextTick,
   onMounted,
   onUnmounted,
+  reactive,
   ref,
   shallowRef,
   useTemplateRef,
@@ -11,6 +12,7 @@ import {
 } from "vue";
 import { useRouter } from "vue-router";
 import { IconLoader2, IconAlertTriangle, IconRefresh } from "@tabler/icons-vue";
+import type { Bookmark } from "../lib/supabase";
 import { useBookmarksStore, type WriteResult } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
 import { useScrollProgress } from "../composables/useScrollProgress";
@@ -34,7 +36,6 @@ const store = useBookmarksStore();
 const offlineCache = useOfflineCacheStore();
 
 const bookmark = computed(() => store.bookmarks.find((b) => b.id === props.id) ?? null);
-const byline = computed(() => (bookmark.value ? readerByline(bookmark.value) : ""));
 // The list query omits article bodies, so a row that arrived via the list has
 // `content_md === undefined` until fetchOne() pulls the full record. Once
 // loaded it is a string (or null for a body-less type), never undefined.
@@ -237,15 +238,15 @@ function onMarkUnread() {
 const showShareDialog = ref(false);
 
 function onTogglePublic(isPublic: boolean) {
-  if (bookmark.value) run(store.setPublic(bookmark.value.id, isPublic));
+  run(store.setPublic(props.id, isPublic));
 }
 
 function onAddTag(name: string) {
-  if (bookmark.value) run(store.addTag(bookmark.value.id, name));
+  run(store.addTag(props.id, name));
 }
 
 function onRemoveTag(tagId: string) {
-  if (bookmark.value) run(store.removeTag(bookmark.value.id, tagId));
+  run(store.removeTag(props.id, tagId));
 }
 
 // What the content area is doing, as one value — so it can't be editing and
@@ -254,11 +255,11 @@ function onRemoveTag(tagId: string) {
 // - reading: `view` is which body to show when a cached translation exists
 //   (translated by default); `error` is the last translation failure.
 // - translating: waiting on DeepL for `forId`.
-// - editing: the title/body drafts.
+// - editing: `draft` holds the title/body being edited.
 type ContentMode =
   | { kind: "reading"; view: "translated" | "original"; error: string | null }
   | { kind: "translating"; forId: string }
-  | { kind: "editing"; title: string; content: string };
+  | { kind: "editing" };
 
 const READING: ContentMode = { kind: "reading", view: "translated", error: null };
 const mode = shallowRef<ContentMode>(READING);
@@ -270,43 +271,30 @@ const showOriginal = computed(
   () => mode.value.kind === "reading" && mode.value.view === "original",
 );
 
-const draftTitle = computed({
-  get: () => (mode.value.kind === "editing" ? mode.value.title : ""),
-  set: (title: string) => {
-    if (mode.value.kind === "editing") mode.value = { ...mode.value, title };
-  },
-});
-const draftContent = computed({
-  get: () => (mode.value.kind === "editing" ? mode.value.content : ""),
-  set: (content: string) => {
-    if (mode.value.kind === "editing") mode.value = { ...mode.value, content };
-  },
-});
+// Only meaningful while editing; onEdit seeds it from the bookmark.
+const draft = reactive({ title: "", content: "" });
 
 // Editing is allowed while a translation is in flight: the pending result is
 // then dropped (the mode is no longer "translating"), and the store discards
 // a translation whose source text has since changed.
 function onEdit() {
   if (!bookmark.value || mode.value.kind === "editing") return;
-  mode.value = {
-    kind: "editing",
-    title: bookmark.value.title ?? "",
-    content: bookmark.value.content_md ?? "",
-  };
+  draft.title = bookmark.value.title ?? "";
+  draft.content = bookmark.value.content_md ?? "";
+  mode.value = { kind: "editing" };
 }
 
 function onCancelEdit() {
   mode.value = READING;
 }
 
+// The Save button only renders while editing, so the draft is current.
 async function onSaveEdit() {
-  const current = mode.value;
-  if (!bookmark.value || current.kind !== "editing") return;
-  const words = wordCount(current.content);
+  const words = wordCount(draft.content);
   const saved = await run(
-    store.updateContent(bookmark.value.id, {
-      title: current.title,
-      content_md: current.content,
+    store.updateContent(props.id, {
+      title: draft.title,
+      content_md: draft.content,
       word_count: words,
       reading_time: readingTimeFromWordCount(words),
     }),
@@ -315,11 +303,12 @@ async function onSaveEdit() {
   if (saved) mode.value = READING;
 }
 
-const displayContentMd = computed(() => {
-  if (!bookmark.value) return null;
-  if (showOriginal.value || !bookmark.value.translated_content_md) return bookmark.value.content_md;
-  return bookmark.value.translated_content_md;
-});
+// The editor always starts from the original; otherwise a cached
+// translation is shown unless the reader asked for the original.
+function displayedBody(b: Bookmark): string | null {
+  if (editing.value || showOriginal.value || !b.translated_content_md) return b.content_md;
+  return b.translated_content_md;
+}
 
 async function onTranslate() {
   const current = bookmark.value;
@@ -338,20 +327,22 @@ async function onTranslate() {
   mode.value = { kind: "reading", view: "translated", error };
 }
 
+// The toggle only renders while reading a translation with no error showing.
 function onToggleOriginal() {
-  if (mode.value.kind !== "reading") return;
-  mode.value = { ...mode.value, view: mode.value.view === "original" ? "translated" : "original" };
+  mode.value = {
+    kind: "reading",
+    view: showOriginal.value ? "translated" : "original",
+    error: null,
+  };
 }
 
 // PDFs: view_mode is the persisted user choice; absent that, default to
 // markdown when extraction succeeded, else fall back to the original.
 const pdfSignedUrl = ref<string | null>(null);
 
-const pdfEffectiveViewMode = computed<"markdown" | "original">(() => {
-  if (!bookmark.value || bookmark.value.type !== "pdf") return "markdown";
-  if (bookmark.value.view_mode) return bookmark.value.view_mode;
-  return bookmark.value.pdf_parsed ? "markdown" : "original";
-});
+function pdfViewMode(pdf: Bookmark): "markdown" | "original" {
+  return pdf.view_mode ?? (pdf.pdf_parsed ? "markdown" : "original");
+}
 
 // Both views are only available once parsing succeeded and the original
 // hasn't been trashed — otherwise there's only one view to show, forced.
@@ -363,7 +354,7 @@ const showPdfOriginal = computed(
   () =>
     bookmark.value?.type === "pdf" &&
     !!bookmark.value.pdf_path &&
-    pdfEffectiveViewMode.value === "original",
+    pdfViewMode(bookmark.value) === "original",
 );
 
 watch(
@@ -379,10 +370,9 @@ watch(
   { immediate: true },
 );
 
+// The toggle only renders for a PDF that has both views.
 function onTogglePdfView() {
-  if (!bookmark.value) return;
-  const next = pdfEffectiveViewMode.value === "markdown" ? "original" : "markdown";
-  run(store.setViewMode(bookmark.value.id, next));
+  run(store.setViewMode(props.id, showPdfOriginal.value ? "markdown" : "original"));
 }
 
 async function onOpenOriginalPdf() {
@@ -392,8 +382,7 @@ async function onOpenOriginalPdf() {
 }
 
 async function onTrashOriginalPdf() {
-  if (!bookmark.value) return;
-  await store.trashOriginalPdf(bookmark.value.id);
+  await store.trashOriginalPdf(props.id);
 }
 
 watch(
@@ -448,13 +437,13 @@ watch(
         <input
           data-testid="title-input"
           v-else
-          v-model="draftTitle"
+          v-model="draft.title"
           class="m-0 mb-12 w-full rounded-sm border border-line bg-recessed px-10 py-8 font-sans text-xl leading-[normal] font-medium tracking-tight text-ink focus:border-ink focus:outline-none"
           type="text"
           placeholder="Title"
         />
-        <p v-if="byline && !editing" class="label m-0 mb-20 text-ink-muted">
-          {{ byline }}
+        <p v-if="!editing && readerByline(bookmark)" class="label m-0 mb-20 text-ink-muted">
+          {{ readerByline(bookmark) }}
         </p>
         <div v-if="editing" class="m-0 mb-12 flex justify-end gap-8">
           <Button variant="secondary" test-id="cancel-edit-btn" @click="onCancelEdit">
@@ -471,7 +460,7 @@ watch(
         </div>
         <div
           data-testid="translate-bar"
-          v-if="!editing && (translating || translateError || bookmark.translated_content_md)"
+          v-if="!editing && (translateError || translating || bookmark.translated_content_md)"
           class="m-0 mb-16 flex items-center gap-10 rounded-sm border border-line bg-canvas px-10 py-8 font-sans text-sm"
         >
           <span v-if="translating" class="text-ink-muted">Translating…</span>
@@ -493,28 +482,26 @@ watch(
           v-if="!editing && canTogglePdfView"
           class="m-0 mb-16 flex items-center gap-10 rounded-sm border border-line bg-canvas px-10 py-8 font-sans text-sm"
         >
-          <span class="text-ink-muted">{{
-            pdfEffectiveViewMode === "original" ? "Original PDF" : "Markdown"
-          }}</span>
+          <span class="text-ink-muted">{{ showPdfOriginal ? "Original PDF" : "Markdown" }}</span>
           <button
             data-testid="pdf-view-toggle"
             class="cursor-pointer border-0 bg-transparent p-0 font-sans text-sm leading-[normal] text-ink underline underline-offset-2"
             type="button"
             @click="onTogglePdfView"
           >
-            {{ pdfEffectiveViewMode === "original" ? "Show markdown" : "Show original PDF" }}
+            {{ showPdfOriginal ? "Show markdown" : "Show original PDF" }}
           </button>
         </div>
         <ArticleContent
-          :content-md="editing ? bookmark.content_md : displayContentMd"
+          :content-md="displayedBody(bookmark)"
           :type="bookmark.type"
           :youtube-video-id="bookmark.youtube_video_id"
           :thumbnail-url="bookmark.thumbnail_url"
           :editing="editing"
-          :model-value="draftContent"
+          :model-value="draft.content"
           :show-pdf-original="showPdfOriginal"
           :pdf-url="pdfSignedUrl"
-          @update:model-value="draftContent = $event"
+          @update:model-value="draft.content = $event"
         />
       </template>
       <div

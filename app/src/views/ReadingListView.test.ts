@@ -307,4 +307,171 @@ describe("ReadingListView", () => {
     expect(fetchOneSpy).toHaveBeenCalledWith("bm-1");
     expect(cacheSpy).toHaveBeenCalledWith(fullRow);
   });
+
+  test("coming back online refetches the list and resubscribes to live changes", async () => {
+    const { wrapper, store } = await mountSettled();
+    const fetchSpy = vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+    const subscribeSpy = vi.spyOn(store, "subscribeToChanges").mockImplementation(() => {});
+
+    window.dispatchEvent(new Event("online"));
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(subscribeSpy).toHaveBeenCalledTimes(1);
+
+    wrapper.unmount();
+    window.dispatchEvent(new Event("online"));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("a second intersection while a page is loading doesn't start another page", async () => {
+    const { store } = await mountSettled();
+    store.bookmarks = [{ id: "1", archived: false, tags: [] } as never];
+    store.hasMore = true;
+    await flushPromises();
+    let finish!: () => void;
+    const loadMoreSpy = vi
+      .spyOn(store, "loadMore")
+      .mockImplementation(() => new Promise<void>((resolve) => (finish = resolve)));
+
+    const observer = FakeIntersectionObserver.instances.at(-1)!;
+    observer.trigger(true);
+    observer.trigger(true);
+    expect(loadMoreSpy).toHaveBeenCalledTimes(1);
+
+    finish();
+    await flushPromises();
+  });
+
+  test("observes a sentinel that is already rendered when the view mounts", async () => {
+    const store = useBookmarksStore();
+    store.hasMore = true;
+    vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+    const observeSpy = vi.spyOn(FakeIntersectionObserver.prototype, "observe");
+
+    const wrapper = mount(ReadingListView);
+    await flushPromises();
+
+    expect(observeSpy).toHaveBeenCalledWith(
+      wrapper.get('[data-testid="load-more"]').element.parentElement,
+    );
+    observeSpy.mockRestore();
+  });
+
+  test("without IntersectionObserver, older pages load through the Load more button", async () => {
+    vi.stubGlobal("IntersectionObserver", undefined);
+    const { wrapper, store } = await mountSettled();
+    const loadMoreSpy = vi.spyOn(store, "loadMore").mockResolvedValue(undefined);
+    store.bookmarks = [{ id: "1", archived: false, tags: [] } as never];
+    store.hasMore = true;
+    await flushPromises();
+
+    await wrapper.get('[data-testid="load-more"]').trigger("click");
+
+    expect(loadMoreSpy).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  test("shows a loading note instead of the button while a page is in flight", async () => {
+    const { wrapper, store } = await mountSettled();
+    store.hasMore = true;
+    store.loadingMore = true;
+    await flushPromises();
+
+    expect(wrapper.text()).toContain("Loading more…");
+    expect(wrapper.find('[data-testid="load-more"]').exists()).toBe(false);
+  });
+
+  test("opening a bookmark routes to the reader", async () => {
+    const { wrapper } = await mountSettled();
+
+    wrapper.findComponent({ name: "BookmarkList" }).vm.$emit("open", "bm-7");
+
+    expect(pushMock).toHaveBeenCalledWith({ name: "reader", params: { id: "bm-7" } });
+  });
+
+  test("the settings button routes to settings", async () => {
+    const { wrapper } = await mountSettled();
+
+    await wrapper.get('button[aria-label="Settings"]').trigger("click");
+
+    expect(pushMock).toHaveBeenCalledWith({ name: "settings" });
+  });
+
+  test("switching tabs applies the filter and scrolls back to the top", async () => {
+    const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const { wrapper, store } = await mountSettled();
+
+    wrapper.findComponent({ name: "StatusTabs" }).vm.$emit("change", "archived");
+
+    expect(store.filter).toBe("archived");
+    expect(scrollToSpy).toHaveBeenCalledWith(0, 0);
+  });
+
+  test("toggling an active tag removes it from the filter", async () => {
+    const { wrapper, store } = await mountSettled();
+    store.setActiveTagIds(["tag-1", "tag-2"]);
+
+    wrapper.findComponent({ name: "TagFilterBar" }).vm.$emit("toggle", "tag-1");
+
+    expect(store.activeTagIds).toEqual(["tag-2"]);
+  });
+
+  describe("toggling offline", () => {
+    async function setup() {
+      const { useOfflineCacheStore } = await import("../stores/offlineCache");
+      const { wrapper, store } = await mountSettled();
+      const offlineCache = useOfflineCacheStore();
+      const listRow = { id: "bm-1", title: "Test", archived: false, tags: [] } as never;
+      store.bookmarks = [listRow];
+      const cacheSpy = vi.spyOn(offlineCache, "cacheBookmark").mockResolvedValue(undefined);
+      const removeSpy = vi.spyOn(offlineCache, "removeCachedBookmark").mockResolvedValue(undefined);
+      const toggle = async (id: string) => {
+        wrapper.findComponent({ name: "BookmarkList" }).vm.$emit("toggleOffline", id);
+        await flushPromises();
+      };
+      return { store, offlineCache, listRow, cacheSpy, removeSpy, toggle };
+    }
+
+    test("removes the offline copy of a bookmark that is already cached", async () => {
+      const { offlineCache, cacheSpy, removeSpy, toggle } = await setup();
+      vi.spyOn(offlineCache, "isCached").mockReturnValue(true);
+
+      await toggle("bm-1");
+
+      expect(removeSpy).toHaveBeenCalledWith("bm-1");
+      expect(cacheSpy).not.toHaveBeenCalled();
+    });
+
+    test("caches the list row as-is when the full row can't be fetched", async () => {
+      const { store, listRow, cacheSpy, toggle } = await setup();
+      vi.spyOn(store, "fetchOne").mockResolvedValue(null);
+
+      await toggle("bm-1");
+
+      expect(cacheSpy).toHaveBeenCalledWith(listRow);
+    });
+
+    test("caches a row that already carries its body without refetching it", async () => {
+      const { store, cacheSpy, toggle } = await setup();
+      const fullRow = { id: "bm-1", archived: false, tags: [], content_md: "Body" } as never;
+      store.bookmarks = [fullRow];
+      const fetchOneSpy = vi.spyOn(store, "fetchOne");
+
+      await toggle("bm-1");
+
+      expect(fetchOneSpy).not.toHaveBeenCalled();
+      expect(cacheSpy).toHaveBeenCalledWith(fullRow);
+    });
+
+    test("ignores an id that is no longer in the list", async () => {
+      const { store, cacheSpy, removeSpy, toggle } = await setup();
+      const fetchOneSpy = vi.spyOn(store, "fetchOne");
+
+      await toggle("gone");
+
+      expect(fetchOneSpy).not.toHaveBeenCalled();
+      expect(cacheSpy).not.toHaveBeenCalled();
+      expect(removeSpy).not.toHaveBeenCalled();
+    });
+  });
 });

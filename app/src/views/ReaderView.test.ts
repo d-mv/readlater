@@ -889,4 +889,405 @@ describe("ReaderView", () => {
       expect(update).toHaveBeenCalledWith({ progress: 0.75 });
     });
   });
+
+  describe("actions", () => {
+    function mountReady(overrides: Partial<Bookmark> = {}) {
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "1", status: "ready", content_md: "Body", ...overrides }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      return { store, wrapper };
+    }
+
+    async function openMenuItem(wrapper: ReturnType<typeof mount>, testId: string) {
+      await wrapper.get('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.get(`[data-testid="${testId}"]`).trigger("click");
+      await flushPromises();
+    }
+
+    test("Back returns to the reading list", async () => {
+      const { wrapper } = mountReady();
+      await flushPromises();
+
+      await wrapper.get('[data-testid="back-btn"]').trigger("click");
+
+      expect(pushMock).toHaveBeenCalledWith({ name: "list" });
+    });
+
+    test("the not-available screen also leads back to the list", async () => {
+      vi.spyOn(useBookmarksStore(), "fetchOne").mockResolvedValue(null);
+      const wrapper = mount(ReaderView, { props: { id: "missing" } });
+      await flushPromises();
+
+      await wrapper.get('[data-testid="back-to-list-btn"]').trigger("click");
+
+      expect(pushMock).toHaveBeenCalledWith({ name: "list" });
+    });
+
+    test("a successful archive returns to the list", async () => {
+      const { store, wrapper } = mountReady();
+      const archive = vi.spyOn(store, "archive").mockResolvedValue({ error: null });
+      await flushPromises();
+
+      await openMenuItem(wrapper, "archive-item");
+
+      expect(archive).toHaveBeenCalledWith("1");
+      expect(pushMock).toHaveBeenCalledWith({ name: "list" });
+    });
+
+    test("Mark as read and Mark as unread write through the store", async () => {
+      const { store, wrapper } = mountReady({ read_at: null });
+      const markRead = vi.spyOn(store, "markRead").mockResolvedValue({ error: null });
+      const markUnread = vi.spyOn(store, "markUnread").mockResolvedValue({ error: null });
+      await flushPromises();
+
+      await openMenuItem(wrapper, "mark-read");
+      expect(markRead).toHaveBeenCalledWith("1");
+
+      store.bookmarks[0]!.read_at = "2026-02-01T00:00:00Z";
+      await flushPromises();
+      await openMenuItem(wrapper, "mark-unread");
+      expect(markUnread).toHaveBeenCalledWith("1");
+      expect(wrapper.find('[data-testid="action-error"]').exists()).toBe(false);
+    });
+
+    test("a failed mark-as-read is reported", async () => {
+      const { store, wrapper } = mountReady({ read_at: null });
+      vi.spyOn(store, "markRead").mockResolvedValue({ error: "Couldn't save the change." });
+      await flushPromises();
+
+      await openMenuItem(wrapper, "mark-read");
+
+      expect(wrapper.get('[data-testid="action-error"]').text()).toBe("Couldn't save the change.");
+    });
+
+    test("Share opens the dialog, which can make the bookmark public and be closed", async () => {
+      const { store, wrapper } = mountReady({ is_public: false });
+      const setPublic = vi.spyOn(store, "setPublic").mockResolvedValue({ error: null });
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+      await flushPromises();
+
+      await openMenuItem(wrapper, "share-item");
+      const dialog = wrapper.findComponent({ name: "ShareDialog" });
+      expect(dialog.exists()).toBe(true);
+
+      await dialog.get('[data-testid="toggle-input"]').setValue(true);
+      await flushPromises();
+      expect(setPublic).toHaveBeenCalledWith("1", true);
+
+      await dialog.get('[data-testid="close-btn"]').trigger("click");
+      expect(wrapper.findComponent({ name: "ShareDialog" }).exists()).toBe(false);
+      confirm.mockRestore();
+    });
+
+    test("adding and removing a tag go through the store for this bookmark", async () => {
+      const { store, wrapper } = mountReady({
+        tags: [{ id: "t1", name: "later", color: "#000" }],
+      } as Partial<Bookmark>);
+      const addTag = vi.spyOn(store, "addTag").mockResolvedValue({ error: null });
+      const removeTag = vi.spyOn(store, "removeTag").mockResolvedValue({ error: null });
+      await flushPromises();
+
+      const tagInput = wrapper.findComponent({ name: "TagInput" });
+      tagInput.vm.$emit("add", "physics");
+      tagInput.vm.$emit("remove", "t1");
+      await flushPromises();
+
+      expect(addTag).toHaveBeenCalledWith("1", "physics");
+      expect(removeTag).toHaveBeenCalledWith("1", "t1");
+    });
+
+    test("a failed article without an error message shows no details line", async () => {
+      const { wrapper } = mountReady({ status: "failed", error_message: null });
+      await flushPromises();
+
+      const placeholder = wrapper.get('[data-testid="status-placeholder"]');
+      expect(placeholder.text()).toContain("Couldn't process this article.");
+      expect(placeholder.findAll("p")).toHaveLength(1);
+    });
+
+    test("an article deleted while its body loads after turning ready isn't cached", async () => {
+      const { store, wrapper } = mountReady({ status: "processing", content_md: null });
+      await flushPromises();
+      const cacheSpy = vi.spyOn(useOfflineCacheStore(), "cacheBookmark");
+      vi.spyOn(store, "fetchOne").mockImplementation(async () => {
+        store.bookmarks = [];
+        return null;
+      });
+
+      store.bookmarks[0]!.status = "ready";
+      await flushPromises();
+
+      expect(cacheSpy).not.toHaveBeenCalled();
+      expect(wrapper.find('[data-testid="not-found"]').exists()).toBe(true);
+    });
+  });
+
+  describe("editing, more", () => {
+    async function enterEditMode(wrapper: ReturnType<typeof mount>) {
+      await wrapper.get('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.get('[data-testid="edit-item"]').trigger("click");
+    }
+
+    function titleValue(wrapper: ReturnType<typeof mount>) {
+      return (wrapper.get('input[data-testid="title-input"]').element as HTMLInputElement).value;
+    }
+
+    test("choosing Edit again while editing keeps the current draft", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "1", status: "ready", title: "T", content_md: "Body" }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await enterEditMode(wrapper);
+      await wrapper.get('input[data-testid="title-input"]').setValue("Draft title");
+      await enterEditMode(wrapper);
+
+      expect(titleValue(wrapper)).toBe("Draft title");
+    });
+
+    test("a ready bookmark without a title or body opens the editor empty", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", status: "ready", title: null, content_md: null })];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await enterEditMode(wrapper);
+
+      expect(wrapper.findComponent({ name: "ArticleContent" }).props("modelValue")).toBe("");
+      expect(titleValue(wrapper)).toBe("");
+    });
+
+    test("a save the server rejects keeps the editor and the draft open", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "1", status: "ready", title: "T", content_md: "Body" }),
+      ];
+      vi.spyOn(store, "updateContent").mockResolvedValue({ error: "Couldn't save the change." });
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await enterEditMode(wrapper);
+      await wrapper.get('input[data-testid="title-input"]').setValue("Unsaved title");
+      await wrapper.get('[data-testid="save-edit-btn"]').trigger("click");
+      await flushPromises();
+
+      expect(wrapper.get('[data-testid="action-error"]').text()).toBe("Couldn't save the change.");
+      expect(titleValue(wrapper)).toBe("Unsaved title");
+    });
+  });
+
+  describe("translate, more", () => {
+    test("falls back to English when the browser reports no language", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "1", status: "ready", url: null, type: "note", content_md: "Hola" }),
+      ];
+      const translate = vi
+        .spyOn(store, "translateBookmark")
+        .mockResolvedValue({ translatedText: "Hello", error: null });
+      const language = vi.spyOn(navigator, "language", "get").mockReturnValue("");
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await wrapper.get('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.get('[data-testid="translate-item"]').trigger("click");
+      await flushPromises();
+
+      expect(translate).toHaveBeenCalledWith("1", "Hola", "EN");
+      language.mockRestore();
+    });
+
+    test("the toggle switches back and forth between translation and original", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({
+          id: "1",
+          status: "ready",
+          content_md: "Bonjour",
+          translated_content_md: "Hello",
+          translated_lang: "EN",
+        }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      const body = () => wrapper.findComponent({ name: "ArticleContent" }).props("contentMd");
+      const toggle = () => wrapper.get('[data-testid="translate-toggle"]');
+
+      await toggle().trigger("click");
+      expect(body()).toBe("Bonjour");
+      expect(toggle().text()).toBe("Show translation");
+
+      await toggle().trigger("click");
+      expect(body()).toBe("Hello");
+      expect(toggle().text()).toBe("Show original");
+    });
+  });
+
+  describe("pdf, more", () => {
+    function parsedPdf(overrides: Partial<Bookmark> = {}) {
+      return makeBookmark({
+        id: "1",
+        status: "ready",
+        url: null,
+        type: "pdf",
+        content_md: "Extracted",
+        pdf_path: "user-1/a.pdf",
+        pdf_parsed: true,
+        ...overrides,
+      });
+    }
+
+    test("a PDF saved in the original view switches back to markdown", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [parsedPdf({ view_mode: "original" })];
+      storageCreateSignedUrl.mockResolvedValue({
+        data: { signedUrl: "https://storage.example/a" },
+        error: null,
+      });
+      const setViewMode = vi.spyOn(store, "setViewMode").mockResolvedValue({ error: null });
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      expect(wrapper.get('[data-testid="pdf-view-bar"]').text()).toContain("Original PDF");
+      await wrapper.get('[data-testid="pdf-view-toggle"]').trigger("click");
+
+      expect(setViewMode).toHaveBeenCalledWith("1", "markdown");
+    });
+
+    test("Open original does nothing when the signed url can't be created", async () => {
+      useBookmarksStore().bookmarks = [parsedPdf()];
+      storageCreateSignedUrl.mockResolvedValue({ data: null, error: { message: "denied" } });
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await wrapper.get('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.get('[data-testid="open-original"]').trigger("click");
+      await flushPromises();
+
+      expect(storageCreateSignedUrl).toHaveBeenCalled();
+      expect(openSpy).not.toHaveBeenCalled();
+      openSpy.mockRestore();
+    });
+
+    test("ignores an open-original-PDF request for a bookmark with no stored PDF", async () => {
+      useBookmarksStore().bookmarks = [
+        makeBookmark({ id: "1", status: "ready", content_md: "Body" }),
+      ];
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      wrapper.findComponent({ name: "ReaderHeader" }).vm.$emit("openOriginalPdf");
+      await flushPromises();
+
+      expect(storageCreateSignedUrl).not.toHaveBeenCalled();
+      expect(openSpy).not.toHaveBeenCalled();
+      openSpy.mockRestore();
+    });
+  });
+
+  describe("reading progress, more", () => {
+    function scrollArea(wrapper: ReturnType<typeof mount>, height: number, client: number) {
+      const el = wrapper.get('[data-testid="scroll-area"]').element as HTMLDivElement;
+      Object.defineProperty(el, "scrollHeight", { value: height, configurable: true });
+      Object.defineProperty(el, "clientHeight", { value: client, configurable: true });
+      return el;
+    }
+
+    test("a body that fits on screen is not scrolled", async () => {
+      useBookmarksStore().bookmarks = [
+        makeBookmark({ id: "1", status: "ready", progress: 0.5, content_md: "Short" }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      const el = scrollArea(wrapper, 200, 200);
+
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(el.scrollTop).toBe(0);
+    });
+
+    test("a bookmark with no saved progress starts at the top and writes nothing", async () => {
+      const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+      from.mockReturnValue({ update });
+      useBookmarksStore().bookmarks = [
+        makeBookmark({ id: "1", status: "ready", progress: null, content_md: "Text" }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      const el = scrollArea(wrapper, 1000, 200);
+
+      await vi.advanceTimersByTimeAsync(2000);
+
+      expect(el.scrollTop).toBe(0);
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    test("closing the reader before the restore runs leaves the detached page alone", async () => {
+      useBookmarksStore().bookmarks = [
+        makeBookmark({ id: "1", status: "ready", progress: 0.5, content_md: "Text" }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      // The restore is now queued for the next animation frame.
+      await flushPromises();
+      const el = scrollArea(wrapper, 1000, 200);
+      wrapper.unmount();
+
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(el.scrollTop).toBe(0);
+    });
+
+    test("a live update to the open bookmark doesn't jump back to the saved position", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "1", status: "ready", progress: 0.5, content_md: "Text" }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      const el = scrollArea(wrapper, 1000, 200);
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+      expect(el.scrollTop).toBe(400);
+
+      el.scrollTop = 600;
+      store.bookmarks = [{ ...store.bookmarks[0]!, title: "Renamed elsewhere" }];
+      await flushPromises();
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(wrapper.get('[data-testid="title"]').text()).toBe("Renamed elsewhere");
+      expect(el.scrollTop).toBe(600);
+    });
+
+    test("leaving the reader writes the pending position and stops listening", async () => {
+      const eqUpdate = vi.fn().mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq: eqUpdate }));
+      from.mockReturnValue({ update });
+      useBookmarksStore().bookmarks = [
+        makeBookmark({ id: "1", status: "ready", progress: 0, content_md: "Text" }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      const el = scrollArea(wrapper, 1000, 200);
+      Object.defineProperty(el, "scrollTop", { value: 200, configurable: true, writable: true });
+      el.dispatchEvent(new Event("scroll"));
+      await nextTick();
+
+      wrapper.unmount();
+      expect(update).toHaveBeenCalledWith({ progress: 0.25 });
+      expect(eqUpdate).toHaveBeenCalledWith("id", "1");
+
+      window.dispatchEvent(new Event("pagehide"));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(update).toHaveBeenCalledTimes(1);
+    });
+  });
 });

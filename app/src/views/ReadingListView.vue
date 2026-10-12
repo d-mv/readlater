@@ -23,8 +23,7 @@ const store = useBookmarksStore();
 const offlineCache = useOfflineCacheStore();
 
 function onScroll() {
-  savedScrollPosition =
-    window.scrollY || window.pageYOffset || document.documentElement.scrollTop || 0;
+  savedScrollPosition = window.scrollY;
 }
 
 // How far below the viewport the next page starts loading.
