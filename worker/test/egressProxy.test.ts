@@ -172,11 +172,10 @@ describe("egress proxy", () => {
 
   test("close() during a pending upstream connect leaves no upstream connection behind", async () => {
     const upstreamSeen: string[] = [];
-    let upstreamClosed!: () => void;
-    const closed = new Promise<void>((resolve) => (upstreamClosed = resolve));
+    let upstreamConnections = 0;
     upstream = createServer((socket) => {
+      upstreamConnections += 1;
       socket.on("data", (chunk) => upstreamSeen.push(chunk.toString()));
-      socket.on("close", () => upstreamClosed());
     });
     await new Promise<void>((resolve) => upstream!.listen(0, "127.0.0.1", () => resolve()));
     const port = (upstream.address() as { port: number }).port;
@@ -199,8 +198,150 @@ describe("egress proxy", () => {
     resolveLookup(["127.0.0.1"]);
 
     expect(await answer).toBe("");
-    await closed;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The client is already gone, so the upstream connect isn't even started.
+    expect(upstreamConnections).toBe(0);
     expect(upstreamSeen).toEqual([]);
+  });
+
+  describe("a client that goes away before its tunnel is up", () => {
+    /** An upstream that records what reaches it and when a connection closes. */
+    async function startRecordingUpstream() {
+      const seen: string[] = [];
+      let connections = 0;
+      upstream = createServer((socket) => {
+        connections += 1;
+        socket.on("data", (chunk) => seen.push(chunk.toString()));
+      });
+      await new Promise<void>((resolve) => upstream!.listen(0, "127.0.0.1", () => resolve()));
+      const port = (upstream.address() as { port: number }).port;
+      return { port, seen, connections: () => connections };
+    }
+
+    /** A proxy whose DNS answer is held back until release() is called. */
+    async function startGatedProxy() {
+      let release!: () => void;
+      let lookupStarted!: () => void;
+      const started = new Promise<void>((resolve) => (lookupStarted = resolve));
+      proxy = await startEgressProxy({
+        lookup: () => {
+          lookupStarted();
+          return new Promise((resolve) => (release = () => resolve(["127.0.0.1"])));
+        },
+        isPrivate: () => false,
+      });
+      return { started, release: () => release() };
+    }
+
+    function openClient(proxyUrl: string) {
+      const socket = connect({ host: "127.0.0.1", port: Number(new URL(proxyUrl).port) });
+      let received = "";
+      socket.on("data", (chunk) => (received += chunk.toString()));
+      const closed = new Promise<string>((resolve) => socket.on("close", () => resolve(received)));
+      socket.on("error", () => {});
+      return { socket, closed };
+    }
+
+    const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
+
+    test("a CONNECT client that half-closes before its tunnel is up gets no bytes forwarded", async () => {
+      const recorder = await startRecordingUpstream();
+      const gate = await startGatedProxy();
+      const client = openClient(proxy!.url);
+
+      client.socket.write(`CONNECT site.example:${recorder.port} HTTP/1.1\r\n\r\nPING`);
+      await gate.started;
+      client.socket.end();
+      await settle();
+      gate.release();
+
+      expect(await client.closed).toBe("");
+      await settle();
+      expect(recorder.seen).toEqual([]);
+    });
+
+    test("a plain-http client that half-closes after sending its body gets nothing forwarded", async () => {
+      const recorder = await startRecordingUpstream();
+      const gate = await startGatedProxy();
+      const client = openClient(proxy!.url);
+
+      client.socket.write(
+        `POST http://site.example:${recorder.port}/form HTTP/1.1\r\nHost: site.example\r\nContent-Length: 8\r\n\r\n`,
+      );
+      await gate.started;
+      // The body arrives after the head was parsed, while the destination is
+      // still being vetted, and the client half-closes right behind it.
+      client.socket.end("BODYBODY");
+      await settle();
+      gate.release();
+
+      expect(await client.closed).toBe("");
+      await settle();
+      expect(recorder.seen).toEqual([]);
+    });
+
+    test("a client that closes during the upstream connect aborts that connect", async () => {
+      let upstreamSocket: Socket | null = null;
+      let connectStarted!: () => void;
+      const started = new Promise<void>((resolve) => (connectStarted = resolve));
+      proxy = await startEgressProxy({
+        lookup: async () => ["93.184.216.34"],
+        // Never connects, so only the client going away can end it early.
+        connectUpstream: () => {
+          upstreamSocket = new Socket();
+          connectStarted();
+          return upstreamSocket;
+        },
+        connectTimeoutMs: 10_000,
+      });
+      const client = openClient(proxy.url);
+
+      client.socket.write("CONNECT slow.example:443 HTTP/1.1\r\n\r\n");
+      await started;
+      client.socket.destroy();
+      await client.closed;
+      await settle();
+
+      expect(upstreamSocket!.destroyed).toBe(true);
+    });
+
+    test("bytes a live client sent while its tunnel was being set up are forwarded in order", async () => {
+      const recorder = await startRecordingUpstream();
+      const gate = await startGatedProxy();
+      const client = openClient(proxy!.url);
+
+      client.socket.write(`CONNECT site.example:${recorder.port} HTTP/1.1\r\n\r\nONE`);
+      await gate.started;
+      client.socket.write("TWO");
+      await settle();
+      gate.release();
+      await settle();
+      client.socket.write("THREE");
+      await settle();
+
+      expect(recorder.connections()).toBe(1);
+      expect(recorder.seen.join("")).toBe("ONETWOTHREE");
+      client.socket.destroy();
+      await client.closed;
+    });
+
+    test("a client sending more than the hold limit is paused, then forwarded in full", async () => {
+      const recorder = await startRecordingUpstream();
+      const gate = await startGatedProxy();
+      const client = openClient(proxy!.url);
+      const body = "x".repeat(600 * 1024);
+
+      client.socket.write(`CONNECT site.example:${recorder.port} HTTP/1.1\r\n\r\n`);
+      await gate.started;
+      client.socket.write(body);
+      await settle();
+      gate.release();
+      while (recorder.seen.join("").length < body.length) await settle();
+
+      expect(recorder.seen.join("")).toBe(body);
+      client.socket.destroy();
+      await client.closed;
+    });
   });
 
   test("closes the client connection if vetting the destination fails unexpectedly", async () => {

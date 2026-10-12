@@ -536,7 +536,11 @@ connection (accepted: it runs no page code). The browser fallback does not:
 all Chromium traffic goes through a local egress proxy
 (`worker/src/egressProxy.ts`, `--proxy-server`, loopback not bypassed) that
 resolves each host once, refuses private addresses and connects to exactly
-the vetted IP, for CONNECT tunnels and plain http alike; a Playwright route
+the vetted IP, for CONNECT tunnels and plain http alike. Until the upstream
+is connected it keeps reading the client (holding up to 256 KB, then
+pausing) instead of pausing it at once — a paused socket never reports the
+peer's FIN — so a client that ends or closes meanwhile aborts the connect and
+none of its bytes are forwarded; a Playwright route
 handler (`routeIfPublic`) checks every request as well. Contexts block
 service workers and downloads, WebSockets are closed, WebRTC may not send
 non-proxied UDP, QUIC is off, and Chromium is launched with a minimal env

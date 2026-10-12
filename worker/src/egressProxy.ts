@@ -22,6 +22,9 @@ export interface EgressProxy {
 
 const MAX_HEADER_BYTES = 32 * 1024;
 const UPSTREAM_CONNECT_TIMEOUT_MS = 10_000;
+// What a client may send past its request head while the destination is
+// vetted and connected; beyond it the client is paused (backpressure).
+const MAX_HELD_BYTES = 256 * 1024;
 // Hop-by-hop headers dropped from a forwarded plain-http request.
 const HOP_BY_HOP = new Set(["proxy-connection", "proxy-authorization", "connection", "keep-alive"]);
 
@@ -69,26 +72,54 @@ export async function startEgressProxy(
     socket.on("error", () => socket.destroy());
   }
 
-  function openUpstream(address: string, port: number): Promise<Socket> {
+  /** Connects to the vetted address; abandoned when `clientGone` aborts. */
+  function openUpstream(address: string, port: number, clientGone: AbortSignal): Promise<Socket> {
+    if (clientGone.aborted) return Promise.reject(new Error("client gone"));
     return new Promise((resolve, reject) => {
       const upstream = connectUpstream({ host: address, port });
       track(upstream);
-      const timer = setTimeout(() => {
+      const fail = (err: Error) => {
+        clearTimeout(timer);
+        clientGone.removeEventListener("abort", onClientGone);
         upstream.destroy();
-        reject(new Error("upstream connect timed out"));
-      }, connectTimeoutMs);
+        reject(err);
+      };
+      const timer = setTimeout(
+        () => fail(new Error("upstream connect timed out")),
+        connectTimeoutMs,
+      );
+      const onClientGone = () => fail(new Error("client gone during upstream connect"));
+      clientGone.addEventListener("abort", onClientGone, { once: true });
+      upstream.once("error", fail);
       upstream.once("connect", () => {
         clearTimeout(timer);
+        clientGone.removeEventListener("abort", onClientGone);
+        upstream.off("error", fail);
         resolve(upstream);
-      });
-      upstream.once("error", (err) => {
-        clearTimeout(timer);
-        reject(err);
       });
     });
   }
 
   async function handle(client: Socket, head: Buffer, rest: Buffer) {
+    // Until the tunnel is up, keep reading the client rather than pausing
+    // it: a paused socket doesn't report the peer's FIN, so a client that
+    // half-closed meanwhile would look alive and its request would still be
+    // forwarded. What it sends is held (paused past MAX_HELD_BYTES), and a
+    // client that ends or closes aborts the connect and is dropped with
+    // nothing forwarded.
+    const held: Buffer[] = [rest];
+    let heldBytes = rest.length;
+    const hold = (chunk: Buffer) => {
+      held.push(chunk);
+      heldBytes += chunk.length;
+      if (heldBytes > MAX_HELD_BYTES) client.pause();
+    };
+    client.on("data", hold);
+    const gone = new AbortController();
+    const markGone = () => gone.abort();
+    client.once("end", markGone);
+    client.once("close", markGone);
+
     const lines = head.toString("latin1").split("\r\n");
     const [method = "", target = "", version = "HTTP/1.1"] = (lines[0] ?? "").split(" ");
 
@@ -126,15 +157,18 @@ export async function startEgressProxy(
 
     let upstream: Socket;
     try {
-      upstream = await openUpstream(address, dest.port);
+      upstream = await openUpstream(address, dest.port, gone.signal);
     } catch {
+      if (gone.signal.aborted) return client.destroy();
       return reply(client, "502 Bad Gateway");
     }
-    if (client.destroyed) return upstream.destroy();
 
+    client.off("data", hold);
+    client.off("end", markGone);
+    client.off("close", markGone);
     if (requestHead === null) client.write("HTTP/1.1 200 Connection Established\r\n\r\n");
     else upstream.write(requestHead);
-    if (rest.length > 0) upstream.write(rest);
+    for (const chunk of held) if (chunk.length > 0) upstream.write(chunk);
     client.pipe(upstream);
     upstream.pipe(client);
     client.on("close", () => upstream.destroy());
@@ -155,7 +189,6 @@ export async function startEgressProxy(
         return;
       }
       client.off("data", onData);
-      client.pause();
       handle(client, buffered.subarray(0, end), buffered.subarray(end + 4)).catch(() =>
         client.destroy(),
       );
