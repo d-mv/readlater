@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
   recoverStaleProcessing,
   processBookmark,
@@ -11,9 +11,13 @@ import {
 } from "../src/index";
 import { CircuitBreakerOpenError } from "../src/circuitBreaker";
 import { HttpStatusError } from "../src/errors";
+import { log } from "../src/logger";
 import { TimeoutError } from "../src/timeout";
 
-afterEach(() => resetWorkerState());
+afterEach(() => {
+  resetWorkerState();
+  mock.restore();
+});
 
 describe("formatErrorMessage", () => {
   test("extracts message from Error object and strips null bytes", () => {
@@ -31,7 +35,10 @@ describe("recoverStaleProcessing", () => {
 
   // select(...).eq("status","processing").or(stale) lists the stuck rows;
   // each is then moved with a compare-and-set on "processing".
-  function staleClient(rows: Stale[], opts: { listError?: string; moves?: boolean } = {}) {
+  function staleClient(
+    rows: Stale[],
+    opts: { listError?: string; moves?: boolean; failMoveOf?: string } = {},
+  ) {
     const listFilters: { eq?: [string, unknown]; or?: string } = {};
     const updates: Update[] = [];
     const client = {
@@ -62,10 +69,14 @@ describe("recoverStaleProcessing", () => {
                 return chain;
               },
               select: () =>
-                Promise.resolve({
-                  data: opts.moves === false ? [] : [{ id: update.filters.id }],
-                  error: null,
-                }),
+                Promise.resolve(
+                  update.filters.id === opts.failMoveOf
+                    ? { data: null, error: { message: "statement timeout" } }
+                    : {
+                        data: opts.moves === false ? [] : [{ id: update.filters.id }],
+                        error: null,
+                      },
+                ),
             };
             return chain;
           },
@@ -121,6 +132,25 @@ describe("recoverStaleProcessing", () => {
     await recoverStaleProcessing(client);
 
     expect(updates[0]?.payload).toMatchObject({ status: "pending", attempts: 1 });
+  });
+
+  test("a row that fails to move is logged and the sweep goes on", async () => {
+    const error = spyOn(log, "error");
+    const { client, updates } = staleClient(
+      [
+        { id: "a", attempts: 0 },
+        { id: "b", attempts: 0 },
+      ],
+      { failMoveOf: "a" },
+    );
+
+    await recoverStaleProcessing(client);
+
+    expect(updates.map((u) => u.filters.id)).toEqual(["a", "b"]);
+    expect(error).toHaveBeenCalledWith("stale-processing recovery failed for a bookmark", {
+      bookmarkId: "a",
+      err: "statement timeout",
+    });
   });
 
   test("a listing error writes nothing", async () => {
@@ -349,6 +379,36 @@ describe("pollOnce", () => {
     expect(processedIds).toEqual(["https://example.com/1", "https://example.com/2"]);
   });
 
+  test("a bookmark whose processing throws outright doesn't stop the batch", async () => {
+    const parsedUrls: string[] = [];
+    const { client } = fakeClient({
+      pending: [
+        { id: "bm-1", url: "https://example.com/1", type: "article", attempts: 0 },
+        { id: "bm-2", url: "https://example.com/2", type: "article", attempts: 0 },
+      ],
+    });
+    const table = client.from("bookmarks");
+    let updates = 0;
+    client.from = () => ({
+      ...table,
+      update: (payload: Record<string, unknown>) => {
+        updates += 1;
+        if (updates === 1) throw new Error("socket hang up");
+        return table.update(payload);
+      },
+    });
+
+    const count = await pollOnce(client, {
+      parseArticleFn: async (url) => {
+        parsedUrls.push(url);
+        return parsed();
+      },
+    });
+
+    expect(count).toBe(2);
+    expect(parsedUrls).toEqual(["https://example.com/2"]);
+  });
+
   test("returns the number of pending bookmarks it picked up", async () => {
     const { client } = fakeClient({
       pending: [
@@ -472,6 +532,42 @@ describe("processBookmark retries", () => {
       expect(next).toBeLessThanOrEqual(Date.now() + delay);
     },
   );
+
+  test("a failed re-queue is logged and the row is left for the stale sweep", async () => {
+    const error = spyOn(log, "error");
+    const { client, updates } = fakeClient({
+      errorFor: (u) => (u.payload.status === "pending" ? "connection reset" : null),
+    });
+
+    await processBookmark(bookmarkWith(0), client, {
+      parseArticleFn: failingWith(new HttpStatusError(503, "Service Unavailable")),
+    });
+
+    // No fallback write to "failed": the row stays in processing until the
+    // stale sweep returns it to the queue.
+    expect(updates.map((u) => u.payload.status)).toEqual(["processing", "pending"]);
+    expect(error).toHaveBeenCalledWith("failed to re-queue bookmark", {
+      bookmarkId: "bm-r",
+      err: "connection reset",
+    });
+  });
+
+  test("a failed write of the failure is logged, not thrown", async () => {
+    const error = spyOn(log, "error");
+    const { client, updates } = fakeClient({
+      errorFor: (u) => (u.payload.status === "failed" ? "connection reset" : null),
+    });
+
+    await processBookmark(bookmarkWith(0), client, {
+      parseArticleFn: failingWith(new HttpStatusError(404, "Not Found")),
+    });
+
+    expect(updates.map((u) => u.payload.status)).toEqual(["processing", "failed"]);
+    expect(error).toHaveBeenCalledWith("failed to mark bookmark as failed", {
+      bookmarkId: "bm-r",
+      err: "connection reset",
+    });
+  });
 
   test("the fourth transient failure fails the row for good", async () => {
     const { client, updates } = fakeClient();

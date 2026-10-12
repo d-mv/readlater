@@ -37,7 +37,7 @@ const HEARTBEAT_PATH = "/tmp/worker-heartbeat";
 
 // Every Supabase request gets a hard timeout so a hung connection can't stall
 // the poll loop forever (and keep the heartbeat from advancing).
-const fetchWithTimeout: typeof fetch = Object.assign(
+export const fetchWithTimeout: typeof fetch = Object.assign(
   (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) =>
     fetch(input, {
       ...init,
@@ -48,12 +48,16 @@ const fetchWithTimeout: typeof fetch = Object.assign(
   { preconnect: fetch.preconnect },
 );
 
-export const supabase =
-  process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY
-    ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SECRET_KEY, {
+/** The service-role client, or null when the environment doesn't configure one. */
+export function supabaseFromEnv(env: NodeJS.ProcessEnv): SupabaseClient | null {
+  return env.SUPABASE_URL && env.SUPABASE_SECRET_KEY
+    ? createClient(env.SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
         global: { fetch: fetchWithTimeout },
       })
-    : (null as unknown as SupabaseClient);
+    : null;
+}
+
+export const supabase = supabaseFromEnv(process.env) as SupabaseClient;
 
 export const uploadThumbnail = supabase
   ? makeThumbnailUploader(supabase)
@@ -362,11 +366,9 @@ export async function pollOnce(
       }
     });
   } catch (err) {
-    if (err instanceof CircuitBreakerOpenError) {
-      log.warn("poll cycle skipped", { err });
-    } else {
-      log.error("poll cycle failed", { err });
-    }
+    // The breaker can't be open here (checked above), so this is the cycle
+    // itself failing.
+    log.error("poll cycle failed", { err });
   }
   return pendingCount;
 }
@@ -412,54 +414,78 @@ export async function shutdown(
   await (opts.closeBrowserFn ?? closeBrowser)();
 }
 
-/** Test hook: clears shutdown state between tests. */
+/** Test hook: clears shutdown and heartbeat state between tests. */
 export function resetWorkerState() {
   worker.stopping = false;
   worker.inFlight = null;
+  heartbeatPath = null;
 }
 
-if (import.meta.main) {
-  const missing = ["SUPABASE_URL", "SUPABASE_SECRET_KEY"].filter((name) => !process.env[name]);
+/** Everything main() reaches outside this module; tests substitute it. */
+export interface WorkerRuntime {
+  env: NodeJS.ProcessEnv;
+  client: SupabaseClient;
+  heartbeatPath: string;
+  schedule: (loop: () => void, ms: number) => ReturnType<typeof setTimeout>;
+  cancel: (timer: ReturnType<typeof setTimeout> | undefined) => void;
+  onSignal: (signal: "SIGINT" | "SIGTERM", handler: () => void) => void;
+  exit: (code: number) => void;
+  closeBrowserFn: () => Promise<void>;
+}
+
+/** Starts the poll loop and installs the SIGINT/SIGTERM handlers. */
+export function main(overrides: Partial<WorkerRuntime> = {}): void {
+  const runtime: WorkerRuntime = {
+    env: process.env,
+    client: supabase,
+    heartbeatPath: HEARTBEAT_PATH,
+    schedule: setTimeout,
+    cancel: clearTimeout,
+    onSignal: process.on.bind(process),
+    exit: process.exit.bind(process),
+    closeBrowserFn: closeBrowser,
+    ...overrides,
+  };
+
+  const missing = ["SUPABASE_URL", "SUPABASE_SECRET_KEY"].filter((name) => !runtime.env[name]);
   if (missing.length > 0) {
     log.error("missing required environment variables; exiting", { missing });
-    process.exit(1);
+    runtime.exit(1);
+    return;
   }
 
-  heartbeatPath = HEARTBEAT_PATH;
+  heartbeatPath = runtime.heartbeatPath;
   // Recursive setTimeout (not setInterval) so cycles never overlap and the
-  // delay can grow while the queue is empty.
+  // delay can grow while the queue is empty. pollOnce never rejects.
   let interval = POLL_INTERVAL_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   const loop = async () => {
     heartbeat();
-    let pending = 0;
-    try {
-      pending = await pollOnce();
-    } catch (err) {
-      log.error("poll cycle failed", { err });
-    }
+    const pending = await pollOnce(runtime.client);
     heartbeat();
     if (worker.stopping) return;
     interval = pending > 0 ? POLL_INTERVAL_MS : Math.min(interval * 2, MAX_POLL_INTERVAL_MS);
-    timer = setTimeout(loop, interval);
+    timer = runtime.schedule(loop, interval);
   };
-  loop();
+  void loop();
 
   let shuttingDown = false;
   const onSignal = async (signal: string) => {
     if (shuttingDown) return;
     shuttingDown = true;
     log.info("received signal; shutting down", { signal });
-    clearTimeout(timer);
+    runtime.cancel(timer);
     try {
-      await shutdown();
+      await shutdown(runtime.client, { closeBrowserFn: runtime.closeBrowserFn });
     } finally {
-      process.exit(0);
+      runtime.exit(0);
     }
   };
-  process.on("SIGINT", () => void onSignal("SIGINT"));
-  process.on("SIGTERM", () => void onSignal("SIGTERM"));
+  runtime.onSignal("SIGINT", () => void onSignal("SIGINT"));
+  runtime.onSignal("SIGTERM", () => void onSignal("SIGTERM"));
 
   log.info("worker started", { pollIntervalMs: POLL_INTERVAL_MS });
 }
+
+if (import.meta.main) main();
