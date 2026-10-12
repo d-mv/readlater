@@ -68,9 +68,11 @@ select is_empty(
   $$update tags set name = 'hacked' where id = '00000000-0000-0000-0000-0000000000f2' returning 1$$,
   'A cannot rename B''s tag'
 );
-select is_empty(
-  $$delete from tags where id = '00000000-0000-0000-0000-0000000000f2' returning 1$$,
-  'A cannot delete B''s tag'
+-- Clients hold no DELETE on tags (nothing in the app deletes one), so even
+-- B's tag is refused by privilege, not just filtered by RLS.
+select throws_ok(
+  $$delete from tags where id = '00000000-0000-0000-0000-0000000000f2'$$,
+  '42501', null, 'clients cannot delete tags (no delete grant)'
 );
 select throws_ok(
   $$update tags set user_id = '00000000-0000-0000-0000-00000000000b' where id = '00000000-0000-0000-0000-0000000000f3'$$,
@@ -133,13 +135,14 @@ select is(
 reset role;
 
 -- Deleting a tag cascades its links and bumps their bookmarks (delta sync).
+-- Clients can't delete tags; this is the server-side path (e.g. an admin
+-- cleanup), so it runs as postgres.
 insert into bookmark_tags (bookmark_id, tag_id)
 values ('00000000-0000-0000-0000-0000000000a2', '00000000-0000-0000-0000-0000000000f3');
 alter table bookmarks disable trigger bookmarks_touch_updated_at;
 update bookmarks set updated_at = '2000-01-01' where id = '00000000-0000-0000-0000-0000000000a2';
 alter table bookmarks enable trigger bookmarks_touch_updated_at;
 
-select tests.authenticate_as('00000000-0000-0000-0000-00000000000a');
 delete from tags where id = '00000000-0000-0000-0000-0000000000f3';
 select is_empty(
   $$select 1 from bookmark_tags where tag_id = '00000000-0000-0000-0000-0000000000f3'$$,
@@ -170,8 +173,8 @@ select lives_ok(
 
 -- ─── anon ──────────────────────────────────────────────────────────────────
 select tests.authenticate_anon();
-select is_empty('select 1 from tags', 'anon sees no tags');
-select is_empty('select 1 from bookmark_tags', 'anon sees no links');
+select throws_ok('select 1 from tags', '42501', null, 'anon cannot read tags');
+select throws_ok('select 1 from bookmark_tags', '42501', null, 'anon cannot read links');
 select throws_ok(
   $$insert into tags (name, user_id) values ('anon', '00000000-0000-0000-0000-00000000000a')$$,
   '42501', null, 'anon cannot insert tags'

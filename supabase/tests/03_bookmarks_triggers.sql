@@ -118,13 +118,13 @@ select throws_ok(
   $$insert into bookmark_deletions (bookmark_id, user_id) values (gen_random_uuid(), auth.uid())$$,
   '42501', null, 'clients cannot write tombstones'
 );
-select is_empty(
-  $$update bookmark_deletions set deleted_at = '2000-01-01' returning 1$$,
-  'clients cannot update tombstones'
+select throws_ok(
+  $$update bookmark_deletions set deleted_at = '2000-01-01'$$,
+  '42501', null, 'clients cannot update tombstones (select-only grant)'
 );
-select is_empty(
-  $$delete from bookmark_deletions returning 1$$,
-  'clients cannot delete tombstones'
+select throws_ok(
+  $$delete from bookmark_deletions$$,
+  '42501', null, 'clients cannot delete tombstones (select-only grant)'
 );
 
 select tests.authenticate_as('00000000-0000-0000-0000-00000000000b');
@@ -137,7 +137,7 @@ select results_eq(
 );
 
 select tests.authenticate_anon();
-select is_empty('select 1 from bookmark_deletions', 'anon reads no tombstones');
+select throws_ok('select 1 from bookmark_deletions', '42501', null, 'anon cannot read tombstones');
 reset role;
 
 -- Re-deleting an id (re-imported, deleted again) upserts the tombstone.

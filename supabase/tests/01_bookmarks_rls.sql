@@ -85,16 +85,18 @@ select is(
 
 -- ─── anon ──────────────────────────────────────────────────────────────────
 select tests.authenticate_anon();
-select is_empty('select 1 from bookmarks', 'anon sees no bookmarks');
+-- anon holds no table privileges at all (minimal_table_grants migration):
+-- every statement is refused before RLS is even consulted.
+select throws_ok('select 1 from bookmarks', '42501', null, 'anon cannot read bookmarks');
 select throws_ok(
   $$insert into bookmarks (user_id, url, type) values ('00000000-0000-0000-0000-00000000000a', 'https://anon.example', 'article')$$,
   '42501', null, 'anon cannot insert bookmarks'
 );
-select is_empty(
-  $$update bookmarks set title = 'x' returning id$$, 'anon update affects no rows'
+select throws_ok(
+  $$update bookmarks set title = 'x'$$, '42501', null, 'anon cannot update bookmarks'
 );
-select is_empty(
-  $$delete from bookmarks returning id$$, 'anon delete affects no rows'
+select throws_ok(
+  $$delete from bookmarks$$, '42501', null, 'anon cannot delete bookmarks'
 );
 
 select results_eq(

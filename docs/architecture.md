@@ -141,7 +141,6 @@ create policy "owner access" on bookmark_tags for all to authenticated
   using (exists (select 1 from bookmarks b where b.id = bookmark_id and b.user_id = (select auth.uid()))
      and exists (select 1 from tags t where t.id = tag_id and t.user_id = (select auth.uid())))
   with check (/* same */);
-grant select, insert, update, delete on tags, bookmark_tags to authenticated;
 -- bookmark_tags_touch_bookmark (security definer, after insert/delete on
 -- bookmark_tags) bumps the bookmark's updated_at.
 
@@ -170,6 +169,15 @@ create table rate_limits (
 --   security definer, execute: service_role only.
 -- bump_rate_limit(p_action, p_max, p_window) → boolean: the same, keyed on
 --   the caller's own auth.uid(); execute: authenticated.
+
+-- Table privileges (20261012100000_minimal_table_grants): anon holds none;
+-- authenticated holds exactly what the app and RLS-scoped functions use.
+revoke all on bookmarks, tags, bookmark_tags, bookmark_deletions, rate_limits
+  from anon, authenticated;
+grant select, insert, update, delete on bookmarks to authenticated;
+grant select, insert, update on tags to authenticated;          -- upsert; no client deletes tags
+grant select, insert, update, delete on bookmark_tags to authenticated;
+grant select on bookmark_deletions to authenticated;            -- tombstones: trigger-written
 
 -- Returns public-safe columns only (no user_id, pdf_path, url, status,
 -- error_message, progress, translation, …).
@@ -256,10 +264,14 @@ Notes on the shape:
   anyone holding the anon key list every public bookmark with no `id`
   filter, defeating "the id is the unguessable token." `get_public_bookmark`
   is `security definer` and only ever returns a row for an exact id match.
-- New tables aren't auto-exposed to PostgREST by default in this project's
-  config (`auto_expose_new_tables` off), so `tags`/`bookmark_tags` need an
-  explicit `grant` in addition to RLS policies, or they're invisible to the
-  Data API regardless of policy.
+- Grants are minimal, not Supabase's defaults (which give anon and
+  authenticated every privilege, TRUNCATE included, on each new public
+  table). anon holds no table privileges — the public view goes through the
+  security-definer `get_public_bookmark` — and authenticated holds only the
+  operations the client uses (block above). RLS still decides which rows;
+  the grants decide which statements. `00_inventory.sql` pins the exact
+  privileges, so a new table fails the suite until its grants are decided.
+  service_role keeps its defaults (server-side only, bypasses RLS).
 
 Migrations (`supabase/migrations/`): `20260825000001_initial_schema.sql` — the
 flattened base schema (tables, indexes, replica identity, RLS,
@@ -269,8 +281,9 @@ flattened base schema (tables, indexes, replica identity, RLS,
 (`attempts`, `next_attempt_at`, reset trigger, due index),
 `20261011171000_audit_hardening` (per-user tags, owner-only RLS on
 `(select auth.uid())`, `rate_limits`, bucket MIME lists,
-`list_orphaned_storage_objects`, a commented `cron.schedule` for the sweep)
-and `20261011172000_bookmarks_keyset_index`. New changes go in new migration
+`list_orphaned_storage_objects`, a commented `cron.schedule` for the sweep),
+`20261011172000_bookmarks_keyset_index` and
+`20261012100000_minimal_table_grants`. New changes go in new migration
 files.
 
 ## 3. Capture paths

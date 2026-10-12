@@ -23,8 +23,9 @@ afterwards only if it started it.
 - Each `NN_*.sql` file is one transaction that rolls back. `now()` is fixed
   within it, so "was bumped" checks compare an old fixture value to `now()`.
 - `00_inventory.sql` pins the exact set of public tables, functions,
-  triggers, policies and bookmarks indexes: adding one to a migration fails
-  it until it's listed there and covered below.
+  triggers, policies, bookmarks indexes and anon/authenticated table
+  privileges: adding one to a migration fails it until it's listed there and
+  covered below.
 
 ## Coverage checklist
 
@@ -36,6 +37,7 @@ afterwards only if it started it.
 | `bookmarks_url_required_unless_note`, `bookmarks_pdf_path_requires_type`, type/status/view_mode checks | 02 |
 | `url_normalized` generated column + `bookmarks_url_normalized_uniq` (global — see note) | 02 |
 | bookmarks defaults, PK/FK, indexes, replica identity | 00, 02 |
+| table grants: anon none, authenticated per table (minimal_table_grants) | 00 (+ 42501 checks in 01, 03, 04) |
 | `bookmarks_touch_updated_at` trigger/function | 03 |
 | `bookmarks_reset_retry` trigger/function (user vs worker re-queue) | 03 |
 | `bookmarks_record_deletion` trigger/function, `bookmark_deletions` + policy "owner read", user cascade | 03 |

@@ -3,7 +3,7 @@
 -- and given tests in the matching file (see README.md checklist).
 begin;
 \ir _helpers.psql
-select plan(9);
+select plan(10);
 
 select tables_are('public',
   array['bookmarks', 'tags', 'bookmark_tags', 'bookmark_deletions', 'rate_limits']);
@@ -37,6 +37,23 @@ select is(
   array['bookmark_deletions: owner read', 'bookmark_tags: owner access',
         'bookmarks: owner access', 'tags: owner access']::text[],
   'public policies'
+);
+
+-- Exact table privileges of the client roles (see the minimal_table_grants
+-- migration). A new table fails this until its grants are decided here —
+-- Supabase's defaults would hand anon/authenticated everything.
+select is(
+  (select array_agg(format('%s: %s: %s', table_name, grantee, privs) order by table_name, grantee)
+   from (select table_name, grantee,
+                string_agg(privilege_type, ',' order by privilege_type) as privs
+         from information_schema.role_table_grants
+         where table_schema = 'public' and grantee in ('anon', 'authenticated')
+         group by table_name, grantee) g),
+  array['bookmark_deletions: authenticated: SELECT',
+        'bookmark_tags: authenticated: DELETE,INSERT,SELECT,UPDATE',
+        'bookmarks: authenticated: DELETE,INSERT,SELECT,UPDATE',
+        'tags: authenticated: INSERT,SELECT,UPDATE']::text[],
+  'anon holds no table privileges; authenticated only what the app uses'
 );
 
 select indexes_are('public', 'bookmarks', array[
