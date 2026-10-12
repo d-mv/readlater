@@ -5,7 +5,7 @@ import { supabase, type AddBookmarkResult, type Bookmark } from "../lib/supabase
 import { detectBookmarkType } from "../utils/bookmarkType";
 import { truncateTitle } from "../utils/captureText";
 import { arrayBufferToBase64 } from "../utils/base64";
-import { detectFileKind, maxBytesForFileKind } from "../utils/fileKind";
+import { detectFileKind, maxBytesForFileKind, sizeLimitLabelForFileKind } from "../utils/fileKind";
 import { normalizeUrl } from "../utils/normalizeUrl";
 import { readingTimeFromWordCount, wordCount } from "../utils/reading";
 import * as offlineDb from "../lib/offlineDb";
@@ -717,10 +717,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       return { error: "Unsupported file type. Use .md, .markdown, or .docx." };
     }
 
-    const maxBytes = maxBytesForFileKind(kind);
-    if (file.size > maxBytes) {
-      const limit = kind === "markdown" ? "500KB" : "5MB";
-      return { error: `File exceeds the ${limit} limit for this file type.` };
+    if (file.size > maxBytesForFileKind(kind)) {
+      return {
+        error: `File exceeds the ${sizeLimitLabelForFileKind(kind)} limit for this file type.`,
+      };
     }
 
     const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());
@@ -739,7 +739,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (detectFileKind(file.name) !== "pdf") return { error: "Unsupported file type. Use .pdf." };
 
     if (file.size > maxBytesForFileKind("pdf")) {
-      return { error: "File exceeds the 20MB limit for PDFs." };
+      return { error: `File exceeds the ${sizeLimitLabelForFileKind("pdf")} limit for PDFs.` };
     }
 
     const contentBase64 = arrayBufferToBase64(await file.arrayBuffer());

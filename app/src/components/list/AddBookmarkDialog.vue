@@ -2,7 +2,11 @@
 import { computed, shallowRef } from "vue";
 import type { AddBookmarkResult } from "../../lib/supabase";
 import { useBookmarksStore } from "../../stores/bookmarks";
-import { detectFileKind, maxBytesForFileKind } from "../../utils/fileKind";
+import {
+  detectFileKind,
+  maxBytesForFileKind,
+  sizeLimitLabelForFileKind,
+} from "../../utils/fileKind";
 import { cn } from "../../shared/clsx";
 import Button from "../../shared/ui/Button.vue";
 import Dialog from "../../shared/ui/Dialog.vue";
@@ -18,7 +22,7 @@ const MODE_OPTIONS: TabOption<Mode>[] = [
   { value: "file", label: "File", testId: "mode-file" },
 ];
 
-const FILE_KIND_LIMIT_LABEL = { markdown: "500KB", docx: "5MB", pdf: "20MB" } as const;
+const FILE_HINT = `Markdown (.md, up to ${sizeLimitLabelForFileKind("markdown")}), Word (.docx, up to ${sizeLimitLabelForFileKind("docx")}), or PDF (up to ${sizeLimitLabelForFileKind("pdf")})`;
 
 const store = useBookmarksStore();
 
@@ -118,7 +122,7 @@ function handleFile(file: File | null) {
   }
   if (file.size > maxBytesForFileKind(kind)) {
     selectedFile.value = null;
-    showError(`File exceeds the ${FILE_KIND_LIMIT_LABEL[kind]} limit for this type.`);
+    showError(`File exceeds the ${sizeLimitLabelForFileKind(kind)} limit for this type.`);
     return;
   }
 
@@ -314,8 +318,8 @@ async function confirmDuplicate() {
             <span class="font-medium text-ink underline underline-offset-2">Click to upload</span>
             or drag and drop
           </p>
-          <p class="mx-0 mt-8 mb-0 text-2xs text-ink-muted">
-            Markdown (.md, up to 500KB), Word (.docx, up to 5MB), or PDF (up to 20MB)
+          <p class="mx-0 mt-8 mb-0 text-2xs text-ink-muted" data-testid="file-hint">
+            {{ FILE_HINT }}
           </p>
         </div>
       </template>

@@ -1153,7 +1153,7 @@ describe("useBookmarksStore", () => {
     const big = "a".repeat(500 * 1024 + 1);
     const result = await store.addFile(new File([big], "big.md"));
 
-    expect(result.error).toContain("500KB");
+    expect(result.error).toBe("File exceeds the 500KB limit for this file type.");
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -1184,7 +1184,7 @@ describe("useBookmarksStore", () => {
     const big = new Uint8Array(20 * 1024 * 1024 + 1);
     const result = await store.addPdf(new File([big], "big.pdf"));
 
-    expect(result.error).toContain("20MB");
+    expect(result.error).toBe("File exceeds the 20MB limit for PDFs.");
     expect(invoke).not.toHaveBeenCalled();
   });
 
@@ -2735,7 +2735,7 @@ describe("useBookmarksStore", () => {
       const big = new Uint8Array(5 * 1024 * 1024 + 1);
       const result = await store.addFile(new File([big], "big.docx"));
 
-      expect(result.error).toContain("5MB");
+      expect(result.error).toBe("File exceeds the 5MB limit for this file type.");
       expect(invoke).not.toHaveBeenCalled();
     });
 

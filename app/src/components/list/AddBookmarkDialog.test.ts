@@ -422,8 +422,20 @@ describe("AddBookmarkDialog", () => {
     const file = new File([big], "big.md");
     await selectFile(wrapper, file);
 
-    expect(wrapper.text()).toContain("500KB");
+    expect(wrapper.get('[data-testid="error"]').text()).toBe(
+      "File exceeds the 500KB limit for this type.",
+    );
     expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeDefined();
+  });
+
+  test("the file hint states each kind's limit, derived from the byte limits", async () => {
+    const wrapper = mount(AddBookmarkDialog);
+    await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+    await wrapper.get('button[data-testid="mode-file"]').trigger("click");
+
+    expect(wrapper.get('[data-testid="file-hint"]').text()).toBe(
+      "Markdown (.md, up to 500KB), Word (.docx, up to 5MB), or PDF (up to 20MB)",
+    );
   });
 
   test("selecting a valid markdown file and submitting calls addFile and closes the dialog", async () => {
