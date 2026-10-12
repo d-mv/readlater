@@ -1,5 +1,6 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.19";
-import { corsHeaders, handleRequest, handleTranslate, MAX_TRANSLATE_CHARS } from "./index.ts";
+import { corsHeaders, handleRequest, handlerFromEnv, handleTranslate, MAX_TRANSLATE_CHARS } from "./index.ts";
+import { quietly, stubFetch, withEnv } from "../_shared/testing.ts";
 
 const B1 = "6f1c1c3e-2b4a-4c55-9d1e-0a3b5c7d9e11";
 
@@ -341,4 +342,178 @@ Deno.test("handleRequest: an oversize declared body is a 413 with CORS headers",
 
   assertEquals(res.status, 413);
   assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+});
+
+Deno.test("handleTranslate: an unrecognisable target_lang is a 400 before loading anything", async () => {
+  const supabase = fakeSupabase({});
+  for (const target_lang of ["english", "E", "EN-", "pt-b"]) {
+    const res = await handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1, target_lang });
+    assertEquals(res.status, 400, target_lang);
+    assertEquals(await res.json(), "invalid target_lang");
+  }
+  assertEquals(supabase.loadedId, undefined);
+});
+
+Deno.test("handleTranslate: accepts regional target languages and treats '' or non-strings as EN", async () => {
+  const cases: [unknown, string][] = [["pt-br", "PT-BR"], ["zh-hans", "ZH-HANS"], ["", "EN"], [7, "EN"]];
+  for (const [target_lang, expected] of cases) {
+    const supabase = fakeSupabase({});
+    const fetchMock = fakeFetch({ ok: true, body: { translations: [{ text: "x" }] } });
+    const res = await handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1, target_lang }, fetchMock.impl);
+    assertEquals(res.status, 200);
+    assertEquals(JSON.parse(fetchMock.lastInit?.body as string).target_lang, expected);
+  }
+});
+
+Deno.test("handleTranslate: a DB error loading the bookmark is a generic 500 without calling DeepL", async () => {
+  const supabase = fakeSupabase({ loadError: { message: "relation bookmarks does not exist" } });
+  const fetchMock = fakeFetch({ ok: true, body: {} });
+  const res = await quietly(() => handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1 }, fetchMock.impl));
+  assertEquals(res.status, 500);
+  assertEquals(await res.json(), "internal error");
+  assertEquals(fetchMock.calls, 0);
+});
+
+Deno.test("handleTranslate: reports a null detected_source_lang when DeepL doesn't give one", async () => {
+  const supabase = fakeSupabase({});
+  const fetchMock = fakeFetch({ ok: true, body: { translations: [{ text: "Hi" }] } });
+  const res = await handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1 }, fetchMock.impl);
+  assertEquals(await res.json(), { translated_text: "Hi", translated_lang: "EN", detected_source_lang: null });
+});
+
+Deno.test("handleTranslate: uses the global fetch by default", async () => {
+  const supabase = fakeSupabase({});
+  const net = stubFetch({
+    "/v2/translate": () => Response.json({ translations: [{ text: "Hallo", detected_source_lang: "EN" }] }),
+  });
+  try {
+    const res = await handleTranslate(asClient(supabase), "pro-key", { bookmark_id: B1, target_lang: "de" });
+    assertEquals(res.status, 200);
+    assertEquals((await res.json()).translated_text, "Hallo");
+    assertEquals(net.calls.map((c) => c.path), ["/v2/translate"]);
+    assertEquals(net.calls[0].headers.get("Authorization"), "DeepL-Auth-Key pro-key");
+  } finally {
+    net.restore();
+  }
+});
+
+Deno.test("handleRequest: CORS preflight is answered without touching Supabase", async () => {
+  let clients = 0;
+  const res = await handleRequest(new Request("http://localhost/translate", { method: "OPTIONS" }), () => {
+    clients++;
+    return asClient(fakeSupabase({}));
+  }, "key:fx");
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("Access-Control-Allow-Headers"), corsHeaders["Access-Control-Allow-Headers"]);
+  assertEquals(clients, 0);
+});
+
+Deno.test("handleRequest: methods other than POST are a 404 with CORS headers", async () => {
+  const res = await handleRequest(
+    new Request("http://localhost/translate", { method: "DELETE" }),
+    () => asClient(fakeSupabase({})),
+    "key:fx",
+  );
+  assertEquals(res.status, 404);
+  assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+});
+
+Deno.test("handleRequest: a valid POST translates as the caller, forwarding their Authorization", async () => {
+  const seen: string[] = [];
+  const makeClient = (authorization: string) => {
+    seen.push(authorization);
+    return asClient(fakeSupabase({ contentMd: "Hola" }));
+  };
+  const fetchMock = fakeFetch({ ok: true, body: { translations: [{ text: "Hello" }] } });
+  const body = JSON.stringify({ bookmark_id: B1 });
+  const withAuth = new Request("http://localhost/translate", {
+    method: "POST",
+    headers: { Authorization: "Bearer user-jwt" },
+    body,
+  });
+  const res = await handleRequest(withAuth, makeClient, "key:fx", fetchMock.impl);
+  assertEquals(res.status, 200);
+  assertEquals((await res.json()).translated_text, "Hello");
+
+  await handleRequest(new Request("http://localhost/translate", { method: "POST", body }), makeClient, "key:fx", fetchMock.impl);
+  assertEquals(seen, ["Bearer user-jwt", ""]);
+});
+
+Deno.test("handleRequest: uses the global fetch for DeepL by default", async () => {
+  const net = stubFetch({ "/v2/translate": () => Response.json({ translations: [{ text: "Hello" }] }) });
+  try {
+    const req = new Request("http://localhost/translate", { method: "POST", body: JSON.stringify({ bookmark_id: B1 }) });
+    const res = await handleRequest(req, () => asClient(fakeSupabase({})), "key:fx");
+    assertEquals(res.status, 200);
+    assertEquals(net.calls.length, 1);
+  } finally {
+    net.restore();
+  }
+});
+
+Deno.test(
+  "handlerFromEnv: translates end to end as the caller with DEEPL_API_KEY",
+  withEnv(
+    { SUPABASE_URL: "http://supabase.test", SUPABASE_ANON_KEY: "anon-key", DEEPL_API_KEY: "deepl-key:fx" },
+    async () => {
+      const net = stubFetch({
+        "/auth/v1/user": () => Response.json({ id: "user-1", aud: "authenticated" }),
+        "/rest/v1/bookmarks": (req) =>
+          req.method === "GET" ? Response.json({ content_md: "Hola mundo" }) : Response.json([{ id: B1 }]),
+        "/rest/v1/rpc/bump_rate_limit": () => Response.json(true),
+        "/v2/translate": () => Response.json({ translations: [{ text: "Hello world", detected_source_lang: "ES" }] }),
+      });
+      try {
+        const req = new Request("http://localhost/translate", {
+          method: "POST",
+          headers: { Authorization: "Bearer user-jwt" },
+          body: JSON.stringify({ bookmark_id: B1, target_lang: "en-gb" }),
+        });
+        const res = await handlerFromEnv()(req);
+        assertEquals(await res.json(), {
+          translated_text: "Hello world",
+          translated_lang: "EN-GB",
+          detected_source_lang: "ES",
+        });
+        assertEquals(net.calls.map((c) => `${c.method} ${c.path}`), [
+          "GET /auth/v1/user",
+          "GET /rest/v1/bookmarks",
+          "POST /rest/v1/rpc/bump_rate_limit",
+          "POST /v2/translate",
+          "PATCH /rest/v1/bookmarks",
+        ]);
+        // Supabase calls run under the caller's JWT (so RLS applies) …
+        for (const call of net.calls.filter((c) => c.path !== "/v2/translate")) {
+          assertEquals(call.headers.get("Authorization"), "Bearer user-jwt");
+        }
+        // … and DeepL gets the server's key, on the free-tier host for a :fx key.
+        assertEquals(net.calls[3].headers.get("Authorization"), "DeepL-Auth-Key deepl-key:fx");
+      } finally {
+        net.restore();
+      }
+    },
+  ),
+);
+
+Deno.test("handleTranslate: reports the first source language DeepL detects across chunks", async () => {
+  const paragraph = "word ".repeat(10_000).trim(); // ~50KB: one chunk each
+  const supabase = fakeSupabase({ contentMd: [paragraph, paragraph, paragraph].join("\n\n") });
+  const detected = [undefined, "DE", "EN"];
+  let call = 0;
+  const fetchImpl: typeof fetch = () =>
+    Promise.resolve(Response.json({ translations: [{ text: "x", detected_source_lang: detected[call++] }] }));
+
+  const res = await handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1 }, fetchImpl);
+  assertEquals(call, 3);
+  assertEquals((await res.json()).detected_source_lang, "DE");
+});
+
+Deno.test("handleTranslate: a DeepL network failure (not a timeout) is a 502 and caches nothing", async () => {
+  const supabase = fakeSupabase({});
+  const fetchImpl: typeof fetch = () => Promise.reject(new TypeError("error sending request: connection refused"));
+
+  const res = await quietly(() => handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1 }, fetchImpl));
+  assertEquals(res.status, 502);
+  assertEquals(await res.json(), "translation service unavailable");
+  assertEquals(supabase.lastUpdatePayload, undefined);
 });

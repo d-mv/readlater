@@ -104,3 +104,18 @@ Deno.test("chunkText: doesn't cut words when whitespace is available", () => {
   assertEquals(joinChunks(chunks), text);
 });
 
+
+Deno.test("chunkText: cuts CJK text after a full-width sentence end", () => {
+  const text = "今日は晴れです。明日は雨です。"; // 3 bytes per character
+  const chunks = chunkText(text, 30);
+
+  assertEquals(chunks.map((c) => c.text), ["今日は晴れです。", "明日は雨です。"]);
+  assertEquals(chunks[0].glue, "");
+  assertEquals(joinChunks(chunks), text);
+});
+
+Deno.test("chunkText: a code point wider than the limit still goes out whole, one per chunk", () => {
+  const chunks = chunkText("😀😀😀", 3);
+  assertEquals(chunks.map((c) => c.text), ["😀", "😀", "😀"]);
+  assertEquals(joinChunks(chunks), "😀😀😀");
+});

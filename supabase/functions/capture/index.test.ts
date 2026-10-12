@@ -1,11 +1,14 @@
 import { assertEquals } from "jsr:@std/assert@1.0.19";
+import { quietly, stubFetch, withEnv } from "../_shared/testing.ts";
 import {
   handleCapture,
   handleRefresh,
   handleRequest,
+  handlerFromEnv,
   insertReadyNote,
   MAX_TEXT_CHARS,
   MAX_TITLE_CHARS,
+  MAX_URL_CHARS,
 } from "./index.ts";
 
 const OWNER = "owner-1";
@@ -14,23 +17,38 @@ const BOOKMARK_ID = "6f1c1c3e-2b4a-4c55-9d1e-0a3b5c7d9e11";
 function fakeSupabase(opts: {
   contentEdited?: boolean;
   updateError?: { message: string };
-  updatedRows?: { id: string }[];
+  updatedRows?: { id: string }[] | null;
   rateLimit?: { data: unknown; error?: { message: string } | null };
   insertResult?: { data: unknown; error: unknown };
+  // What the post-conflict lookup by url_normalized finds.
+  existing?: { id: string; title: string | null; created_at: string } | null;
+  // The refresh's content_edited lookup sees no row.
+  contentLookupMissing?: boolean;
 }) {
   let lastUpdatedRow: Record<string, unknown> | undefined;
   let lastInsertedRow: Record<string, unknown> | undefined;
+  const lookups: { col: string; val: string }[] = [];
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
 
-  const maybeSingle = () => Promise.resolve({ data: { content_edited: opts.contentEdited ?? false } });
-  const eqSelect = (_col: string, _val: string) => ({ maybeSingle });
-  const select = (_cols: string) => ({ eq: eqSelect });
+  const select = (_cols: string) => ({
+    eq: (col: string, val: string) => ({
+      maybeSingle: () => {
+        if (col === "url_normalized") {
+          lookups.push({ col, val });
+          return Promise.resolve({ data: opts.existing ?? null });
+        }
+        return Promise.resolve({
+          data: opts.contentLookupMissing ? null : { content_edited: opts.contentEdited ?? false },
+        });
+      },
+    }),
+  });
 
   const selectAfterUpdate = (_cols: string) =>
     Promise.resolve(
       opts.updateError
         ? { data: null, error: opts.updateError }
-        : { data: opts.updatedRows ?? [{ id: BOOKMARK_ID }], error: null },
+        : { data: opts.updatedRows === undefined ? [{ id: BOOKMARK_ID }] : opts.updatedRows, error: null },
     );
   const not = () => ({ select: selectAfterUpdate });
   const eqUpdate = (_col: string, _val: string) => ({ not });
@@ -57,6 +75,7 @@ function fakeSupabase(opts: {
     from,
     rpc,
     rpcCalls,
+    lookups,
     get lastUpdatedRow() {
       return lastUpdatedRow;
     },
@@ -241,3 +260,276 @@ Deno.test("handleRequest: refresh with no body is an unconfirmed refresh", async
   const res = await handleRequest(req, supabase as any, env);
   assertEquals(res.status, 409);
 });
+
+// deno-lint-ignore no-explicit-any
+const asClient = (s: unknown) => s as any;
+
+Deno.test("handleCapture: missing OWNER_USER_ID is a generic 500 that touches nothing", async () => {
+  const supabase = fakeSupabase({});
+  const res = await quietly(() => handleCapture(asClient(supabase), undefined, { text: "a note" }));
+  assertEquals(res.status, 500);
+  assertEquals(await res.json(), "internal error");
+  assertEquals(supabase.rpcCalls, []);
+});
+
+Deno.test("handleCapture: a url over the cap is a 400", async () => {
+  const supabase = fakeSupabase({});
+  const url = "https://example.com/" + "a".repeat(MAX_URL_CHARS);
+  const res = await handleCapture(asClient(supabase), OWNER, { url });
+  assertEquals(res.status, 400);
+  assertEquals(await res.json(), "url is too long");
+  assertEquals(supabase.rpcCalls, []);
+});
+
+Deno.test("handleCapture: a non-http(s) url is a 400", async () => {
+  const supabase = fakeSupabase({});
+  const res = await handleCapture(asClient(supabase), OWNER, { url: "javascript:alert(1)" });
+  assertEquals(res.status, 400);
+  assertEquals(await res.json(), "invalid url");
+  assertEquals(supabase.lastInsertedRow, undefined);
+});
+
+Deno.test("handleCapture: neither url nor text (or only whitespace) is a 400", async () => {
+  const supabase = fakeSupabase({});
+  for (const input of [{}, { url: "  ", text: "\n" }, { url: 42, text: null }]) {
+    const res = await handleCapture(asClient(supabase), OWNER, input);
+    assertEquals(res.status, 400);
+    assertEquals(await res.json(), "capture requires url or text");
+  }
+  assertEquals(supabase.rpcCalls, []);
+});
+
+Deno.test("handleCapture: saves a url as a pending bookmark of the detected type", async () => {
+  const supabase = fakeSupabase({ insertResult: { data: { id: "b9" }, error: null } });
+  const res = await handleCapture(asClient(supabase), OWNER, {
+    url: " https://youtu.be/abc ",
+    title: "A video",
+  });
+  assertEquals(res.status, 200);
+  assertEquals(await res.json(), { status: "created", id: "b9" });
+  assertEquals(supabase.lastInsertedRow, {
+    url: "https://youtu.be/abc",
+    title: "A video",
+    type: "youtube",
+    status: "pending",
+    user_id: OWNER,
+  });
+});
+
+Deno.test("handleCapture: shared text that is just a URL is saved as a URL, not a note", async () => {
+  const supabase = fakeSupabase({});
+  const res = await handleCapture(asClient(supabase), OWNER, { text: "https://example.com/post" });
+  assertEquals(res.status, 200);
+  assertEquals(supabase.lastInsertedRow?.url, "https://example.com/post");
+  assertEquals(supabase.lastInsertedRow?.type, "article");
+  assertEquals(supabase.lastInsertedRow?.status, "pending");
+});
+
+Deno.test("handleCapture: a URL already saved reports the existing bookmark as a duplicate", async () => {
+  const supabase = fakeSupabase({
+    insertResult: { data: null, error: { code: "23505", message: "duplicate key" } },
+    existing: { id: "b1", title: "Old title", created_at: "2026-01-02T03:04:05Z" },
+  });
+  const res = await handleCapture(asClient(supabase), OWNER, { url: "https://Example.com/Post/" });
+  assertEquals(res.status, 200);
+  assertEquals(await res.json(), {
+    status: "duplicate",
+    existingId: "b1",
+    existingTitle: "Old title",
+    existingSavedAt: "2026-01-02T03:04:05Z",
+  });
+  // Looked up by the same normalisation Postgres applies to url_normalized.
+  assertEquals(supabase.lookups, [{ col: "url_normalized", val: "https://example.com/post" }]);
+});
+
+Deno.test("handleCapture: a unique violation whose row is gone by lookup time is a generic 500", async () => {
+  const supabase = fakeSupabase({
+    insertResult: { data: null, error: { code: "23505", message: "duplicate key" } },
+    existing: null,
+  });
+  const res = await quietly(() => handleCapture(asClient(supabase), OWNER, { url: "https://example.com/post" }));
+  assertEquals(res.status, 500);
+  assertEquals(await res.json(), "internal error");
+});
+
+Deno.test("handleCapture: any other URL insert failure is a generic 500 without a lookup", async () => {
+  const supabase = fakeSupabase({
+    insertResult: { data: null, error: { code: "42501", message: "permission denied for table bookmarks" } },
+  });
+  const res = await quietly(() => handleCapture(asClient(supabase), OWNER, { url: "https://example.com/post" }));
+  assertEquals(res.status, 500);
+  assertEquals(await res.json(), "internal error");
+  assertEquals(supabase.lookups, []);
+});
+
+Deno.test("handleRefresh: missing OWNER_USER_ID is a generic 500 that touches nothing", async () => {
+  const supabase = fakeSupabase({});
+  const res = await quietly(() => handleRefresh(asClient(supabase), undefined, BOOKMARK_ID, true));
+  assertEquals(res.status, 500);
+  assertEquals(supabase.rpcCalls, []);
+  assertEquals(supabase.lastUpdatedRow, undefined);
+});
+
+Deno.test("handleRefresh: a failed rate-limit RPC is a 500, not a pass", async () => {
+  const supabase = fakeSupabase({ rateLimit: { data: null, error: { message: "rpc down" } } });
+  const res = await quietly(() => handleRefresh(asClient(supabase), OWNER, BOOKMARK_ID, true));
+  assertEquals(res.status, 500);
+  assertEquals(supabase.lastUpdatedRow, undefined);
+});
+
+Deno.test("handleRefresh: returns 429 and updates nothing when the rate limit refuses", async () => {
+  const supabase = fakeSupabase({ rateLimit: { data: false, error: null } });
+  const res = await handleRefresh(asClient(supabase), OWNER, BOOKMARK_ID, true);
+  assertEquals(res.status, 429);
+  assertEquals(supabase.lastUpdatedRow, undefined);
+});
+
+Deno.test("handleRefresh: a bookmark the edited-check can't see falls through to a 404", async () => {
+  // No row from the content_edited lookup → nothing to confirm; the update
+  // (which also matches nothing) then reports the bookmark as missing.
+  const supabase = fakeSupabase({ updatedRows: null, contentLookupMissing: true });
+  const res = await handleRefresh(asClient(supabase), OWNER, BOOKMARK_ID, false);
+  assertEquals(res.status, 404);
+  assertEquals(await res.json(), "bookmark not found");
+});
+
+Deno.test("handleRequest: CORS preflight is answered without auth", async () => {
+  const supabase = fakeSupabase({});
+  const req = new Request("http://localhost/functions/v1/capture", { method: "OPTIONS" });
+  const res = await handleRequest(req, asClient(supabase), env);
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("Access-Control-Allow-Methods"), "POST, OPTIONS");
+  assertEquals(await res.text(), "");
+});
+
+Deno.test("handleRequest: a missing or wrong capture key is a 401 with CORS headers", async () => {
+  const supabase = fakeSupabase({});
+  const headerSets: Record<string, string>[] = [{}, { Authorization: "Bearer wrong" }];
+  for (const headers of headerSets) {
+    const req = new Request("http://localhost/functions/v1/capture", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ text: "a note" }),
+    });
+    const res = await handleRequest(req, asClient(supabase), env);
+    assertEquals(res.status, 401);
+    assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+  }
+  assertEquals(supabase.lastInsertedRow, undefined);
+});
+
+Deno.test("handleRequest: a valid POST creates the capture", async () => {
+  const supabase = fakeSupabase({});
+  const res = await handleRequest(captureRequest(JSON.stringify({ text: "a note" })), asClient(supabase), env);
+  assertEquals(res.status, 200);
+  assertEquals(await res.json(), { status: "created", id: "n1" });
+  assertEquals(supabase.lastInsertedRow?.type, "note");
+});
+
+Deno.test("handleRequest: a path without the function name still routes to capture", async () => {
+  const supabase = fakeSupabase({});
+  const req = new Request("http://localhost/", {
+    method: "POST",
+    headers: { Authorization: "Bearer k3y" },
+    body: JSON.stringify({ text: "a note" }),
+  });
+  const res = await handleRequest(req, asClient(supabase), env);
+  assertEquals(res.status, 200);
+});
+
+Deno.test("handleRequest: unknown routes and methods are 404s", async () => {
+  const supabase = fakeSupabase({});
+  const cases: [string, string][] = [
+    ["GET", "http://localhost/functions/v1/capture"],
+    ["POST", "http://localhost/functions/v1/capture/extra"],
+    ["POST", `http://localhost/functions/v1/capture/${BOOKMARK_ID}/delete`],
+    ["GET", `http://localhost/functions/v1/capture/${BOOKMARK_ID}/refresh`],
+  ];
+  for (const [method, url] of cases) {
+    const res = await handleRequest(
+      new Request(url, { method, headers: { Authorization: "Bearer k3y" } }),
+      asClient(supabase),
+      env,
+    );
+    assertEquals(res.status, 404, `${method} ${url}`);
+    assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+  }
+  assertEquals(supabase.rpcCalls, []);
+});
+
+function refreshRequest(body?: BodyInit): Request {
+  return new Request(`http://localhost/functions/v1/capture/${BOOKMARK_ID}/refresh`, {
+    method: "POST",
+    headers: { Authorization: "Bearer k3y" },
+    body,
+  });
+}
+
+Deno.test("handleRequest: refresh with force=true overrides the edited-content check", async () => {
+  const supabase = fakeSupabase({ contentEdited: true });
+  const res = await handleRequest(refreshRequest(JSON.stringify({ force: true })), asClient(supabase), env);
+  assertEquals(res.status, 200);
+  assertEquals(await res.json(), { status: "ok" });
+});
+
+Deno.test("handleRequest: refresh with a non-JSON body or a non-true force is an unconfirmed refresh", async () => {
+  for (const body of ["{not json", JSON.stringify({ force: "yes" })]) {
+    const supabase = fakeSupabase({ contentEdited: true });
+    const res = await handleRequest(refreshRequest(body), asClient(supabase), env);
+    assertEquals(res.status, 409);
+    assertEquals(supabase.lastUpdatedRow, undefined);
+  }
+});
+
+Deno.test("handleRequest: refresh with an oversize body is a 413", async () => {
+  const supabase = fakeSupabase({});
+  const big = JSON.stringify({ force: true, pad: "a".repeat(1024 * 1024) });
+  const res = await handleRequest(refreshRequest(big), asClient(supabase), env);
+  assertEquals(res.status, 413);
+  assertEquals(supabase.lastUpdatedRow, undefined);
+});
+
+const deployedEnv = {
+  SUPABASE_URL: "http://supabase.test",
+  SUPABASE_SERVICE_ROLE_KEY: "service-role-key",
+  CAPTURE_KEY: "k3y",
+  OWNER_USER_ID: OWNER,
+};
+
+Deno.test(
+  "handlerFromEnv: captures as OWNER_USER_ID through a service-role client",
+  withEnv(deployedEnv, async () => {
+    const net = stubFetch({
+      "/rest/v1/rpc/bump_rate_limit_for_user": () => Response.json(true),
+      "/rest/v1/bookmarks": () => Response.json({ id: "n1" }, { status: 201 }),
+    });
+    try {
+      const res = await handlerFromEnv()(captureRequest(JSON.stringify({ text: "a note" })));
+      assertEquals(res.status, 200);
+      assertEquals(await res.json(), { status: "created", id: "n1" });
+
+      assertEquals(net.calls.map((c) => `${c.method} ${c.path}`), [
+        "POST /rest/v1/rpc/bump_rate_limit_for_user",
+        "POST /rest/v1/bookmarks",
+      ]);
+      for (const call of net.calls) assertEquals(call.headers.get("apikey"), "service-role-key");
+      assertEquals(JSON.parse(net.calls[1].body!).user_id, OWNER);
+    } finally {
+      net.restore();
+    }
+  }),
+);
+
+Deno.test(
+  "handlerFromEnv: refuses every caller when CAPTURE_KEY is unset",
+  withEnv({ ...deployedEnv, CAPTURE_KEY: undefined }, async () => {
+    const net = stubFetch({});
+    try {
+      const res = await handlerFromEnv()(captureRequest(JSON.stringify({ text: "a note" })));
+      assertEquals(res.status, 401);
+      assertEquals(net.calls, []);
+    } finally {
+      net.restore();
+    }
+  }),
+);

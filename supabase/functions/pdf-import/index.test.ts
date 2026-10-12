@@ -1,5 +1,6 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.19";
-import { corsHeaders, handlePdfImport, handleRequest } from "./index.ts";
+import { corsHeaders, handlePdfImport, handleRequest, handlerFromEnv } from "./index.ts";
+import { quietly, stubFetch, withEnv } from "../_shared/testing.ts";
 
 function fakeSupabase(opts: {
   user?: { id: string } | null;
@@ -24,8 +25,10 @@ function fakeSupabase(opts: {
   const from = (_table: string) => ({ insert });
 
   let lastUploadOptions: unknown;
+  let lastUploadBytes: Uint8Array | undefined;
   const storageFrom = (_bucket: string) => ({
-    upload: (path: string, _bytes: Uint8Array, uploadOptions: unknown) => {
+    upload: (path: string, bytes: Uint8Array, uploadOptions: unknown) => {
+      lastUploadBytes = bytes;
       events.push("upload");
       lastUploadPath = path;
       lastUploadOptions = uploadOptions;
@@ -54,6 +57,9 @@ function fakeSupabase(opts: {
     },
     get lastUploadPath() {
       return lastUploadPath;
+    },
+    get lastUploadBytes() {
+      return lastUploadBytes;
     },
     get lastUploadOptions() {
       return lastUploadOptions;
@@ -286,3 +292,122 @@ Deno.test("handleRequest: a declared body over 28 MB is a 413 before anything is
   assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
   assertEquals(supabase.events, []);
 });
+
+// deno-lint-ignore no-explicit-any
+const asClient = (s: unknown) => s as any;
+
+// A minimal real one-page PDF (Helvetica, the text "Hello from a PDF"):
+// exercises the default unpdf extractor rather than an injected stand-in.
+const PDF_BASE64 = [
+  "JVBERi0xLjQKMSAwIG9iago8PCAvVHlwZSAvQ2F0YWxvZyAvUGFnZXMgMiAwIFIgPj4KZW5kb2JqCjIgMCBvYmoKPDwgL1R5cGUg",
+  "L1BhZ2VzIC9LaWRzIFszIDAgUl0gL0NvdW50IDEgPj4KZW5kb2JqCjMgMCBvYmoKPDwgL1R5cGUgL1BhZ2UgL1BhcmVudCAyIDAg",
+  "UiAvTWVkaWFCb3ggWzAgMCA2MTIgNzkyXSAvQ29udGVudHMgNCAwIFIgL1Jlc291cmNlcyA8PCAvRm9udCA8PCAvRjEgNSAwIFIg",
+  "Pj4gPj4gPj4KZW5kb2JqCjQgMCBvYmoKPDwgL0xlbmd0aCA0NyA+PgpzdHJlYW0KQlQgL0YxIDEyIFRmIDcyIDcyMCBUZCAoSGVs",
+  "bG8gZnJvbSBhIFBERikgVGogRVQKZW5kc3RyZWFtCmVuZG9iago1IDAgb2JqCjw8IC9UeXBlIC9Gb250IC9TdWJ0eXBlIC9UeXBl",
+  "MSAvQmFzZUZvbnQgL0hlbHZldGljYSA+PgplbmRvYmoKeHJlZgowIDYKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDA5IDAw",
+  "MDAwIG4gCjAwMDAwMDAwNTggMDAwMDAgbiAKMDAwMDAwMDExNSAwMDAwMCBuIAowMDAwMDAwMjQxIDAwMDAwIG4gCjAwMDAwMDAz",
+  "MzggMDAwMDAgbiAKdHJhaWxlcgo8PCAvU2l6ZSA2IC9Sb290IDEgMCBSID4+CnN0YXJ0eHJlZgo0MDgKJSVFT0YK",
+].join("");
+
+Deno.test("handlePdfImport: extracts a real PDF's text and uploads the original bytes intact", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const res = await handlePdfImport(asClient(supabase), { filename: "hello.pdf", contentBase64: PDF_BASE64 });
+  assertEquals(res.status, 200);
+  assertEquals(supabase.lastInsertedRow?.content_md, "Hello from a PDF");
+  assertEquals(supabase.lastInsertedRow?.pdf_parsed, true);
+  assertEquals(supabase.lastInsertedRow?.word_count, 4);
+  // pdf.js may detach the buffer it parses; the upload must still get every byte.
+  assertEquals(supabase.lastUploadBytes, Uint8Array.from(atob(PDF_BASE64), (c) => c.charCodeAt(0)));
+});
+
+Deno.test("handlePdfImport: a missing or non-string filename or content is a 400", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const inputs = [
+    {},
+    { filename: "a.pdf" },
+    { contentBase64: b64("x") },
+    { filename: null, contentBase64: b64("x") },
+    { filename: "a.pdf", contentBase64: 1 },
+  ];
+  for (const input of inputs) {
+    const res = await handlePdfImport(asClient(supabase), input);
+    assertEquals(res.status, 400);
+    assertEquals(await res.json(), "file is empty");
+  }
+  assertEquals(supabase.events, []);
+});
+
+Deno.test("handlePdfImport: content that isn't valid base64 is a 400", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const res = await handlePdfImport(asClient(supabase), { filename: "a.pdf", contentBase64: "%%%" });
+  assertEquals(res.status, 400);
+  assertEquals(await res.json(), "file could not be decoded");
+  assertEquals(supabase.events, []);
+});
+
+Deno.test("handlePdfImport: a failed rate-limit RPC is a 500 and touches nothing", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" }, rateLimit: { data: null, error: { message: "rpc down" } } });
+  const res = await quietly(() =>
+    handlePdfImport(asClient(supabase), { filename: "a.pdf", contentBase64: b64("x") }, () => Promise.resolve("t"))
+  );
+  assertEquals(res.status, 500);
+  assertEquals(supabase.events, ["rate-limit"]);
+});
+
+Deno.test("handleRequest: CORS preflight is answered without touching Supabase", async () => {
+  let clients = 0;
+  const res = await handleRequest(new Request("http://localhost/pdf-import", { method: "OPTIONS" }), () => {
+    clients++;
+    return asClient(fakeSupabase({}));
+  });
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("Access-Control-Allow-Methods"), "POST, OPTIONS");
+  assertEquals(clients, 0);
+});
+
+Deno.test("handleRequest: methods other than POST are a 404 with CORS headers", async () => {
+  const res = await handleRequest(
+    new Request("http://localhost/pdf-import", { method: "PUT", body: "{}" }),
+    () => asClient(fakeSupabase({})),
+  );
+  assertEquals(res.status, 404);
+  assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+});
+
+Deno.test("handleRequest: a valid POST imports as the caller, forwarding their Authorization", async () => {
+  const seen: string[] = [];
+  const makeClient = (authorization: string) => {
+    seen.push(authorization);
+    return asClient(fakeSupabase({ user: null }));
+  };
+  const body = JSON.stringify({ filename: "a.pdf", contentBase64: b64("x") });
+  const withAuth = new Request("http://localhost/pdf-import", {
+    method: "POST",
+    headers: { Authorization: "Bearer user-jwt" },
+    body,
+  });
+  assertEquals((await handleRequest(withAuth, makeClient)).status, 401);
+  await handleRequest(new Request("http://localhost/pdf-import", { method: "POST", body }), makeClient);
+  assertEquals(seen, ["Bearer user-jwt", ""]);
+});
+
+Deno.test(
+  "handlerFromEnv: authenticates the caller's own JWT against Supabase Auth",
+  withEnv({ SUPABASE_URL: "http://supabase.test", SUPABASE_ANON_KEY: "anon-key" }, async () => {
+    const net = stubFetch({ "/auth/v1/user": () => Response.json({ message: "invalid JWT" }, { status: 401 }) });
+    try {
+      const req = new Request("http://localhost/pdf-import", {
+        method: "POST",
+        headers: { Authorization: "Bearer user-jwt" },
+        body: JSON.stringify({ filename: "a.pdf", contentBase64: b64("x") }),
+      });
+      const res = await handlerFromEnv()(req);
+      assertEquals(res.status, 401);
+      assertEquals(net.calls.map((c) => `${c.method} ${c.path}`), ["GET /auth/v1/user"]);
+      assertEquals(net.calls[0].headers.get("Authorization"), "Bearer user-jwt");
+      assertEquals(net.calls[0].headers.get("apikey"), "anon-key");
+    } finally {
+      net.restore();
+    }
+  }),
+);

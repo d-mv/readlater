@@ -1,5 +1,6 @@
 import { assertEquals, assertStringIncludes } from "jsr:@std/assert@1.0.19";
-import { corsHeaders, handleRequest, handleSnippet } from "./index.ts";
+import { corsHeaders, handleRequest, handlerFromEnv, handleSnippet } from "./index.ts";
+import { quietly, stubFetch, withEnv } from "../_shared/testing.ts";
 
 function fakeSupabase(opts: {
   user?: { id: string } | null;
@@ -49,7 +50,7 @@ Deno.test("handleSnippet: converts HTML to Markdown and inserts a ready note", a
 
 Deno.test("handleSnippet: falls back to plain text when no HTML is provided", async () => {
   const supabase = fakeSupabase({ user: { id: "user-1" } });
-  const res = await handleSnippet(supabase as any, { text: "just plain text" });
+  const res = await handleSnippet(asClient(supabase), { text: "just plain text" });
   const body = await res.json();
 
   assertEquals(res.status, 200);
@@ -59,8 +60,7 @@ Deno.test("handleSnippet: falls back to plain text when no HTML is provided", as
 
 Deno.test("handleSnippet: falls back to plain text when Turndown produces empty output", async () => {
   const supabase = fakeSupabase({ user: { id: "user-1" } });
-  const res = await handleSnippet(supabase as any, { html: "<!-- comment only -->", text: "the text" });
-  const body = await res.json();
+  const res = await handleSnippet(asClient(supabase), { html: "<!-- comment only -->", text: "the text" });
 
   assertEquals(res.status, 200);
   assertEquals(supabase.lastInsertedRow?.content_md, "the text");
@@ -68,7 +68,7 @@ Deno.test("handleSnippet: falls back to plain text when Turndown produces empty 
 
 Deno.test("handleSnippet: returns 400 when both html and text are empty", async () => {
   const supabase = fakeSupabase({ user: { id: "user-1" } });
-  const res = await handleSnippet(supabase as any, { html: "", text: "" });
+  const res = await handleSnippet(asClient(supabase), { html: "", text: "" });
   assertEquals(res.status, 400);
 });
 
@@ -78,7 +78,7 @@ Deno.test("corsHeaders: allows the apikey header supabase-js attaches to functio
 
 Deno.test("handleSnippet: returns 401 when unauthenticated", async () => {
   const supabase = fakeSupabase({ user: null });
-  const res = await handleSnippet(supabase as any, { text: "hello" });
+  const res = await handleSnippet(asClient(supabase), { text: "hello" });
   assertEquals(res.status, 401);
 });
 
@@ -87,7 +87,7 @@ Deno.test("handleSnippet: returns a generic 500 (no DB error text) on insert fai
     user: { id: "user-1" },
     insertResult: { data: undefined, error: { message: "insert failed" } },
   });
-  const res = await handleSnippet(supabase as any, { text: "hello" });
+  const res = await handleSnippet(asClient(supabase), { text: "hello" });
   const body = await res.json();
 
   assertEquals(res.status, 500);
@@ -96,8 +96,7 @@ Deno.test("handleSnippet: returns a generic 500 (no DB error text) on insert fai
 
 Deno.test("handleSnippet: returns 429 and inserts nothing when the rate limit refuses", async () => {
   const supabase = fakeSupabase({ user: { id: "user-1" }, rateLimit: { data: false, error: null } });
-  // deno-lint-ignore no-explicit-any
-  const res = await handleSnippet(supabase as any, { text: "hello" });
+  const res = await handleSnippet(asClient(supabase), { text: "hello" });
   assertEquals(res.status, 429);
   assertEquals(supabase.lastInsertedRow, undefined);
 });
@@ -105,8 +104,7 @@ Deno.test("handleSnippet: returns 429 and inserts nothing when the rate limit re
 Deno.test("handleSnippet: unwraps a link around an image like the worker does", async () => {
   const supabase = fakeSupabase({ user: { id: "user-1" } });
   const html = '<p><a href="https://x.test/a.png"><img src="https://x.test/a.png"></a></p>';
-  // deno-lint-ignore no-explicit-any
-  await handleSnippet(supabase as any, { html, text: "pic" });
+  await handleSnippet(asClient(supabase), { html, text: "pic" });
   assertEquals(supabase.lastInsertedRow?.content_md, "![](https://x.test/a.png)");
 });
 
@@ -130,3 +128,102 @@ Deno.test("handleRequest: a body over 1 MB is a 413 with CORS headers", async ()
   assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
   assertEquals(supabase.lastInsertedRow, undefined);
 });
+
+// deno-lint-ignore no-explicit-any
+const asClient = (s: unknown) => s as any;
+
+Deno.test("handleSnippet: non-string html/text count as empty", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const res = await handleSnippet(asClient(supabase), { html: { tag: "p" }, text: 42 });
+  assertEquals(res.status, 400);
+  assertEquals(await res.json(), "snippet is empty");
+  assertEquals(supabase.lastInsertedRow, undefined);
+});
+
+Deno.test("handleSnippet: whitespace-only html and text is a 400 before rate limiting", async () => {
+  let rpcCalls = 0;
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const rpc = supabase.rpc;
+  supabase.rpc = (fn, args) => {
+    rpcCalls++;
+    return rpc(fn, args);
+  };
+  const res = await handleSnippet(asClient(supabase), { html: "  ", text: "\n" });
+  assertEquals(res.status, 400);
+  assertEquals(rpcCalls, 0);
+});
+
+Deno.test("handleSnippet: html that converts to nothing with no text is a 400", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const res = await handleSnippet(asClient(supabase), { html: "<!-- comment only -->" });
+  assertEquals(res.status, 400);
+  assertEquals(await res.json(), "snippet is empty");
+  assertEquals(supabase.lastInsertedRow, undefined);
+});
+
+Deno.test("handleSnippet: a failed rate-limit RPC is a 500, not a pass", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" }, rateLimit: { data: null, error: { message: "rpc down" } } });
+  const res = await quietly(() => handleSnippet(asClient(supabase), { text: "keep this" }));
+  assertEquals(res.status, 500);
+  assertEquals(supabase.lastInsertedRow, undefined);
+});
+
+Deno.test("handleRequest: CORS preflight is answered without touching Supabase", async () => {
+  let clients = 0;
+  const res = await handleRequest(new Request("http://localhost/snippet", { method: "OPTIONS" }), () => {
+    clients++;
+    return asClient(fakeSupabase({}));
+  });
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("Access-Control-Allow-Headers"), corsHeaders["Access-Control-Allow-Headers"]);
+  assertEquals(clients, 0);
+});
+
+Deno.test("handleRequest: methods other than POST are a 404 with CORS headers", async () => {
+  const res = await handleRequest(
+    new Request("http://localhost/snippet", { method: "GET" }),
+    () => asClient(fakeSupabase({})),
+  );
+  assertEquals(res.status, 404);
+  assertEquals(res.headers.get("Access-Control-Allow-Origin"), "*");
+});
+
+Deno.test("handleRequest: a valid POST saves the snippet as the caller, forwarding their Authorization", async () => {
+  const supabase = fakeSupabase({ user: { id: "user-1" } });
+  const seen: string[] = [];
+  const makeClient = (authorization: string) => {
+    seen.push(authorization);
+    return asClient(supabase);
+  };
+  const body = JSON.stringify({ text: "keep this" });
+  const withAuth = new Request("http://localhost/snippet", {
+    method: "POST",
+    headers: { Authorization: "Bearer user-jwt" },
+    body,
+  });
+  assertEquals((await handleRequest(withAuth, makeClient)).status, 200);
+  assertEquals(supabase.lastInsertedRow?.content_md, "keep this");
+  await handleRequest(new Request("http://localhost/snippet", { method: "POST", body }), makeClient);
+  assertEquals(seen, ["Bearer user-jwt", ""]);
+});
+
+Deno.test(
+  "handlerFromEnv: authenticates the caller's own JWT against Supabase Auth",
+  withEnv({ SUPABASE_URL: "http://supabase.test", SUPABASE_ANON_KEY: "anon-key" }, async () => {
+    const net = stubFetch({ "/auth/v1/user": () => Response.json({ message: "invalid JWT" }, { status: 401 }) });
+    try {
+      const req = new Request("http://localhost/snippet", {
+        method: "POST",
+        headers: { Authorization: "Bearer user-jwt" },
+        body: JSON.stringify({ text: "keep this" }),
+      });
+      const res = await handlerFromEnv()(req);
+      assertEquals(res.status, 401);
+      assertEquals(net.calls.map((c) => `${c.method} ${c.path}`), ["GET /auth/v1/user"]);
+      assertEquals(net.calls[0].headers.get("Authorization"), "Bearer user-jwt");
+      assertEquals(net.calls[0].headers.get("apikey"), "anon-key");
+    } finally {
+      net.restore();
+    }
+  }),
+);
