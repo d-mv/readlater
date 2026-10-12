@@ -11,7 +11,7 @@ import { MAX_HTML_BYTES } from "./http";
 import { log } from "./logger";
 import type { FetchHtml } from "./parseArticle";
 import { TimeoutError, withTimeout } from "./timeout";
-import { routeIfPublic } from "./urlGuard";
+import { routeIfPublic, type LookupAll } from "./urlGuard";
 
 // Budget for one render. Every step gets at most what is left of the total
 // (minus the context-close reserve), so the steps can never add up to more
@@ -71,8 +71,17 @@ interface BrowserHandle {
 let handlePromise: Promise<BrowserHandle> | null = null;
 let liveHandle: BrowserHandle | null = null;
 
+// How the browser's egress is vetted: the proxy's resolver and private-address
+// check, and the request guard's resolver. Production uses the defaults.
+let egress: { proxy?: Parameters<typeof startEgressProxy>[0]; lookup?: LookupAll } = {};
+
+/** Test hook: lets a test point the browser at servers on loopback. */
+export function setEgressPolicyForTests(policy: typeof egress) {
+  egress = policy;
+}
+
 async function launch(): Promise<BrowserHandle> {
-  const proxy = await startEgressProxy();
+  const proxy = await startEgressProxy(egress.proxy);
   let browser: Browser;
   try {
     browser = await chromium.launch(browserLaunchOptions(proxy.url));
@@ -147,7 +156,8 @@ export const browserCircuitBreaker = new CircuitBreaker({
   onStateChange: (from, to) => {
     log.warn("circuit breaker state changed", { breaker: "playwright-browser", from, to });
     if (to === "OPEN") {
-      closeBrowser().catch(() => {});
+      // closeBrowser() never rejects.
+      void closeBrowser();
     }
   },
 });
@@ -186,7 +196,7 @@ async function renderPage(url: string, deadline: number): Promise<string> {
       "Blocking WebSockets",
     );
     await step(
-      context.route("**/*", (route) => routeIfPublic(route)),
+      context.route("**/*", (route) => routeIfPublic(route, egress.lookup)),
       CONTEXT_CREATE_TIMEOUT_MS,
       "Installing request guard",
     );
@@ -229,5 +239,8 @@ async function renderPage(url: string, deadline: number): Promise<string> {
   }
 }
 
-export const renderWithBrowser: FetchHtml = (url) =>
-  browserCircuitBreaker.execute(() => renderPage(url, Date.now() + TOTAL_RENDER_TIMEOUT_MS));
+export const renderWithBrowser = (
+  url: string,
+  totalTimeoutMs = TOTAL_RENDER_TIMEOUT_MS,
+): ReturnType<FetchHtml> =>
+  browserCircuitBreaker.execute(() => renderPage(url, Date.now() + totalTimeoutMs));
