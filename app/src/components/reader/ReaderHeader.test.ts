@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { mount } from "@vue/test-utils";
 import ReaderHeader from "./ReaderHeader.vue";
+import ReaderMenu from "./ReaderMenu.vue";
 import type { Bookmark } from "../../lib/supabase";
 
 function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
@@ -44,6 +45,16 @@ describe("ReaderHeader", () => {
   test("shows the bookmark's domain", () => {
     const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
     expect(wrapper.text()).toContain("arc90.com");
+  });
+
+  test.each([
+    ["delete", "delete"],
+    ["mark-read", "markRead"],
+    ["mark-unread", "markUnread"],
+  ] as const)("forwards %s from the menu as %s", (menuEvent, headerEvent) => {
+    const wrapper = mount(ReaderHeader, { props: { bookmark: makeBookmark() } });
+    wrapper.findComponent(ReaderMenu).vm.$emit(menuEvent);
+    expect(wrapper.emitted(headerEvent)).toHaveLength(1);
   });
 
   test("emits back when the back button is clicked", async () => {

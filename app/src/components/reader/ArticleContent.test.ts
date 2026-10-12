@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { flushPromises, mount } from "@vue/test-utils";
 import { MdEditor } from "md-editor-v3";
@@ -133,6 +133,61 @@ describe("ArticleContent", () => {
     expect(link.find("img").attributes("src")).toBe("https://example.com/thumb.jpg");
   });
 
+  describe("raw-HTML images wrapped in a markdown link", () => {
+    test("drops the link when it points at the image itself", () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: '[<img src="https://cdn/a.png">](https://cdn/a.png)' },
+      });
+      expect(wrapper.find("img").attributes("src")).toBe("https://cdn/a.png");
+      expect(wrapper.find("a").exists()).toBe(false);
+    });
+
+    test("keeps the link when it points somewhere else", () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: '[<img src="https://cdn/a.png">](https://example.com/page)' },
+      });
+      expect(wrapper.find("a").attributes("href")).toBe("https://example.com/page");
+      expect(wrapper.find("a img").attributes("src")).toBe("https://cdn/a.png");
+    });
+
+    test("keeps the link around an image that has no src", () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: '[<img alt="x">](https://example.com/page)' },
+      });
+      expect(wrapper.find("a").attributes("href")).toBe("https://example.com/page");
+    });
+  });
+
+  test("keeps a link around a markdown image with an empty source", () => {
+    const wrapper = mount(ArticleContent, {
+      props: { contentMd: "[![alt]()](https://example.com/page)" },
+    });
+    expect(wrapper.find("a").attributes("href")).toBe("https://example.com/page");
+  });
+
+  test("unwraps a raw-HTML link whose only content is the image it points to", () => {
+    const wrapper = mount(ArticleContent, {
+      props: {
+        contentMd: '<p><a href="https://cdn/a.png"> <img src="https://cdn/a.png"> </a></p>',
+      },
+    });
+    expect(wrapper.find("a").exists()).toBe(false);
+    expect(wrapper.find("img").attributes("src")).toBe("https://cdn/a.png");
+  });
+
+  test("keeps a raw-HTML link whose image points elsewhere, and named anchors without href", () => {
+    const wrapper = mount(ArticleContent, {
+      props: {
+        contentMd:
+          '<p><a name="top">Top</a> <a href="https://example.com/page"><img src="https://cdn/a.png"></a></p>',
+      },
+    });
+    const links = wrapper.findAll("a");
+    expect(links).toHaveLength(2);
+    expect(links[0]!.text()).toBe("Top");
+    expect(links[1]!.find("img").exists()).toBe(true);
+  });
+
   test("cleans up broken markdown image link rudiments with internal newlines", () => {
     const wrapper = mount(ArticleContent, {
       props: {
@@ -193,6 +248,14 @@ describe("ArticleContent", () => {
       expect(iframe.exists()).toBe(true);
       expect(iframe.attributes("src")).toBe("https://www.youtube-nocookie.com/embed/abc123");
       expect(wrapper.find('button[data-testid="youtube-play"]').exists()).toBe(false);
+    });
+
+    test("without a thumbnail the play button shows no image source", () => {
+      const wrapper = mount(ArticleContent, {
+        props: { ...youtubeProps, thumbnailUrl: null },
+      });
+      const img = wrapper.get('button[data-testid="youtube-play"] img');
+      expect(img.attributes("src")).toBeUndefined();
     });
 
     test("non-youtube content renders without any click-to-play affordance", () => {
@@ -367,6 +430,40 @@ describe("ArticleContent", () => {
       const editor = wrapper.findComponent(MdEditor);
       expect(editor.props("preview")).toBe(false);
       expect(editor.props("toolbars")).toEqual(expect.arrayContaining(["preview"]));
+    });
+
+    test("drops to single-pane with a preview toggle when the window narrows", async () => {
+      window.innerWidth = 1200;
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
+      await flushPromises();
+
+      window.innerWidth = 400;
+      window.dispatchEvent(new Event("resize"));
+      await flushPromises();
+
+      const editor = wrapper.findComponent(MdEditor);
+      expect(editor.props("preview")).toBe(false);
+      expect(editor.props("toolbars")).toEqual(expect.arrayContaining(["preview"]));
+    });
+
+    test("stops listening for resizes once unmounted", () => {
+      const add = vi.spyOn(window, "addEventListener");
+      const remove = vi.spyOn(window, "removeEventListener");
+      const wrapper = mount(ArticleContent, { props: { contentMd: "" } });
+      const onResize = add.mock.calls.find(([type]) => type === "resize")![1];
+
+      wrapper.unmount();
+
+      expect(remove).toHaveBeenCalledWith("resize", onResize);
+      vi.restoreAllMocks();
+    });
+
+    test("opens the editor empty when no draft is bound", async () => {
+      const wrapper = mount(ArticleContent, { props: { contentMd: "# saved", editing: true } });
+      await flushPromises();
+      expect(wrapper.findComponent(MdEditor).props("modelValue")).toBe("");
     });
 
     test("starts split-screen on a wide viewport", async () => {

@@ -555,6 +555,156 @@ describe("AddBookmarkDialog", () => {
     expect(wrapper.find("dialog").exists()).toBe(false);
   });
 
+  describe("edge cases", () => {
+    async function openIn(mode: "url" | "snippet" | "file") {
+      const wrapper = mount(AddBookmarkDialog);
+      await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+      await wrapper.get(`button[data-testid="mode-${mode}"]`).trigger("click");
+      return wrapper;
+    }
+
+    test("a save that throws shows a generic error and keeps the dialog open", async () => {
+      const store = useBookmarksStore();
+      store.add = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+      const wrapper = await openIn("url");
+
+      await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
+      await wrapper.get("form").trigger("submit");
+      await flushPromises();
+
+      expect(wrapper.get('[data-testid="error"]').text()).toBe("Something went wrong. Try again.");
+      expect(wrapper.find("dialog").exists()).toBe(true);
+    });
+
+    test("a paste event without clipboard data saves the textarea as a plain note", async () => {
+      const store = useBookmarksStore();
+      store.addNote = vi.fn().mockResolvedValue({ error: null });
+      store.addSnippet = vi.fn();
+      const wrapper = await openIn("snippet");
+
+      await wrapper.get("textarea").trigger("paste");
+      await wrapper.get("textarea").setValue("typed");
+      await wrapper.get("form").trigger("submit");
+      await flushPromises();
+
+      expect(store.addNote).toHaveBeenCalledWith("typed");
+      expect(store.addSnippet).not.toHaveBeenCalled();
+    });
+
+    test("cancelling the file picker after choosing a file clears the choice", async () => {
+      const wrapper = await openIn("file");
+      await selectFile(wrapper, new File(["# hi"], "notes.md"));
+      expect(wrapper.text()).toContain("notes.md");
+
+      const input = wrapper.get("input[type=file]");
+      Object.defineProperty(input.element, "files", { value: [], configurable: true });
+      await input.trigger("change");
+
+      expect(wrapper.text()).not.toContain("notes.md");
+      expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeDefined();
+    });
+
+    test("submitting the file form with no file chosen does nothing", async () => {
+      const store = useBookmarksStore();
+      store.addFile = vi.fn();
+      store.addPdf = vi.fn();
+      const wrapper = await openIn("file");
+
+      await wrapper.get("form").trigger("submit");
+      await flushPromises();
+
+      expect(store.addFile).not.toHaveBeenCalled();
+      expect(store.addPdf).not.toHaveBeenCalled();
+      expect(wrapper.find("dialog").exists()).toBe(true);
+    });
+
+    test("dragging over the dropzone allows a drop", async () => {
+      const wrapper = await openIn("file");
+      const event = new Event("dragover", { cancelable: true });
+
+      wrapper.get('[data-testid="dropzone"]').element.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+    });
+
+    test("leaving a child of the dropzone keeps the highlight until the pointer leaves it entirely", async () => {
+      const wrapper = await openIn("file");
+      const dropzone = wrapper.get('[data-testid="dropzone"]');
+
+      await dropzone.trigger("dragenter");
+      await dropzone.trigger("dragenter");
+      await dropzone.trigger("dragleave");
+      expect(dropzone.attributes("data-dragging")).toBe("true");
+
+      await dropzone.trigger("dragleave");
+      expect(dropzone.attributes("data-dragging")).toBeUndefined();
+    });
+
+    test("a drop that carries no files selects nothing", async () => {
+      const wrapper = await openIn("file");
+      const dropzone = wrapper.get('[data-testid="dropzone"]');
+
+      await dropzone.trigger("drop");
+
+      expect(wrapper.find('[data-testid="error"]').exists()).toBe(false);
+      expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeDefined();
+    });
+
+    test("switching tabs while a save is in flight keeps the form locked", async () => {
+      const store = useBookmarksStore();
+      const pending = deferred<{ error: null }>();
+      store.add = vi.fn().mockReturnValue(pending.promise);
+      const wrapper = await openIn("url");
+      await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
+      await wrapper.get("form").trigger("submit");
+
+      await wrapper.get('button[data-testid="mode-snippet"]').trigger("click");
+      await wrapper.get("textarea").setValue("text");
+
+      expect(wrapper.get('button[data-testid="submit-btn"]').attributes("disabled")).toBeDefined();
+      pending.resolve({ error: null });
+      await flushPromises();
+      expect(wrapper.find("dialog").exists()).toBe(false);
+    });
+
+    async function reachDuplicatePrompt() {
+      const store = useBookmarksStore();
+      store.add = vi.fn().mockResolvedValue(DUPLICATE);
+      const wrapper = await openIn("url");
+      await wrapper.get("input[type=url]").setValue("https://arc90.com/x");
+      await wrapper.get("form").trigger("submit");
+      await flushPromises();
+      return { store, wrapper };
+    }
+
+    test("a double-click on 'Add anyway' re-fetches only once", async () => {
+      const { store, wrapper } = await reachDuplicatePrompt();
+      store.refresh = vi.fn().mockResolvedValue({ error: null });
+      const confirm = wrapper.get('button[data-testid="confirm-btn"]').element as HTMLButtonElement;
+
+      confirm.click();
+      confirm.click();
+      await flushPromises();
+
+      expect(store.refresh).toHaveBeenCalledTimes(1);
+    });
+
+    test("a re-fetch finishing after the dialog was dismissed doesn't touch the new form", async () => {
+      const { store, wrapper } = await reachDuplicatePrompt();
+      const pending = deferred<{ error: string | null }>();
+      store.refresh = vi.fn().mockReturnValue(pending.promise);
+
+      await wrapper.get('button[data-testid="confirm-btn"]').trigger("click");
+      await wrapper.get("dialog").trigger("click");
+      await wrapper.get('button[data-testid="add-btn"]').trigger("click");
+      pending.resolve({ error: "Couldn't save the change." });
+      await flushPromises();
+
+      expect(wrapper.find('[data-testid="error"]').exists()).toBe(false);
+      expect(wrapper.find("dialog").exists()).toBe(true);
+    });
+  });
+
   test("cancelling the duplicate prompt returns to the form without adding", async () => {
     const store = useBookmarksStore();
     store.add = vi.fn().mockResolvedValue(DUPLICATE);

@@ -95,8 +95,8 @@ function close() {
 // Up/Down/Home/End move focus between the items (wrapping), as a role="menu"
 // promises. Tab still reaches the font-size buttons, which aren't items.
 function onPanelKeydown(event: KeyboardEvent) {
+  // Never empty: the Edit item is always there.
   const items = menuItems();
-  if (items.length === 0) return;
   const current = items.indexOf(document.activeElement as HTMLElement);
   let next: number;
   switch (event.key) {

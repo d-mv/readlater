@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { mount } from "@vue/test-utils";
+import { flushPromises, mount } from "@vue/test-utils";
 import ShareDialog from "./ShareDialog.vue";
+import Dialog from "../../shared/ui/Dialog.vue";
 import type { Bookmark } from "../../lib/supabase";
 
 function makeBookmark(overrides: Partial<Bookmark> = {}): Bookmark {
@@ -103,5 +104,122 @@ describe("ShareDialog", () => {
     await wrapper.find('[data-testid="copy-btn"]').trigger("click");
 
     expect(writeText).toHaveBeenCalledWith("https://readlater.mlnkv.net/s/abc-123");
+  });
+
+  test("shows a copied state for two seconds after copying", async () => {
+    vi.useFakeTimers();
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark({ is_public: true }) } });
+    const iconClass = () => wrapper.get('[data-testid="copy-btn"] svg').classes();
+
+    expect(iconClass()).toContain("tabler-icon-copy");
+    await wrapper.get('[data-testid="copy-btn"]').trigger("click");
+    await flushPromises();
+    expect(iconClass()).toContain("tabler-icon-copy-check");
+
+    vi.advanceTimersByTime(2000);
+    await flushPromises();
+    expect(iconClass()).toContain("tabler-icon-copy");
+    vi.useRealTimers();
+  });
+
+  test("falls back to a hidden textarea and execCommand when the clipboard API is refused", async () => {
+    Object.assign(navigator, {
+      clipboard: { writeText: vi.fn().mockRejectedValue(new Error("NotAllowedError")) },
+    });
+    let copiedText: string | undefined;
+    const execCommand = vi.fn(() => {
+      copiedText = (document.activeElement as HTMLTextAreaElement | null)?.value;
+      return true;
+    });
+    Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
+    const select = vi
+      .spyOn(HTMLTextAreaElement.prototype, "select")
+      .mockImplementation(function (this: HTMLTextAreaElement) {
+        this.focus();
+      });
+    const wrapper = mount(ShareDialog, {
+      props: { bookmark: makeBookmark({ is_public: true }), origin: "https://readlater.mlnkv.net" },
+    });
+
+    await wrapper.get('[data-testid="copy-btn"]').trigger("click");
+    await flushPromises();
+
+    expect(select).toHaveBeenCalled();
+    expect(execCommand).toHaveBeenCalledWith("copy");
+    expect(copiedText).toBe("https://readlater.mlnkv.net/s/abc-123");
+    expect(document.querySelector("body > textarea")).toBeNull();
+  });
+
+  test("focusing the link field selects the whole link", async () => {
+    const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark({ is_public: true }) } });
+    const field = wrapper.get('[data-testid="link-field"]');
+    const select = vi.spyOn(field.element as HTMLInputElement, "select");
+
+    await field.trigger("focus");
+
+    expect(select).toHaveBeenCalled();
+  });
+
+  test("closing the sheet itself (Escape or the scrim) emits close", () => {
+    const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark() } });
+    wrapper.getComponent(Dialog).vm.$emit("close");
+    expect(wrapper.emitted("close")).toHaveLength(1);
+  });
+
+  test("defaults the link to the current origin", () => {
+    const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark({ is_public: true }) } });
+    const field = wrapper.get('[data-testid="link-field"]').element as HTMLInputElement;
+    expect(field.value).toBe(`${window.location.origin}/s/abc-123`);
+  });
+
+  describe("native share sheet", () => {
+    afterEach(() => {
+      delete (navigator as Partial<Navigator>).share;
+    });
+
+    test("is not offered where the browser has no Web Share API", () => {
+      const wrapper = mount(ShareDialog, {
+        props: { bookmark: makeBookmark({ is_public: true }) },
+      });
+      expect(wrapper.text()).not.toContain("Share…");
+    });
+
+    test("shares the link and title", async () => {
+      const share = vi.fn().mockResolvedValue(undefined);
+      Object.assign(navigator, { share });
+      const wrapper = mount(ShareDialog, {
+        props: {
+          bookmark: makeBookmark({ is_public: true }),
+          origin: "https://readlater.mlnkv.net",
+        },
+      });
+
+      await wrapper.get("button:not([data-testid])").trigger("click");
+
+      expect(share).toHaveBeenCalledWith({
+        url: "https://readlater.mlnkv.net/s/abc-123",
+        title: "Title",
+      });
+    });
+
+    test("omits a missing title and ignores the user dismissing the sheet", async () => {
+      const share = vi.fn().mockRejectedValue(new DOMException("cancelled", "AbortError"));
+      Object.assign(navigator, { share });
+      const wrapper = mount(ShareDialog, {
+        props: {
+          bookmark: makeBookmark({ is_public: true, title: null }),
+          origin: "https://readlater.mlnkv.net",
+        },
+      });
+
+      await wrapper.get("button:not([data-testid])").trigger("click");
+      await flushPromises();
+
+      expect(share).toHaveBeenCalledWith({
+        url: "https://readlater.mlnkv.net/s/abc-123",
+        title: undefined,
+      });
+    });
   });
 });

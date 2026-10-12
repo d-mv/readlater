@@ -70,6 +70,64 @@ describe("BookmarkRow", () => {
     expect(wrapper.text()).toContain("https://arc90.com/x");
   });
 
+  test.each([
+    ["pdf", "PDF"],
+    ["note", "Note"],
+  ] as const)("a %s with neither title nor URL is labelled by its type", (type, label) => {
+    const wrapper = mount(BookmarkRow, {
+      props: { bookmark: makeBookmark({ type, title: null, url: null }) },
+    });
+    expect(wrapper.get('[data-testid="title"]').text()).toBe(label);
+  });
+
+  test.each(["pending", "processing"] as const)(
+    "a %s row without a title shows a spinner and 'Processing…'",
+    (status) => {
+      const wrapper = mount(BookmarkRow, {
+        props: { bookmark: makeBookmark({ status, title: null }) },
+      });
+      const title = wrapper.get('[data-testid="title"]');
+      expect(title.text()).toBe("Processing…");
+      expect(title.classes()).toContain("italic");
+      expect(wrapper.find("svg.tabler-icon-loader-2").exists()).toBe(true);
+    },
+  );
+
+  test("a failed row without a title says so with a warning icon", () => {
+    const wrapper = mount(BookmarkRow, {
+      props: { bookmark: makeBookmark({ status: "failed", title: null }) },
+    });
+    const title = wrapper.get('[data-testid="title"]');
+    expect(title.text()).toBe("Failed to process");
+    expect(title.classes()).toContain("text-danger");
+    expect(wrapper.find("svg.tabler-icon-alert-triangle").exists()).toBe(true);
+  });
+
+  test("a YouTube bookmark gets the YouTube icon; an article gets the document icon", () => {
+    const video = mount(BookmarkRow, { props: { bookmark: makeBookmark({ type: "youtube" }) } });
+    const article = mount(BookmarkRow, { props: { bookmark: makeBookmark() } });
+    expect(video.find("svg.tabler-icon-brand-youtube").exists()).toBe(true);
+    expect(article.find("svg.tabler-icon-file-text").exists()).toBe(true);
+  });
+
+  test("shows a translated badge only once a translation exists", () => {
+    const translated = mount(BookmarkRow, {
+      props: { bookmark: makeBookmark({ translated_lang: "en" }) },
+    });
+    const plain = mount(BookmarkRow, { props: { bookmark: makeBookmark() } });
+    expect(translated.find('[data-testid="translated-badge"]').exists()).toBe(true);
+    expect(plain.find('[data-testid="translated-badge"]').exists()).toBe(false);
+  });
+
+  test("a cached copy missing a single image says '1 image'", () => {
+    const wrapper = mount(BookmarkRow, {
+      props: { bookmark: makeBookmark(), isCached: true, missingImages: 1 },
+    });
+    expect(wrapper.get('[data-testid="offline-toggle"]').attributes("title")).toBe(
+      "Saved offline without 1 image — remove offline copy",
+    );
+  });
+
   test("shows a save-offline toggle for unread rows", () => {
     const wrapper = mount(BookmarkRow, {
       props: { bookmark: makeBookmark({ archived: false, read_at: null }) },

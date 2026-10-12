@@ -52,6 +52,37 @@ describe("ReaderMenu", () => {
     expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(true);
   });
 
+  test("clicking the trigger again closes the menu", async () => {
+    const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
+    await openMenu(wrapper);
+    await openMenu(wrapper);
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
+  });
+
+  test("a double-click on the trigger leaves the menu closed", async () => {
+    const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
+    const trigger = wrapper.get('[data-testid="menu-trigger"]').element as HTMLButtonElement;
+
+    trigger.click();
+    trigger.click();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="menu-panel"]').exists()).toBe(false);
+  });
+
+  test("page translation falls back to English when the browser reports no language", async () => {
+    vi.spyOn(navigator, "language", "get").mockReturnValue("");
+    const wrapper = mount(ReaderMenu, {
+      props: { bookmark: makeBookmark({ url: "https://example.com/a" }) },
+    });
+    await openMenu(wrapper);
+
+    expect(wrapper.get('[data-testid="translate-page-item"]').attributes("href")).toContain(
+      "tl=en&",
+    );
+    vi.restoreAllMocks();
+  });
+
   test("marks the share item active when the bookmark is public", async () => {
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark({ is_public: true }) } });
     await openMenu(wrapper);
@@ -324,6 +355,46 @@ describe("ReaderMenu", () => {
       expect(focusedTestId()).toBe(items.at(-1));
       await panel.trigger("keydown", { key: "Home" });
       expect(focusedTestId()).toBe(items[0]);
+      wrapper.unmount();
+    });
+
+    test("with focus outside the items (font-size buttons), Down goes to the first and Up to the last", async () => {
+      const wrapper = mount(ReaderMenu, {
+        props: { bookmark: makeBookmark() },
+        attachTo: document.body,
+      });
+      await openMenu(wrapper);
+      await flushPromises();
+      const items = wrapper
+        .findAll('[role="menuitem"]')
+        .map((item) => (item.element as HTMLElement).dataset.testid);
+      const panel = wrapper.get('[data-testid="menu-panel"]');
+      const fontButton = () => panel.get("button:not([role])").element as HTMLElement;
+
+      fontButton().focus();
+      await panel.trigger("keydown", { key: "ArrowDown" });
+      expect(focusedTestId()).toBe(items[0]);
+
+      fontButton().focus();
+      await panel.trigger("keydown", { key: "ArrowUp" });
+      expect(focusedTestId()).toBe(items.at(-1));
+      wrapper.unmount();
+    });
+
+    test("other keys are left alone", async () => {
+      const wrapper = mount(ReaderMenu, {
+        props: { bookmark: makeBookmark() },
+        attachTo: document.body,
+      });
+      await openMenu(wrapper);
+      await flushPromises();
+      const before = focusedTestId();
+      const event = new KeyboardEvent("keydown", { key: "a", cancelable: true });
+
+      wrapper.get('[data-testid="menu-panel"]').element.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(false);
+      expect(focusedTestId()).toBe(before);
       wrapper.unmount();
     });
 

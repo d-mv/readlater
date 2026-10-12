@@ -88,8 +88,8 @@ function onSnippetPaste(event: ClipboardEvent) {
   const html = event.clipboardData?.getData("text/html") ?? "";
   const plain = (event.clipboardData?.getData("text/plain") ?? "").replace(/\r\n?/g, "\n");
   const el = event.target as HTMLTextAreaElement;
-  const replacesEverything =
-    (el.selectionStart ?? 0) === 0 && (el.selectionEnd ?? el.value.length) === el.value.length;
+  // A textarea's selection offsets are always numbers (never null).
+  const replacesEverything = el.selectionStart === 0 && el.selectionEnd === el.value.length;
   pastedRichText.value = html && replacesEverything ? { html, text: plain } : null;
 }
 
