@@ -178,6 +178,65 @@ describe("CaptureView", () => {
     expect(window.close).not.toHaveBeenCalled();
   });
 
+  test("a blank title param falls back to showing just the URL", async () => {
+    query.url = "https://arc90.com/x";
+    query.title = "   ";
+
+    const wrapper = mount(CaptureView);
+    await flushPromises();
+
+    const lines = wrapper.findAll('[data-testid="confirm-panel"] p').map((p) => p.text());
+    expect(lines).toEqual(["https://arc90.com/x"]);
+  });
+
+  test("a double-click on Save stores the bookmark once", async () => {
+    query.url = "https://arc90.com/x";
+    const inserted = { id: "new", url: "https://arc90.com/x", type: "article", status: "pending" };
+    const insert = vi.fn(() => ({
+      select: vi.fn(() => ({ single: vi.fn().mockResolvedValue({ data: inserted, error: null }) })),
+    }));
+    from.mockReturnValue({ insert });
+
+    const wrapper = mount(CaptureView);
+    await flushPromises();
+    const save = wrapper.get('[data-testid="save-btn"]').element as HTMLButtonElement;
+    save.click();
+    save.click();
+    await flushPromises();
+
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("Saved");
+  });
+
+  test("a double-click on Continue re-queues the existing bookmark only once", async () => {
+    query.url = "https://arc90.com/x";
+    mockDuplicateInsert();
+    const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+    from.mockReturnValue({ update });
+
+    const wrapper = mount(CaptureView);
+    await flushPromises();
+    await clickSave(wrapper);
+    const button = wrapper.get('[data-testid="continue-btn"]').element as HTMLButtonElement;
+    button.click();
+    button.click();
+    await flushPromises();
+
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(wrapper.text()).toContain("Saved");
+  });
+
+  test("Cancel closes the popup without saving", async () => {
+    query.url = "https://arc90.com/x";
+
+    const wrapper = mount(CaptureView);
+    await flushPromises();
+    await wrapper.get('[data-testid="confirm-panel"] button').trigger("click");
+
+    expect(window.close).toHaveBeenCalledTimes(1);
+    expect(from).not.toHaveBeenCalled();
+  });
+
   test("shows an error state when there's no url param", async () => {
     const wrapper = mount(CaptureView);
     await flushPromises();

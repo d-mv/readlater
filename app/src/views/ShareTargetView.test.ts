@@ -204,6 +204,80 @@ describe("ShareTargetView", () => {
     expect(wrapper.text()).toContain("Already saved");
   });
 
+  test("a double-click on Save stores the bookmark once", async () => {
+    query.url = "https://arc90.com/x";
+    const insert = mockInsert({ id: "new", url: "https://arc90.com/x", status: "pending" });
+
+    const wrapper = mount(ShareTargetView);
+    await flushPromises();
+    const save = wrapper.get('[data-testid="save-btn"]').element as HTMLButtonElement;
+    save.click();
+    save.click();
+    await flushPromises();
+
+    expect(insert).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalledTimes(1);
+  });
+
+  test("a note the server rejects shows the error instead of routing away", async () => {
+    query.text = "a thought worth keeping";
+    const single = vi.fn().mockResolvedValue({ data: null, error: { message: "quota exceeded" } });
+    from.mockReturnValue({ insert: vi.fn(() => ({ select: vi.fn(() => ({ single })) })) });
+
+    const wrapper = await mountAndSave();
+
+    expect(replace).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-testid="status-placeholder"]').text()).toContain("quota exceeded");
+  });
+
+  describe("Continue on the duplicate prompt", () => {
+    function loadExisting() {
+      query.url = "https://arc90.com/x";
+      useBookmarksStore().bookmarks = [
+        {
+          id: "existing-1",
+          url: "https://arc90.com/x",
+          type: "article",
+          status: "ready",
+          title: "Loaded already",
+          content_edited: false,
+          created_at: "2026-01-01T00:00:00Z",
+          tags: [],
+        } as unknown as Bookmark,
+      ];
+    }
+
+    test("re-queues the existing bookmark and routes to the list", async () => {
+      loadExisting();
+      const eq = vi.fn().mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq }));
+      from.mockReturnValue({ update });
+
+      const wrapper = await mountAndSave();
+      await wrapper.get('[data-testid="continue-btn"]').trigger("click");
+      await flushPromises();
+
+      expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: "pending" }));
+      expect(eq).toHaveBeenCalledWith("id", "existing-1");
+      expect(replace).toHaveBeenCalledWith({ name: "list" });
+    });
+
+    test("a double-click re-queues only once", async () => {
+      loadExisting();
+      const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+      from.mockReturnValue({ update });
+
+      const wrapper = await mountAndSave();
+      const button = wrapper.get('[data-testid="continue-btn"]').element as HTMLButtonElement;
+      button.click();
+      button.click();
+      await flushPromises();
+
+      expect(update).toHaveBeenCalledTimes(1);
+      expect(replace).toHaveBeenCalledTimes(1);
+    });
+  });
+
   test("shows an error state when neither url nor text is present", async () => {
     const wrapper = mount(ShareTargetView);
     await flushPromises();

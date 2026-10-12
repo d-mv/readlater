@@ -39,7 +39,10 @@ async function save() {
 
 async function onContinueRefresh() {
   if (outcome.value.kind !== "duplicate") return;
-  const { error } = await store.refresh(outcome.value.id);
+  const { id } = outcome.value;
+  // Like save(): leave the prompt at once, so a double-click refreshes once.
+  outcome.value = { kind: "working" };
+  const { error } = await store.refresh(id);
   if (error) outcome.value = { kind: "error", message: error };
   else finish();
 }
