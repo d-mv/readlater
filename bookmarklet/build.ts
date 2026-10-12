@@ -62,12 +62,15 @@ export function buildBookmarklet(source: string, appOrigin: string): string {
   return `javascript:${encodeBookmarklet(substituted)}`;
 }
 
-if (import.meta.main) {
-  const appOrigin = process.env.APP_ORIGIN ?? "";
+/** Builds source.js for `appOrigin` into `<outDir>/dist.txt` and returns that path. */
+export function writeBookmarklet(appOrigin: string, outDir: string = import.meta.dir): string {
   const source = readFileSync(join(import.meta.dir, "source.js"), "utf8");
 
   const bookmarklet = buildBookmarklet(source, appOrigin);
-  const outPath = join(import.meta.dir, "dist.txt");
+  const outPath = join(outDir, "dist.txt");
   writeFileSync(outPath, bookmarklet);
   console.log(`Bookmarklet written to ${outPath}`);
+  return outPath;
 }
+
+if (import.meta.main) writeBookmarklet(process.env.APP_ORIGIN ?? "");

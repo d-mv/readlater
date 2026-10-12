@@ -5,6 +5,7 @@
   "scripts": {
     "build": "bun run build.ts",
     "test": "bun test",
+    "test:coverage": "bun test --coverage",
     "format": "oxfmt .",
     "format:check": "oxfmt --check .",
     "unused-deps": "knip --dependencies"

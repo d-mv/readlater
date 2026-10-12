@@ -1,7 +1,10 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
-import { buildBookmarklet } from "../build";
+import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { buildBookmarklet, writeBookmarklet } from "../build";
+
+afterEach(() => mock.restore());
 
 describe("buildBookmarklet", () => {
   test("substitutes the app origin, then wraps as a javascript: URI", () => {
@@ -48,5 +51,57 @@ describe("buildBookmarklet", () => {
     const result = buildBookmarklet(source, "https://readlater.mlnkv.net");
 
     expect(result.length).toBeLessThan(2048);
+  });
+});
+
+describe("writeBookmarklet", () => {
+  test("writes the built source.js to dist.txt in the output directory", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bookmarklet-"));
+    const logged = spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const outPath = writeBookmarklet("https://readlater.mlnkv.net", dir);
+
+      expect(outPath).toBe(join(dir, "dist.txt"));
+      const source = readFileSync(join(import.meta.dir, "../source.js"), "utf8");
+      expect(readFileSync(outPath, "utf8")).toBe(
+        buildBookmarklet(source, "https://readlater.mlnkv.net"),
+      );
+      expect(logged).toHaveBeenCalledWith(`Bookmarklet written to ${outPath}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("refuses to write without an app origin", () => {
+    const dir = mkdtempSync(join(tmpdir(), "bookmarklet-"));
+    try {
+      expect(() => writeBookmarklet("", dir)).toThrow("APP_ORIGIN is required");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the built bookmarklet", () => {
+  test("opens the capture popup for the current page's URL and title", () => {
+    const source = readFileSync(join(import.meta.dir, "../source.js"), "utf8");
+    const code = decodeURIComponent(
+      buildBookmarklet(source, "https://readlater.mlnkv.net").slice("javascript:".length),
+    );
+    const opened: unknown[][] = [];
+    const window = { open: (...args: unknown[]) => void opened.push(args) };
+    const location = { href: "https://example.com/post?id=1#top" };
+    const document = { title: "A post & more" };
+
+    new Function("window", "location", "document", code)(window, location, document);
+
+    expect(opened).toHaveLength(1);
+    const [url, name, features] = opened[0] as [string, string, string];
+    const target = new URL(url);
+    expect(target.origin + target.pathname).toBe("https://readlater.mlnkv.net/capture");
+    expect(target.searchParams.get("url")).toBe(location.href);
+    expect(target.searchParams.get("title")).toBe(document.title);
+    expect(name).toBe("readlater-capture");
+    expect(features).toBe("width=380,height=260");
   });
 });
