@@ -121,6 +121,9 @@ beforeAll(() => {
           return new Response("only counted", { status: 400 });
         case "/text":
           return new Response("plain text", { headers: { "content-type": "text/plain" } });
+        case "/big-chunked":
+          // Streamed without a Content-Length, so only the loaded DOM shows the size.
+          return streaming(`<!doctype html><p>big</p><!--${"x".repeat(20_000)}-->`, 0);
         case "/huge":
           // In a comment: cheap to parse, nothing to lay out.
           return html(`<p>big</p><!--${"x".repeat(MAX_HTML_BYTES)}-->`);
@@ -253,6 +256,16 @@ describe("renderWithBrowser (real Chromium)", () => {
     "refuses a page larger than the HTML cap",
     async () => {
       await expect(renderWithBrowser(`${base}/huge`)).rejects.toBeInstanceOf(ResponseTooLargeError);
+    },
+    SLOW,
+  );
+
+  test(
+    "refuses an over-cap page sent without a Content-Length once it has loaded",
+    async () => {
+      await expect(
+        renderWithBrowser(`${base}/big-chunked`, undefined, 10_000),
+      ).rejects.toBeInstanceOf(ResponseTooLargeError);
     },
     SLOW,
   );

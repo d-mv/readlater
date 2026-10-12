@@ -163,14 +163,18 @@ export const browserCircuitBreaker = new CircuitBreaker({
   },
 });
 
-async function renderPage(url: string, deadline: number): Promise<string> {
+// For promises nobody awaits any more (a step that lost its race, a context
+// or page closed in the background): their failure has nowhere to go.
+function ignoreRejection(): void {}
+
+async function renderPage(url: string, deadline: number, maxHtmlBytes: number): Promise<string> {
   // Work must finish early enough to leave the context-close reserve.
   const workDeadline = deadline - CONTEXT_CLOSE_TIMEOUT_MS;
   const remaining = () => workDeadline - Date.now();
   const step = <T>(promise: Promise<T>, cap: number, label: string): Promise<T> => {
     const budget = Math.min(cap, remaining());
     if (budget <= 0) {
-      promise.catch(() => {});
+      promise.catch(ignoreRejection);
       return Promise.reject(new TimeoutError(`${label}: render deadline exceeded`));
     }
     return withTimeout(promise, budget, `${label} timed out`);
@@ -184,7 +188,7 @@ async function renderPage(url: string, deadline: number): Promise<string> {
     "Creating browser context",
   ).catch((err: unknown) => {
     // Don't leak a context that shows up after we stopped waiting for it.
-    pendingContext.then((late) => late.close()).catch(() => {});
+    pendingContext.then((late) => late.close()).catch(ignoreRejection);
     throw err;
   });
 
@@ -208,19 +212,33 @@ async function renderPage(url: string, deadline: number): Promise<string> {
     const gotoBudget = remaining() - PAGE_CONTENT_TIMEOUT_MS;
     if (gotoBudget <= 0) throw new TimeoutError(`Render deadline exceeded before loading ${url}`);
 
+    // A document that declares itself over the cap is refused as soon as its
+    // headers arrive, instead of being downloaded and parsed first (5 MB of
+    // HTML can take longer to parse than the whole render budget).
+    let declaredTooLarge = false;
+    page.on("response", (res) => {
+      if (res.frame() !== page.mainFrame() || !res.request().isNavigationRequest()) return;
+      if (Number(res.headers()["content-length"]) > maxHtmlBytes) {
+        declaredTooLarge = true;
+        void page.close().catch(ignoreRejection);
+      }
+    });
+
     let gotoTimedOut = false;
     try {
       const response = await page.goto(url, { waitUntil: "domcontentloaded", timeout: gotoBudget });
       const type = (response?.headers()["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
       if (type && !HTML_TYPES.has(type)) throw new UnsupportedContentTypeError(type);
     } catch (err) {
+      if (declaredTooLarge) throw new ResponseTooLargeError(maxHtmlBytes);
       if (!(err instanceof Error) || err.name !== "TimeoutError") throw err;
       // Pages that never stop loading still have a usable DOM: keep going.
       gotoTimedOut = true;
     }
 
     const content = await step(page.content(), PAGE_CONTENT_TIMEOUT_MS, "Extracting page content");
-    if (content.length > MAX_HTML_BYTES) throw new ResponseTooLargeError(MAX_HTML_BYTES);
+    // No (or a lying) Content-Length: the size is only known once loaded.
+    if (content.length > maxHtmlBytes) throw new ResponseTooLargeError(maxHtmlBytes);
     if (gotoTimedOut && content.trim().length < 50) {
       throw new TimeoutError(`Page navigation timed out and content was empty for ${url}`);
     }
@@ -243,5 +261,6 @@ async function renderPage(url: string, deadline: number): Promise<string> {
 export const renderWithBrowser = (
   url: string,
   totalTimeoutMs = TOTAL_RENDER_TIMEOUT_MS,
+  maxHtmlBytes = MAX_HTML_BYTES,
 ): ReturnType<FetchHtml> =>
-  browserCircuitBreaker.execute(() => renderPage(url, Date.now() + totalTimeoutMs));
+  browserCircuitBreaker.execute(() => renderPage(url, Date.now() + totalTimeoutMs, maxHtmlBytes));
