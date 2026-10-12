@@ -50,6 +50,9 @@ afterwards only if it started it.
 | `list_orphaned_storage_objects()` (min age, limit, both buckets, service_role only) | 06 |
 | `supabase_realtime` publication column list | 07 |
 | `search_vector` + `bookmarks_search_idx` (weights, websearch syntax, RLS, default config) | 07 |
+| pg_cron/pg_net, `storage-sweep` cron job (schedule, no hard-coded URL, no-op without both Vault secrets, request shape with them) | 08 |
 
 Not testable at the SQL level: bucket MIME/size enforcement (done by the
-Storage API) and Realtime delivery itself.
+Storage API), Realtime delivery itself, and pg_cron firing / pg_net actually
+sending (08 runs the job's command in a rolled-back transaction, so queued
+requests are never sent).

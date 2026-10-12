@@ -284,8 +284,10 @@ flattened base schema (tables, indexes, replica identity, RLS,
 `(select auth.uid())`, `rate_limits`, bucket MIME lists,
 `list_orphaned_storage_objects`, a commented `cron.schedule` for the sweep),
 `20261011172000_bookmarks_keyset_index`,
-`20261012100000_minimal_table_grants` and
-`20261012101000_bookmarks_url_unique_per_user`. New changes go in new migration
+`20261012100000_minimal_table_grants`,
+`20261012101000_bookmarks_url_unique_per_user` and
+`20261012102000_schedule_storage_sweep` (pg_cron + pg_net, Vault-driven
+nightly sweep, §5). New changes go in new migration
 files.
 
 ## 3. Capture paths
@@ -693,10 +695,14 @@ the click-to-play embed.
   day that no `pdf_path`, `thumbnail_url` or YouTube `content_md`
   references, at most 1000 per call); the function removes them through the
   Storage API in batches of 500 (Supabase refuses direct deletes from
-  `storage.objects`). `?dry_run=1` only counts. It is meant to run daily
-  from pg_cron + pg_net; the `cron.schedule` snippet is commented at the end
-  of `20261011171000_audit_hardening.sql` (needs both extensions and the
-  service-role key in Vault as `service_role_key`).
+  `storage.objects`). `?dry_run=1` only counts. It runs daily at 03:17 UTC
+  from pg_cron + pg_net (`20261012102000_schedule_storage_sweep`; supersedes
+  the commented snippet in `20261011171000_audit_hardening.sql`). The job
+  reads the project URL and the service-role key from Vault at run time
+  (`project_url`, `service_role_key`) and selects nothing — sends no
+  request — until both exist, so the migration holds nothing
+  per-environment and a local `db reset` can never call prod. Until the
+  one-time Vault step in §8 is done, the job is scheduled but inert.
 
 ## 6. Frontend — Vue 3 PWA
 
@@ -1011,6 +1017,12 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
   (capture) and `DEEPL_API_KEY` (translate). `verify_jwt` is on for snippet,
   translate, file-import and pdf-import, off for capture and storage-sweep,
   which check their own bearer (`supabase/config.toml`).
+- Storage sweep schedule — one-time, per project, in the SQL editor (never
+  in a migration; the key must not reach the repo):
+  `select vault.create_secret('https://<project-ref>.supabase.co', 'project_url');`
+  `select vault.create_secret('<service-role key>', 'service_role_key');`
+  Until both exist the pg_cron job is a no-op (§5). Rotating the
+  service-role key means `vault.update_secret` on `service_role_key` too.
 - Bookmarklet — nothing to deploy. `bookmarklet/build.ts` bakes the app's
   origin into `bookmarklet/source.js` once; the built snippet is dragged to
   the bookmarks bar. No secret inside it, nothing to rotate when the PWA
