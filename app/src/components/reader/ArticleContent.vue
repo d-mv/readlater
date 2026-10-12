@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from "vue";
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, useTemplateRef } from "vue";
 import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
-import type { ToolbarNames } from "md-editor-v3";
+import type { ExposeParam, ToolbarNames } from "md-editor-v3";
 import { IconPlayerPlayFilled } from "@tabler/icons-vue";
 import { loadMdEditor } from "../../lib/editor";
 import { useFontSizeStore } from "../../stores/fontSize";
@@ -44,13 +44,25 @@ const emit = defineEmits<{
 useFontSizeStore();
 const themeStore = useThemeStore();
 
+// Below 640px the editor is one pane: no split preview, and a "preview only"
+// toggle that swaps the input for the rendered preview. (md-editor's plain
+// "preview" toggle would split a phone screen into two ~175px columns.)
 const isNarrowViewport = ref(window.innerWidth <= NARROW_VIEWPORT_BREAKPOINT);
 const editorToolbars = computed<ToolbarNames[]>(() =>
-  isNarrowViewport.value ? [...EDITOR_TOOLBARS, "preview"] : [...EDITOR_TOOLBARS],
+  isNarrowViewport.value ? [...EDITOR_TOOLBARS, "previewOnly"] : [...EDITOR_TOOLBARS],
 );
+const editor = useTemplateRef<ExposeParam>("editor");
 
 function onResize() {
-  isNarrowViewport.value = window.innerWidth <= NARROW_VIEWPORT_BREAKPOINT;
+  const narrow = window.innerWidth <= NARROW_VIEWPORT_BREAKPOINT;
+  if (narrow === isNarrowViewport.value) return;
+  isNarrowViewport.value = narrow;
+  // md-editor reads its `preview` prop only on mount, so a breakpoint
+  // crossing (a phone turned sideways) switches the split view itself. And
+  // widening drops the preview-only toggle from the toolbar: leave that mode
+  // first so the input can't be stranded behind it.
+  if (!narrow) editor.value?.togglePreviewOnly(false);
+  editor.value?.togglePreview(!narrow);
 }
 
 onMounted(() => window.addEventListener("resize", onResize));
@@ -226,6 +238,7 @@ const safeHtml = computed(() =>
 
     <MdEditor
       v-if="editing"
+      ref="editor"
       :model-value="modelValue ?? ''"
       @update:model-value="emit('update:modelValue', $event)"
       :theme="themeStore.theme"

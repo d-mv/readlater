@@ -436,7 +436,7 @@ describe("ArticleContent", () => {
       localStorage.removeItem("theme");
     });
 
-    test("starts single-pane (no split preview) on a narrow viewport, and includes a preview toggle", async () => {
+    test("starts single-pane (no split preview) on a narrow viewport, with a preview-only toggle", async () => {
       window.innerWidth = 400;
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
@@ -444,23 +444,69 @@ describe("ArticleContent", () => {
       await flushPromises();
       const editor = wrapper.findComponent(MdEditor);
       expect(editor.props("preview")).toBe(false);
-      expect(editor.props("toolbars")).toEqual(expect.arrayContaining(["preview"]));
+      // previewOnly swaps panes; "preview" would split a phone screen in two.
+      expect(editor.props("toolbars")).toEqual(expect.arrayContaining(["previewOnly"]));
+      expect(editor.props("toolbars")).not.toContain("preview");
     });
 
-    test("drops to single-pane with a preview toggle when the window narrows", async () => {
+    test("drops to single-pane with a preview-only toggle when the window narrows", async () => {
       window.innerWidth = 1200;
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "", editing: true, modelValue: "" },
+        attachTo: document.body,
       });
       await flushPromises();
+      expect(wrapper.find(".md-editor-preview-wrapper").exists()).toBe(true);
 
       window.innerWidth = 400;
       window.dispatchEvent(new Event("resize"));
       await flushPromises();
 
       const editor = wrapper.findComponent(MdEditor);
-      expect(editor.props("preview")).toBe(false);
-      expect(editor.props("toolbars")).toEqual(expect.arrayContaining(["preview"]));
+      expect(editor.props("toolbars")).toEqual(expect.arrayContaining(["previewOnly"]));
+      // md-editor only reads `preview` on mount; the split view is switched off
+      // through its exposed API.
+      expect(wrapper.find(".md-editor-preview-wrapper").exists()).toBe(false);
+      wrapper.unmount();
+    });
+
+    test("widening leaves preview-only mode and brings the split view back", async () => {
+      window.innerWidth = 400;
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+        attachTo: document.body,
+      });
+      await flushPromises();
+      // The scrollbar box md-editor sizes around its input pane.
+      const inputPaneStyle = () =>
+        wrapper
+          .find(".md-editor-content-wrapper > .md-editor-custom-scrollbar")
+          .attributes("style");
+      wrapper.find('.md-editor-toolbar-item[title="preview only"]').trigger("click");
+      await flushPromises();
+      // Preview-only: the input pane is collapsed to nothing.
+      expect(inputPaneStyle()).toContain("width: 0%");
+
+      window.innerWidth = 1200;
+      window.dispatchEvent(new Event("resize"));
+      await flushPromises();
+
+      expect(inputPaneStyle()).not.toContain("width: 0%");
+      expect(wrapper.find(".md-editor-preview-wrapper").exists()).toBe(true);
+      expect(wrapper.findComponent(MdEditor).props("toolbars")).not.toContain("previewOnly");
+      wrapper.unmount();
+    });
+
+    test("a resize that stays on one side of the breakpoint, or with no editor open, changes nothing", async () => {
+      window.innerWidth = 1200;
+      const reading = mount(ArticleContent, { props: { contentMd: "# saved" } });
+      window.innerWidth = 400;
+      window.dispatchEvent(new Event("resize"));
+      window.innerWidth = 380;
+      window.dispatchEvent(new Event("resize"));
+      await flushPromises();
+      expect(reading.find("h1").text()).toBe("saved");
+      reading.unmount();
     });
 
     test("stops listening for resizes once unmounted", () => {

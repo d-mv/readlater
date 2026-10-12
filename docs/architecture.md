@@ -795,8 +795,13 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   nonce (`lib/editor.ts`, §8). Toolbar
   trimmed to basic formatting;
   preview sanitized through the app's `DOMPurify` (the library does not escape
-  raw HTML by default); theme bound to the theme store; single-pane
-  edit/preview toggle below 640px. Save recomputes `word_count`/`reading_time`
+  raw HTML by default); theme bound to the theme store. Below 640px it is
+  one pane with md-editor's `previewOnly` toggle (its plain `preview`
+  toggle would split a phone screen into two ~175px columns); md-editor
+  reads `preview` only on mount, so crossing the breakpoint switches the
+  split view through its exposed `togglePreview`/`togglePreviewOnly`
+  (`e2e/editor.spec.ts` checks the layouts and that the preview renders
+  like the reader, bar code-block chrome and image `<figure>`s). Save recomputes `word_count`/`reading_time`
   client-side and sets `content_edited = true`.
 - **Translation** — for anything with a body (notes and articles), "Translate" calls `store.translateBookmark()` →
   `translate` edge function (DeepL, `DEEPL_API_KEY`), which stores
