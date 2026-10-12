@@ -30,14 +30,25 @@ Deno.test("createTurndownService: a link around an image keeps its title on the 
   );
 });
 
-// The unwrap compares the link's textContent with the image's alt, but an
-// <img> contributes no textContent, so an image with alt text never matches
-// and stays wrapped. Pinned as-is: worker/src/parseArticle.ts has the same
-// rule and the two must change together.
-Deno.test("createTurndownService: a link around its own image with alt text stays wrapped", () => {
+// worker/src/parseArticle.ts has the same rule; the two must change together.
+Deno.test("createTurndownService: a link around its own image with alt text is unwrapped", () => {
   assertEquals(
     md('<a href="https://x.test/a.png"><img src="https://x.test/a.png" alt="A"></a>'),
-    "[![A](https://x.test/a.png)](https://x.test/a.png)",
+    "![A](https://x.test/a.png)",
+  );
+});
+
+Deno.test("createTurndownService: a link around a figure holding only its own image is unwrapped", () => {
+  assertEquals(
+    md('<a href="https://x.test/a.png"><figure><img src="https://x.test/a.png" alt="A"></figure></a>'),
+    "![A](https://x.test/a.png)",
+  );
+});
+
+Deno.test("createTurndownService: a link whose text equals the image alt stays a link", () => {
+  assertEquals(
+    md('<a href="https://x.test/a.png"><img src="https://x.test/a.png" alt="A">A</a>'),
+    "[![A](https://x.test/a.png)A](https://x.test/a.png)",
   );
 });
 

@@ -577,6 +577,13 @@ A duplicate leading heading
 that repeats the article title is stripped from the converted markdown
 (`stripDuplicateTitleHeading`) before it's stored.
 
+Turndown gets one custom rule (`createTurndownService`, kept identical in
+`supabase/functions/_shared/turndown.ts`): a link whose only content is a
+single image (no text of its own, wrappers like `<figure>` allowed) and whose
+`href` is that image's own `src` is unwrapped to a plain `![alt](src "title")`;
+a link around block elements becomes a single-line link; any other link
+(text, several images, a different target) stays a link.
+
 **YouTube pipeline** (`worker/src/parseYoutube.ts`) — fetches title/author/
 thumbnail from YouTube's public oEmbed endpoint (`worker/src/youtubeMeta.ts`),
 no transcript, no HTML to convert so markdown is assembled by hand:

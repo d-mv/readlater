@@ -44,11 +44,14 @@ export function createTurndownService(): TurndownService {
       const imgs = node.querySelectorAll("img");
       const img = imgs[0];
       const textContent = node.textContent?.trim() || "";
-      const imgAlt = imgs.length === 1 && img ? img.getAttribute("alt") || "" : "";
 
       if (imgs.length === 1 && img && href) {
         const src = img.getAttribute("src") || "";
-        if (src && href.trim() === src.trim() && textContent === imgAlt) {
+        // Unwrap only when the image is all the link holds (an <img> adds no
+        // textContent, so any text is a caption or label) and the link points
+        // at the image's own file.
+        if (src && href.trim() === src.trim() && textContent === "") {
+          const imgAlt = img.getAttribute("alt") || "";
           return `\n\n![${imgAlt}](${src}${titleAttr})\n\n`;
         }
       }

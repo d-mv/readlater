@@ -114,6 +114,7 @@ describe("parseArticle", () => {
       async () => htmlWithLinkedImage,
     );
     expect(result.content_md).toContain("![Diagram](https://example.com/image.png)");
+    expect(result.content_md).not.toContain("[![");
     expect(result.content_md).not.toContain("[\n");
     expect(result.content_md).not.toContain("\n]");
   });
@@ -170,6 +171,29 @@ describe("parseArticle", () => {
 
     expect(result.content_md).toContain('![](https://example.com/photo.jpg "Full size")');
     expect(result.content_md).not.toContain("[![");
+  });
+
+  test("unwraps a self-linked image that has alt text", async () => {
+    const html = FIXTURE_HTML.replace(
+      '<p class="byline">',
+      '<p><a href="https://example.com/chart.png"><img src="https://example.com/chart.png" alt="Chart"></a></p><p class="byline">',
+    );
+    const result = await parseArticle("https://example.com/alt-linked", async () => html);
+
+    expect(result.content_md).toContain("![Chart](https://example.com/chart.png)");
+    expect(result.content_md).not.toContain("[![");
+  });
+
+  test("keeps the link when it holds text besides its own image", async () => {
+    const html = FIXTURE_HTML.replace(
+      '<p class="byline">',
+      '<p><a href="https://example.com/chart.png"><img src="https://example.com/chart.png" alt="Chart"> full size</a></p><p class="byline">',
+    );
+    const result = await parseArticle("https://example.com/captioned", async () => html);
+
+    expect(result.content_md).toContain(
+      "[![Chart](https://example.com/chart.png) full size](https://example.com/chart.png)",
+    );
   });
 
   test("leaves ordinary text links to Turndown, which escapes their destination and title", async () => {
