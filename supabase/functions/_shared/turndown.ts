@@ -24,8 +24,10 @@ export function createTurndownService(): TurndownService {
     filter: (domNode: unknown) => {
       const node = domNode as RuleNode;
       if (node.nodeName !== "A") return false;
+      // Loose `!= null`: domino's querySelector answers a miss with
+      // undefined, not null, so a strict check matched every link.
       return (
-        node.querySelector("img") !== null ||
+        node.querySelector("img") != null ||
         Array.from(node.children).some((child) =>
           ["FIGURE", "DIV", "P", "SECTION"].includes(child.nodeName)
         )
