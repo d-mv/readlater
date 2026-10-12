@@ -401,4 +401,47 @@ describe("offlineDb", () => {
       expect(revoked.sort()).toEqual(["blob:1", "blob:2"]);
     });
   });
+
+  test("hydrateArticleContent mints object URLs with URL.createObjectURL by default", () => {
+    const createObjectURL = vi.fn(() => "blob:default");
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL }));
+    const blob = new Blob(["x"]);
+
+    const content = offlineDb.hydrateArticleContent({
+      id: "default-url",
+      content_md: "![x](https://cdn/x.png)",
+      images: [{ url: "https://cdn/x.png", blob }],
+    });
+
+    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    expect(content).toBe("![x](blob:default)");
+    vi.unstubAllGlobals();
+  });
+
+  describe("_resetForTests", () => {
+    test("rejects when the database can't be deleted", async () => {
+      const req = {} as IDBOpenDBRequest;
+      vi.spyOn(indexedDB, "deleteDatabase").mockImplementation(() => {
+        queueMicrotask(() => {
+          Object.defineProperty(req, "error", { value: new Error("delete failed") });
+          req.onerror!(new Event("error"));
+        });
+        return req;
+      });
+
+      await expect(offlineDb._resetForTests()).rejects.toThrow("delete failed");
+      vi.restoreAllMocks();
+    });
+
+    test("resolves when the delete is blocked by another open connection", async () => {
+      const req = {} as IDBOpenDBRequest;
+      vi.spyOn(indexedDB, "deleteDatabase").mockImplementation(() => {
+        queueMicrotask(() => req.onblocked!(new Event("blocked") as IDBVersionChangeEvent));
+        return req;
+      });
+
+      await expect(offlineDb._resetForTests()).resolves.toBeUndefined();
+      vi.restoreAllMocks();
+    });
+  });
 });

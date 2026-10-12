@@ -74,4 +74,37 @@ describe("router auth guard", () => {
 
     expect(router.currentRoute.value.name).toBe("login");
   });
+
+  test("sends a signed-in visitor away from login to the list", async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: "u1" } } } });
+    await router.push("/s/abc-123");
+
+    await router.push("/login");
+    expect(router.currentRoute.value.name).toBe("list");
+  });
+
+  test("resolves the reader and share-target pages for a signed-in visitor", async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: "u1" } } } });
+
+    await router.push("/b/abc-123");
+    expect(router.currentRoute.value.name).toBe("reader");
+    expect(router.currentRoute.value.matched[0]!.components!.default).toBeDefined();
+
+    await router.push("/share-target");
+    expect(router.currentRoute.value.name).toBe("share-target");
+    expect(router.currentRoute.value.matched[0]!.components!.default).toBeDefined();
+  });
+
+  test("a login that ends while reading a public share stays on that page", async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: "u1" } } } });
+    await router.push("/s/shared-1");
+
+    const [onChange] = onAuthStateChange.mock.calls.at(-1) as unknown as [
+      (event: string, session: null) => void,
+    ];
+    onChange("SIGNED_OUT", null);
+    await flushPromises();
+
+    expect(router.currentRoute.value.name).toBe("public");
+  });
 });

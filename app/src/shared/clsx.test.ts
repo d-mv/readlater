@@ -27,4 +27,8 @@ describe("cn", () => {
   test("keeps a font size and a text colour side by side", () => {
     expect(cn("text-sm text-ink", "text-ink-muted")).toBe("text-sm text-ink-muted");
   });
+
+  test("a nested array with nothing truthy adds no stray space", () => {
+    expect(clsx("a", [false, null], "b")).toBe("a b");
+  });
 });

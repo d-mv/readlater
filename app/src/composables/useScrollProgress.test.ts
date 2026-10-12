@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { defineComponent, h, useTemplateRef } from "vue";
+import { defineComponent, effectScope, h, shallowRef, useTemplateRef, type Ref } from "vue";
 import { mount } from "@vue/test-utils";
 import { useScrollProgress } from "./useScrollProgress";
 
@@ -60,5 +60,38 @@ describe("useScrollProgress", () => {
     await wrapper.vm.$nextTick();
 
     expect(wrapper.text()).toBe("0");
+  });
+
+  test("stops listening once the owner unmounts", () => {
+    let progress: Ref<number> | undefined;
+    const el = document.createElement("div");
+    const Host = defineComponent({
+      setup() {
+        const target = shallowRef<HTMLElement | null>(el);
+        progress = useScrollProgress(target).progress;
+        return () => h("div");
+      },
+    });
+    const wrapper = mount(Host);
+    wrapper.unmount();
+
+    setScrollMetrics(el, { scrollTop: 50, scrollHeight: 200, clientHeight: 100 });
+    el.dispatchEvent(new Event("scroll"));
+
+    expect(progress!.value).toBe(0);
+  });
+
+  test("a scroll on an element that was just detached is ignored", () => {
+    const el = document.createElement("div");
+    const target = shallowRef<HTMLElement | null>(el);
+    const scope = effectScope();
+    const { progress } = scope.run(() => useScrollProgress(target))!;
+
+    target.value = null;
+    setScrollMetrics(el, { scrollTop: 50, scrollHeight: 200, clientHeight: 100 });
+    el.dispatchEvent(new Event("scroll"));
+
+    expect(progress.value).toBe(0);
+    scope.stop();
   });
 });

@@ -85,6 +85,19 @@ describe("Dialog modality", () => {
     wrapper.unmount();
     expect(document.activeElement).toBe(opener);
   });
+
+  test("doesn't try to refocus an opener that has since left the page", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    const focus = vi.spyOn(opener, "focus");
+
+    const wrapper = mount(Dialog, { attachTo: document.body });
+    opener.remove();
+    wrapper.unmount();
+
+    expect(focus).not.toHaveBeenCalled();
+  });
 });
 
 describe("Dialog labelling", () => {

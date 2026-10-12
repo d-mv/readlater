@@ -86,6 +86,9 @@ function getDb() {
         db.createObjectStore("bookmarksList", { keyPath: "id" });
       }
       if (oldVersion < 2) db.createObjectStore("syncState");
+      // Newest step: upgrade() only runs while oldVersion < DB_VERSION (3), so
+      // the skip branch exists only once a later version is added.
+      /* v8 ignore else */
       if (oldVersion < 3) {
         // Built over the existing records by the browser. Records written
         // before missingImages existed simply aren't in that index (none
@@ -141,23 +144,29 @@ export interface CachedArticleInfo {
 export async function listCachedArticles(): Promise<CachedArticleInfo[]> {
   const db = await getDb();
   const store = db.transaction("articles").store;
-  const info = new Map<string, CachedArticleInfo>();
-  for (
-    let cursor = await store.index("cachedAt").openKeyCursor();
-    cursor;
-    cursor = await cursor.continue()
-  ) {
-    info.set(cursor.primaryKey, { id: cursor.primaryKey, cachedAt: cursor.key, missingImages: 0 });
-  }
+  // Every article has cachedAt, so the cachedAt index lists them all; only
+  // those with missing images appear in the missingImages index.
+  const missing = new Map<string, number>();
   for (
     let cursor = await store.index("missingImages").openKeyCursor();
     cursor;
     cursor = await cursor.continue()
   ) {
-    const entry = info.get(cursor.primaryKey);
-    if (entry) entry.missingImages = cursor.key.length;
+    missing.set(cursor.primaryKey, cursor.key.length);
   }
-  return [...info.values()];
+  const info: CachedArticleInfo[] = [];
+  for (
+    let cursor = await store.index("cachedAt").openKeyCursor();
+    cursor;
+    cursor = await cursor.continue()
+  ) {
+    info.push({
+      id: cursor.primaryKey,
+      cachedAt: cursor.key,
+      missingImages: missing.get(cursor.primaryKey) ?? 0,
+    });
+  }
+  return info;
 }
 
 export async function getAllArticles(): Promise<CachedArticle[]> {

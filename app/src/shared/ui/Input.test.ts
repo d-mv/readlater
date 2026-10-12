@@ -49,6 +49,12 @@ describe("Input", () => {
     expect(wrapper.emitted("paste")?.[0]?.[0]).toBeInstanceOf(Event);
   });
 
+  test("re-emits paste from a single-line input too", async () => {
+    const wrapper = mount(Input, { props: { modelValue: "" } });
+    await wrapper.get("input").trigger("paste");
+    expect(wrapper.emitted("paste")?.[0]?.[0]).toBeInstanceOf(Event);
+  });
+
   test("merges class overrides onto the field", () => {
     const input = mount(Input, { props: { modelValue: "", class: "bg-raised h-34" } }).get("input");
     expect(input.classes()).toContain("bg-raised");

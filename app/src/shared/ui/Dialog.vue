@@ -45,8 +45,8 @@ let previouslyFocused: Element | null = null;
 
 onMounted(() => {
   previouslyFocused = document.activeElement;
-  const el = dialog.value;
-  if (!el) return;
+  // The <dialog> is the component's root element, so it exists once mounted.
+  const el = dialog.value!;
   // showModal() makes the rest of the page inert (a native focus trap), moves
   // focus into the dialog, and turns Escape into a `cancel` event. jsdom has
   // no showModal, so tests fall back to a plain open dialog.
