@@ -145,7 +145,8 @@ describe("ShareTargetView", () => {
       created_at: "2026-01-01T00:00:00Z",
     };
     const maybeSingle = vi.fn().mockResolvedValue({ data: existing, error: null });
-    const eq = vi.fn(() => ({ maybeSingle }));
+    // Duplicate lookup: .eq("user_id", …).eq("url_normalized", …).maybeSingle()
+    const eq = vi.fn(() => ({ eq: vi.fn(() => ({ maybeSingle })) }));
     const lookupSelect = vi.fn(() => ({ eq }));
     from.mockReturnValueOnce({ select: lookupSelect });
 

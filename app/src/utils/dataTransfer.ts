@@ -247,7 +247,8 @@ export function parseExportPayload(jsonText: string): ParsedImport {
   return { bookmarks, invalid };
 }
 
-// Mirrors the DB's unique index on url_normalized: only rows with a URL can
+// Mirrors the DB's per-user unique index on (user_id, url_normalized) — the
+// existing set holds only the caller's rows (RLS) — so only rows with a URL can
 // collide (notes/PDFs have url = null, which the index treats as distinct
 // every time), so those types always import.
 export function partitionForImport(

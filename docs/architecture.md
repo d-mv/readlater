@@ -104,7 +104,7 @@ create index bookmarks_pending_due_idx on bookmarks (next_attempt_at nulls first
 create index bookmarks_user_created_id_idx on bookmarks (user_id, created_at desc, id desc); -- keyset paging
 create index bookmarks_user_updated_idx on bookmarks (user_id, updated_at);                -- delta sync
 create index bookmarks_search_idx on bookmarks using gin(search_vector);
-create unique index bookmarks_url_normalized_uniq on bookmarks (url_normalized);
+create unique index bookmarks_user_url_normalized_uniq on bookmarks (user_id, url_normalized);
 
 -- Triggers: bookmarks_touch_updated_at (before update → updated_at = now());
 -- bookmarks_reset_retry (before update of status: a re-queue to 'pending'
@@ -243,8 +243,9 @@ Notes on the shape:
 - `url_normalized` (the whole URL lowercased, trailing slashes stripped —
   not stripping `utm_*`/`fbclid` yet) backs a real unique index, so both
   insert paths' duplicate check can rely on a Postgres constraint violation
-  (`23505`) instead of a racy find-then-insert. The index is global, not per
-  user — a single-owner assumption.
+  (`23505`) instead of a racy find-then-insert. The index is per user
+  (`(user_id, url_normalized)`, since `20261012101000_bookmarks_url_unique_per_user`;
+  it was global before), so the follow-up lookup filters on the owner too.
 - `bookmarks_url_http_only`: saved URLs end up in `href`s ("Open original"),
   so only http(s) may be stored — a `javascript:`/`data:` URL would run
   script on the app origin. The app (`isHttpUrl`, `utils/bookmarkType.ts`)
@@ -282,8 +283,9 @@ flattened base schema (tables, indexes, replica identity, RLS,
 `20261011171000_audit_hardening` (per-user tags, owner-only RLS on
 `(select auth.uid())`, `rate_limits`, bucket MIME lists,
 `list_orphaned_storage_objects`, a commented `cron.schedule` for the sweep),
-`20261011172000_bookmarks_keyset_index` and
-`20261012100000_minimal_table_grants`. New changes go in new migration
+`20261011172000_bookmarks_keyset_index`,
+`20261012100000_minimal_table_grants` and
+`20261012101000_bookmarks_url_unique_per_user`. New changes go in new migration
 files.
 
 ## 3. Capture paths
@@ -421,9 +423,13 @@ since only the Markdown remains.
 ### Duplicate handling
 
 Applies to `url`-type captures only — notes have no dedup key and always
-insert fresh. Both insert paths rely on the `bookmarks_url_normalized_uniq`
-index rather than a check-then-insert race: a `23505` violation on insert is
-caught and the existing row is looked up by normalized URL.
+insert fresh. Both insert paths rely on the per-user
+`bookmarks_user_url_normalized_uniq` index rather than a check-then-insert
+race: a `23505` violation on insert is caught and the existing row is looked
+up by owner and normalized URL. The owner filter is explicit in both lookups
+— the app's (`findByNormalizedUrl`, RLS would scope it anyway) and
+`capture`'s, whose service-role client bypasses RLS, so without it another
+user's row with the same URL could match.
 
 - **Client path** (`store.add()` — bookmarklet popup, share target, Add
   dialog): a cheap local check against already-loaded rows runs first; the

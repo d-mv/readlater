@@ -2,7 +2,7 @@
 -- unique index), indexes, replica identity.
 begin;
 \ir _helpers.psql
-select plan(40);
+select plan(43);
 
 -- ─── bookmarks_url_http_only ───────────────────────────────────────────────
 select tests.authenticate_as('00000000-0000-0000-0000-00000000000a');
@@ -115,7 +115,7 @@ select is(
 );
 select throws_ok(
   $$insert into bookmarks (url, type, user_id) values ('https://example.com/path/to', 'article', auth.uid())$$,
-  '23505', null, 'same normalized URL rejected for the same user (bookmarks_url_normalized_uniq)'
+  '23505', null, 'same normalized URL rejected for the same user (bookmarks_user_url_normalized_uniq)'
 );
 select throws_ok(
   $$insert into bookmarks (url, type, user_id) values ('HTTPS://EXAMPLE.COM/PATH/TO/', 'article', auth.uid())$$,
@@ -134,16 +134,22 @@ select throws_ok(
   '428C9', null, 'url_normalized cannot be written directly'
 );
 
--- KNOWN LIMITATION (documented in docs/plan.md §6, "Single-user
--- assumption"): the unique index is global, not per user, so B cannot save
--- a URL A already saved. This test pins the current behaviour; flip it to
--- lives_ok when the index becomes (user_id, url_normalized).
+-- Uniqueness is per user (user_id, url_normalized): B can save a URL A
+-- already saved, and B's own duplicate is still refused.
 select tests.authenticate_as('00000000-0000-0000-0000-00000000000b');
-select throws_ok(
+select lives_ok(
   $$insert into bookmarks (url, type, user_id) values ('https://example.com/path/to', 'article', auth.uid())$$,
-  '23505', null, 'url_normalized uniqueness is global across users (single-user assumption)'
+  'another user can save a URL A already saved (uniqueness is per user)'
+);
+select throws_ok(
+  $$insert into bookmarks (url, type, user_id) values ('https://EXAMPLE.com/path/to/', 'article', auth.uid())$$,
+  '23505', null, 'B''s own duplicate is still rejected'
 );
 reset role;
+select is(
+  (select count(*)::int from bookmarks where url_normalized = 'https://example.com/path/to'),
+  2, 'one row per user for the same normalized URL'
+);
 
 -- ─── schema shape ──────────────────────────────────────────────────────────
 select col_not_null('public', 'bookmarks', 'user_id', 'bookmarks.user_id is not null');
@@ -155,7 +161,9 @@ select ok(
           where conrelid = 'public.bookmarks'::regclass and conname = 'bookmarks_url_http_only'),
   'bookmarks_url_http_only exists'
 );
-select index_is_unique('public', 'bookmarks', 'bookmarks_url_normalized_uniq');
+select index_is_unique('public', 'bookmarks', 'bookmarks_user_url_normalized_uniq');
+select has_index('public', 'bookmarks', 'bookmarks_user_url_normalized_uniq',
+  array['user_id', 'url_normalized'], 'URL uniqueness index is on (user_id, url_normalized)');
 select index_is_unique('public', 'bookmarks', 'bookmarks_replica_identity_idx');
 select has_index('public', 'bookmarks', 'bookmarks_search_idx', 'GIN index on search_vector');
 select has_index('public', 'bookmarks', 'bookmarks_user_updated_idx', 'delta-sync index (user_id, updated_at)');

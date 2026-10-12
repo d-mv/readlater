@@ -57,7 +57,7 @@ select is(
 );
 
 select indexes_are('public', 'bookmarks', array[
-  'bookmarks_pkey', 'bookmarks_url_normalized_uniq', 'bookmarks_replica_identity_idx',
+  'bookmarks_pkey', 'bookmarks_user_url_normalized_uniq', 'bookmarks_replica_identity_idx',
   'bookmarks_search_idx', 'bookmarks_user_updated_idx', 'bookmarks_pending_due_idx',
   'bookmarks_user_created_id_idx'
 ]);

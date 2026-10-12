@@ -22,10 +22,14 @@ function json(body: unknown, status = 200): Response {
   return jsonResponse(corsHeaders, body, status);
 }
 
-async function findByNormalizedUrl(client: SupabaseClient, url: string) {
+// The client is service-role (bypasses RLS) and URLs are unique per user
+// (bookmarks_user_url_normalized_uniq), so the owner filter is what keeps
+// another user's row from matching.
+async function findByNormalizedUrl(client: SupabaseClient, ownerUserId: string, url: string) {
   const { data } = await client
     .from("bookmarks")
     .select("id, title, created_at")
+    .eq("user_id", ownerUserId)
     .eq("url_normalized", normalizeUrl(url))
     .maybeSingle();
   return data;
@@ -48,11 +52,11 @@ async function insertPendingUrl(
     .single();
 
   if (error) {
-    // 23505 = unique_violation on bookmarks_url_normalized_uniq: someone
-    // already saved this URL. Report it as a conflict for the client to
+    // 23505 = unique_violation on bookmarks_user_url_normalized_uniq: the
+    // owner already saved this URL. Report it as a conflict for the client to
     // resolve, rather than a generic 500.
     if (error.code === "23505") {
-      const existing = await findByNormalizedUrl(client, url);
+      const existing = await findByNormalizedUrl(client, ownerUserId, url);
       if (existing) {
         return json({
           status: "duplicate",

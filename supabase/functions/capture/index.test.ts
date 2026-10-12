@@ -27,22 +27,29 @@ function fakeSupabase(opts: {
 }) {
   let lastUpdatedRow: Record<string, unknown> | undefined;
   let lastInsertedRow: Record<string, unknown> | undefined;
-  const lookups: { col: string; val: string }[] = [];
+  // Filters of each post-conflict duplicate lookup, by column.
+  const lookups: Record<string, string>[] = [];
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
 
-  const select = (_cols: string) => ({
-    eq: (col: string, val: string) => ({
+  const select = (_cols: string) => {
+    const filters: Record<string, string> = {};
+    const query = {
+      eq: (col: string, val: string) => {
+        filters[col] = val;
+        return query;
+      },
       maybeSingle: () => {
-        if (col === "url_normalized") {
-          lookups.push({ col, val });
+        if ("url_normalized" in filters) {
+          lookups.push(filters);
           return Promise.resolve({ data: opts.existing ?? null });
         }
         return Promise.resolve({
           data: opts.contentLookupMissing ? null : { content_edited: opts.contentEdited ?? false },
         });
       },
-    }),
-  });
+    };
+    return query;
+  };
 
   const selectAfterUpdate = (_cols: string) =>
     Promise.resolve(
@@ -338,8 +345,10 @@ Deno.test("handleCapture: a URL already saved reports the existing bookmark as a
     existingTitle: "Old title",
     existingSavedAt: "2026-01-02T03:04:05Z",
   });
-  // Looked up by the same normalisation Postgres applies to url_normalized.
-  assertEquals(supabase.lookups, [{ col: "url_normalized", val: "https://example.com/post" }]);
+  // Looked up by the same normalisation Postgres applies to url_normalized,
+  // and scoped to the owner: the service-role client bypasses RLS and URLs
+  // are unique per user, so another user's row must not match.
+  assertEquals(supabase.lookups, [{ user_id: OWNER, url_normalized: "https://example.com/post" }]);
 });
 
 Deno.test("handleCapture: a unique violation whose row is gone by lookup time is a generic 500", async () => {

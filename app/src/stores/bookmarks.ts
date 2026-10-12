@@ -652,9 +652,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (error) {
       // The local check above only catches URLs already loaded into this
       // session's list (e.g. archived items that weren't fetched); the DB's
-      // unique index on the normalized URL is the source of truth.
+      // per-user unique index on the normalized URL is the source of truth.
       if (error.code === UNIQUE_VIOLATION) {
-        const existing = await findByNormalizedUrl(url);
+        const existing = await findByNormalizedUrl(userId, url);
         if (existing) {
           return {
             error: null,
@@ -820,11 +820,15 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return { translatedText: data.translated_text, error: null };
   }
 
-  async function findByNormalizedUrl(url: string) {
+  // URLs are unique per user (bookmarks_user_url_normalized_uniq). RLS already
+  // limits the read to the caller's rows; the explicit owner filter keeps the
+  // lookup matching the index rather than leaning on RLS for correctness.
+  async function findByNormalizedUrl(userId: string, url: string) {
     const normalized = normalizeUrl(url);
     const { data } = await supabase
       .from("bookmarks")
       .select("id, title, created_at")
+      .eq("user_id", userId)
       .eq("url_normalized", normalized)
       .maybeSingle();
     return data;

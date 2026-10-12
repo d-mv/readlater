@@ -1562,8 +1562,9 @@ describe("useBookmarksStore", () => {
       created_at: "2026-01-01T00:00:00Z",
     };
     const maybeSingle = vi.fn().mockResolvedValue({ data: existing, error: null });
-    const eq = vi.fn(() => ({ maybeSingle }));
-    const lookupSelect = vi.fn(() => ({ eq }));
+    const eqUrl = vi.fn(() => ({ maybeSingle }));
+    const eqUser = vi.fn(() => ({ eq: eqUrl }));
+    const lookupSelect = vi.fn(() => ({ eq: eqUser }));
     from.mockReturnValueOnce({ select: lookupSelect });
 
     const store = useBookmarksStore();
@@ -1576,6 +1577,9 @@ describe("useBookmarksStore", () => {
       existingTitle: "Already saved",
       existingSavedAt: "2026-01-01T00:00:00Z",
     });
+    // URLs are unique per user, so the lookup is scoped to the signed-in user.
+    expect(eqUser).toHaveBeenCalledWith("user_id", "user-1");
+    expect(eqUrl).toHaveBeenCalledWith("url_normalized", "https://arc90.com/new");
   });
 
   test("addTag creates the tag, links it, and updates local state", async () => {
@@ -2695,7 +2699,9 @@ describe("useBookmarksStore", () => {
     test("add reports the unique violation when the existing row can't be found", async () => {
       from.mockReturnValueOnce(failingInsert({ code: "23505", message: "duplicate key" }));
       from.mockReturnValueOnce({
-        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+        select: () => ({
+          eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+        }),
       });
 
       const store = useBookmarksStore();

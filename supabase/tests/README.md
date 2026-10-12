@@ -35,7 +35,7 @@ afterwards only if it started it.
 | `get_public_bookmark()` (public only, safe columns, anon/auth grants, no enumeration) | 01 |
 | `bookmarks_url_http_only` | 02 |
 | `bookmarks_url_required_unless_note`, `bookmarks_pdf_path_requires_type`, type/status/view_mode checks | 02 |
-| `url_normalized` generated column + `bookmarks_url_normalized_uniq` (global — see note) | 02 |
+| `url_normalized` generated column + `bookmarks_user_url_normalized_uniq` (per user) | 02 |
 | bookmarks defaults, PK/FK, indexes, replica identity | 00, 02 |
 | table grants: anon none, authenticated per table (minimal_table_grants) | 00 (+ 42501 checks in 01, 03, 04) |
 | `bookmarks_touch_updated_at` trigger/function | 03 |
@@ -53,7 +53,3 @@ afterwards only if it started it.
 
 Not testable at the SQL level: bucket MIME/size enforcement (done by the
 Storage API) and Realtime delivery itself.
-
-Known limitation pinned by a test (02): `bookmarks_url_normalized_uniq` is
-global, not per user — the documented single-user assumption
-(`docs/plan.md` §6). Flip that test when the index becomes per user.
