@@ -192,6 +192,76 @@ describe("main", () => {
     expect(polls()).toBe(2);
     expect(fake.scheduled).toHaveLength(1);
   });
+
+  describe("stall watchdog", () => {
+    /** A watchdog stand-in that records beats and hands back its stall callback. */
+    function fakeWatchdog() {
+      const state = { beats: 0, stopped: 0, onStall: null as ((ms: number) => void) | null };
+      const startWatchdog: WorkerRuntime["startWatchdog"] = (onStall) => {
+        state.onStall = onStall;
+        return { beat: () => void (state.beats += 1), stop: () => void (state.stopped += 1) };
+      };
+      return { state, startWatchdog };
+    }
+
+    test("is fed by the heartbeat around every cycle", async () => {
+      const { client } = queueClient();
+      const dog = fakeWatchdog();
+      const fake = fakeRuntime({ client, startWatchdog: dog.startWatchdog });
+      const first = fake.nextSchedule();
+
+      main(fake.runtime);
+      await first;
+
+      expect(dog.state.beats).toBe(2);
+    });
+
+    test("a stalled loop is logged and the process exits 1 so Docker restarts it", async () => {
+      const error = spyOn(log, "error");
+      const { client } = queueClient();
+      const dog = fakeWatchdog();
+      const fake = fakeRuntime({ client, startWatchdog: dog.startWatchdog });
+      const first = fake.nextSchedule();
+      main(fake.runtime);
+      await first;
+
+      dog.state.onStall!(300_000);
+
+      expect(error).toHaveBeenCalledWith(
+        "poll loop stalled; exiting so the container is restarted",
+        {
+          silentForMs: 300_000,
+        },
+      );
+      expect(fake.exits).toEqual([1]);
+    });
+
+    test("is stopped on SIGTERM so a slow drain can't trip it", async () => {
+      const { client } = queueClient();
+      const dog = fakeWatchdog();
+      const fake = fakeRuntime({ client, startWatchdog: dog.startWatchdog });
+      const first = fake.nextSchedule();
+      main(fake.runtime);
+      await first;
+
+      fake.handlers.get("SIGTERM")!();
+      await Bun.sleep(0);
+
+      expect(dog.state.stopped).toBeGreaterThanOrEqual(1);
+    });
+
+    test("by default watches the heartbeat with a real timer", async () => {
+      const { client } = queueClient();
+      const fake = fakeRuntime({ client });
+      const first = fake.nextSchedule();
+
+      main(fake.runtime);
+      await first;
+
+      // resetWorkerState (afterEach) stops it; nothing has stalled yet.
+      expect(fake.exits).toEqual([]);
+    });
+  });
 });
 
 describe("Supabase client", () => {

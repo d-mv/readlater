@@ -573,7 +573,12 @@ in-flight bookmark 20 s to finish; if it doesn't, it goes back to `pending`
 refresh) without spending an attempt, then the browser closes. Logs are
 single-line JSON (`logger.ts`). The loop touches `/tmp/worker-heartbeat`
 every cycle and before each bookmark; the Dockerfile's HEALTHCHECK reports
-unhealthy when it is over 3 minutes old. The image pins
+unhealthy when it is over 3 minutes old. Plain compose never acts on
+"unhealthy", so the worker also runs an in-process watchdog
+(`worker/src/watchdog.ts`, fed by the same heartbeat, checked every 30 s):
+after 5 minutes without one it logs `poll loop stalled` and exits 1, and
+`restart: unless-stopped` brings up a fresh container. It is stopped on
+SIGTERM/SIGINT so a slow drain can't trip it. The image pins
 `oven/bun:1.3.14-slim`, runs as the image's non-root `bun` user under
 `tini`.
 
@@ -951,7 +956,9 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
 - `readlater-worker` — `worker/Dockerfile` (pinned `oven/bun:1.3.14-slim`,
   non-root `bun` user, `tini`, heartbeat HEALTHCHECK; §4). The server-side
   compose (not in this repo) sets `stop_grace_period: 30s`, enough for the
-  20 s drain, and `mem_limit: 1g`. No public port; it needs outbound access
+  20 s drain, `mem_limit: 1g` and `restart: unless-stopped`, which is what
+  turns the worker's stall watchdog (exit 1 after 5 minutes without a
+  heartbeat; §4) into an automatic restart. No public port; it needs outbound access
   to Supabase, YouTube's oEmbed endpoint and whatever the headless-browser
   fallback has to reach. Env: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`.
 - Edge functions — Supabase-hosted; secrets `CAPTURE_KEY`, `OWNER_USER_ID`

@@ -9,6 +9,7 @@ import { writeFileSync } from "node:fs";
 import { isTransientError } from "./errors";
 import { log } from "./logger";
 import { withTimeout } from "./timeout";
+import { startWatchdog, type Watchdog } from "./watchdog";
 
 export { CircuitBreaker, CircuitBreakerOpenError };
 
@@ -34,6 +35,11 @@ const MAX_RETRY_BACKOFF_MS = 30 * 60_000;
 // deploy should give the container ~30s: `stop_grace_period`).
 export const SHUTDOWN_DRAIN_MS = 20_000;
 const HEARTBEAT_PATH = "/tmp/worker-heartbeat";
+// A cycle waits at most 60s and a bookmark is capped at 45s, so five minutes
+// without a heartbeat means the loop is stuck: exit and let Docker restart
+// the container (`restart: unless-stopped`).
+export const WATCHDOG_STALL_MS = 5 * 60_000;
+const WATCHDOG_CHECK_EVERY_MS = 30_000;
 
 // Every Supabase request gets a hard timeout so a hung connection can't stall
 // the poll loop forever (and keep the heartbeat from advancing).
@@ -119,9 +125,11 @@ const worker: {
 } = { stopping: false, inFlight: null };
 
 let heartbeatPath: string | null = null;
+let watchdog: Watchdog | null = null;
 
-/** Touches the heartbeat file the Docker HEALTHCHECK watches. */
+/** Feeds the watchdog and touches the heartbeat file the Docker HEALTHCHECK watches. */
 function heartbeat() {
+  watchdog?.beat();
   if (!heartbeatPath) return;
   try {
     writeFileSync(heartbeatPath, String(Date.now()));
@@ -419,6 +427,8 @@ export function resetWorkerState() {
   worker.stopping = false;
   worker.inFlight = null;
   heartbeatPath = null;
+  watchdog?.stop();
+  watchdog = null;
 }
 
 /** Everything main() reaches outside this module; tests substitute it. */
@@ -431,6 +441,8 @@ export interface WorkerRuntime {
   onSignal: (signal: "SIGINT" | "SIGTERM", handler: () => void) => void;
   exit: (code: number) => void;
   closeBrowserFn: () => Promise<void>;
+  /** Starts the stall watchdog; `onStall` runs once the heartbeat is too old. */
+  startWatchdog: (onStall: (silentForMs: number) => void) => Watchdog;
 }
 
 /** Starts the poll loop and installs the SIGINT/SIGTERM handlers. */
@@ -444,6 +456,12 @@ export function main(overrides: Partial<WorkerRuntime> = {}): void {
     onSignal: process.on.bind(process),
     exit: process.exit.bind(process),
     closeBrowserFn: closeBrowser,
+    startWatchdog: (onStall) =>
+      startWatchdog({
+        stallMs: WATCHDOG_STALL_MS,
+        checkEveryMs: WATCHDOG_CHECK_EVERY_MS,
+        onStall,
+      }),
     ...overrides,
   };
 
@@ -455,6 +473,10 @@ export function main(overrides: Partial<WorkerRuntime> = {}): void {
   }
 
   heartbeatPath = runtime.heartbeatPath;
+  watchdog = runtime.startWatchdog((silentForMs) => {
+    log.error("poll loop stalled; exiting so the container is restarted", { silentForMs });
+    runtime.exit(1);
+  });
   // Recursive setTimeout (not setInterval) so cycles never overlap and the
   // delay can grow while the queue is empty. pollOnce never rejects.
   let interval = POLL_INTERVAL_MS;
@@ -476,6 +498,7 @@ export function main(overrides: Partial<WorkerRuntime> = {}): void {
     shuttingDown = true;
     log.info("received signal; shutting down", { signal });
     runtime.cancel(timer);
+    watchdog?.stop();
     try {
       await shutdown(runtime.client, { closeBrowserFn: runtime.closeBrowserFn });
     } finally {
