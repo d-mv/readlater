@@ -1,7 +1,10 @@
 /** Thrown when an operation runs past its deadline. Its `name` matches the
  * TimeoutError of AbortSignal.timeout() and Playwright, so one check covers all. */
 export class TimeoutError extends Error {
-  override name = "TimeoutError";
+  constructor(message: string) {
+    super(message);
+    this.name = "TimeoutError";
+  }
 }
 
 /** Rejects with a TimeoutError if `promise` hasn't settled within `timeoutMs`.

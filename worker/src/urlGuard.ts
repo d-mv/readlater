@@ -13,7 +13,10 @@ import { isIP } from "node:net";
 // run page JavaScript, is pinned instead — see egressProxy.ts.
 
 export class BlockedUrlError extends Error {
-  override name = "BlockedUrlError";
+  constructor(message: string) {
+    super(message);
+    this.name = "BlockedUrlError";
+  }
 }
 
 /** Resolves a hostname to every address it maps to. */
