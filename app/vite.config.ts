@@ -15,6 +15,15 @@ function isEditorChunk(moduleIds: readonly string[]): boolean {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: [
+      // md-editor-v3 imports medium-zoom, whose default build injects its CSS
+      // as a <style> element on import — one the CSP (nginx.conf) admits only
+      // with the response's nonce, which medium-zoom can't carry. The "pure"
+      // build leaves the CSS out; the editor runs with no-img-zoom-in anyway.
+      { find: /^medium-zoom$/, replacement: "medium-zoom/dist/pure/index.js" },
+    ],
+  },
   build: {
     rolldownOptions: {
       output: {

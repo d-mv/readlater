@@ -4,15 +4,11 @@ import MarkdownIt from "markdown-it";
 import DOMPurify from "dompurify";
 import type { ToolbarNames } from "md-editor-v3";
 import { IconPlayerPlayFilled } from "@tabler/icons-vue";
+import { loadMdEditor } from "../../lib/editor";
 import { useFontSizeStore } from "../../stores/fontSize";
 import { useThemeStore } from "../../stores/theme";
 
-const MdEditor = defineAsyncComponent(() =>
-  import("md-editor-v3").then((m) => {
-    import("md-editor-v3/lib/style.css");
-    return m.MdEditor;
-  }),
-);
+const MdEditor = defineAsyncComponent(loadMdEditor);
 
 const NARROW_VIEWPORT_BREAKPOINT = 640;
 const EDITOR_TOOLBARS: ToolbarNames[] = [
@@ -223,7 +219,11 @@ const safeHtml = computed(() =>
       </button>
     </div>
     <!-- no-prettier / no-highlight: otherwise md-editor injects prettier and
-         highlight.js from unpkg.com, which the CSP (nginx.conf) blocks. -->
+         highlight.js from unpkg.com, which the CSP (nginx.conf) blocks.
+         no-img-zoom-in: preview images aren't worth a zoom overlay, and
+         medium-zoom is aliased to its build that injects no <style>
+         (vite.config.ts). -->
+
     <MdEditor
       v-if="editing"
       :model-value="modelValue ?? ''"
@@ -238,6 +238,7 @@ const safeHtml = computed(() =>
       :no-mermaid="true"
       :no-katex="true"
       :no-echarts="true"
+      :no-img-zoom-in="true"
       language="en-US"
       placeholder="Write in markdown…"
     />

@@ -790,7 +790,9 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   `md-editor-v3` (lazy-loaded via `defineAsyncComponent` to keep it out of the
   base bundle; its chunks are emitted under `assets/editor/`, see *Offline*),
   plus a plain title input. Runs with `no-prettier` / `no-highlight`, which
-  would otherwise inject scripts from unpkg.com that the CSP blocks. Toolbar
+  would otherwise inject scripts from unpkg.com that the CSP blocks, and
+  `no-img-zoom-in`; CodeMirror's runtime `<style>` carries the page's CSP
+  nonce (`lib/editor.ts`, §8). Toolbar
   trimmed to basic formatting;
   preview sanitized through the app's `DOMPurify` (the library does not escape
   raw HTML by default); theme bound to the theme store; single-pane
@@ -1038,7 +1040,11 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
 **HTTP headers** (`app/nginx.conf`, one server-level `add_header` block so no
 location drops them): a Content-Security-Policy — `default-src 'self'`,
 `script-src 'self'`, `style-src 'self'`, `style-src-elem 'self'
-'unsafe-inline'` (CodeMirror), `img-src`/`media-src` `https: data:/blob:`,
+'nonce-$request_id'` (CodeMirror's runtime `<style>`: nginx `sub_filter`s
+the same `$request_id` into index.html's `<meta name="csp-nonce">`, and
+`src/lib/editor.ts` passes it to `EditorView.cspNonce`; medium-zoom, the
+other runtime `<style>` in the editor, is aliased to its style-less build),
+`img-src`/`media-src` `https: data:/blob:`,
 `connect-src 'self' https:` plus the Supabase origin and its `wss:`,
 `frame-src` YouTube-nocookie and the Supabase origin (signed PDF URLs),
 `object-src 'none'`, `frame-ancestors 'none'`, `base-uri`/`form-action
@@ -1152,9 +1158,22 @@ run one each.
   `bun`; the service key is kept out of its reach (no env, root-only file,
   fd closed), but the worker process still holds the key in memory.
 - **CSP `connect-src https:`** — the offline cache `fetch()`es article images
-  from their own hosts, so any https origin is allowed.
-- **CSP `style-src-elem 'unsafe-inline'`** — CodeMirror injects runtime
-  `<style>` elements; article HTML can't add one (DOMPurify forbids `style`).
+  from their own hosts, so any https origin is allowed. connect-src gates
+  every `fetch()` whatever its mode (a `no-cors` fetch or a service-worker
+  fetch included — `sw.js` gets the same header), and `<img>` alone can't
+  hand the bytes to IndexedDB. Narrowing it means fetching images
+  server-side instead (the worker mirroring them into Storage at capture,
+  or an image-proxy function), which adds SSRF surface and storage — not
+  done. The exposure is limited: with `script-src 'self'` an attacker has
+  no script to exfiltrate with in the first place.
+- **CSP nonce reuse offline** — `style-src-elem` carries a per-response
+  nonce, but the service worker precaches index.html with its headers, so
+  an installed device reuses one nonce/header pair until the next deploy.
+  Still far tighter than the former `'unsafe-inline'`; article HTML can't
+  add `<style>` anyway (DOMPurify forbids it). Chrome's own contenteditable
+  editing can add a `style` attribute when typing over a selection in the
+  editor; `style-src-attr` (via `style-src 'self'`) blocks it, harmlessly —
+  CodeMirror redraws the line from its state.
 - **Thumbnail delete is denied from the client** — no client delete policy on
   `bookmark-assets`; the orphan sweep removes them (once scheduled).
 - **Rate limits are fixed windows** (`rate_limits.window_start`), so up to

@@ -338,9 +338,10 @@ describe("ArticleContent", () => {
       const wrapper = mount(ArticleContent, {
         props: { contentMd: "# saved", editing: true, modelValue: "draft text" },
       });
-      await flushPromises();
+      // The first load resolves the editor's dynamic imports; later tests
+      // reuse them and a flushPromises() is enough.
+      await vi.waitFor(() => expect(wrapper.findComponent(MdEditor).exists()).toBe(true));
       const editor = wrapper.findComponent(MdEditor);
-      expect(editor.exists()).toBe(true);
       expect(editor.props("modelValue")).toBe("draft text");
       expect(wrapper.find("h1").exists()).toBe(false);
     });
@@ -411,6 +412,8 @@ describe("ArticleContent", () => {
       expect(editor.props("noMermaid")).toBe(true);
       expect(editor.props("noKatex")).toBe(true);
       expect(editor.props("noEcharts")).toBe(true);
+      // medium-zoom is aliased to its style-less build (vite.config.ts).
+      expect(editor.props("noImgZoomIn")).toBe(true);
     });
 
     test("doesn't let the editor pull prettier/highlight.js from a CDN the CSP blocks", async () => {
