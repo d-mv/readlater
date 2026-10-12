@@ -74,9 +74,11 @@ pre-commit:
       glob: "*.{sql,psql,sh,toml}"
       run: bash run-db-tests.sh
 
-# Before anything leaves the machine: every suite, whatever changed.
+# Before anything leaves the machine: every suite, whatever changed. One at a
+# time: run in parallel, the e2e suite times out while the pgTAP stack and the
+# build compete for the machine.
 pre-push:
-  parallel: true
+  piped: true
   commands:
     build-app:
       root: "app/"
