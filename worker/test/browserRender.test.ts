@@ -82,6 +82,13 @@ describe("browserLaunchOptions", () => {
     expect(JSON.stringify(options)).not.toContain("sb_secret_do_not_leak");
   });
 
+  test("keeps Chromium's sandbox on", () => {
+    const options = browserLaunchOptions("http://127.0.0.1:4000", env);
+    expect(options.chromiumSandbox).toBe(true);
+    expect(options.args).not.toContain("--no-sandbox");
+    expect(options.args).not.toContain("--no-zygote");
+  });
+
   test("routes all browser traffic through the egress proxy, loopback included", () => {
     const options = browserLaunchOptions("http://127.0.0.1:4000", env);
     expect(options.proxy).toEqual({ server: "http://127.0.0.1:4000" });

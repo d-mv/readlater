@@ -544,9 +544,29 @@ none of its bytes are forwarded; a Playwright route
 handler (`routeIfPublic`) checks every request as well. Contexts block
 service workers and downloads, WebSockets are closed, WebRTC may not send
 non-proxied UDP, QUIC is off, and Chromium is launched with a minimal env
-(`PATH`, `HOME` only — never the Supabase key). It runs `--no-sandbox`: under
-Docker's default seccomp profile Chromium's sandbox fails to start even as
-non-root (see `worker/Dockerfile`).
+(`PATH`, `HOME` only — never the Supabase key). Its sandbox is on
+(`chromiumSandbox: true`, no `--no-sandbox`/`--no-zygote`): renderers run in
+their own user namespace under seccomp-bpf, so a compromised one can't open
+files or read other processes. Docker's default seccomp profile blocks the
+user namespaces this needs, so the container runs with
+`worker/seccomp-chromium.json` — Docker's default profile
+(`moby/profiles` `seccomp/v0.2.4`) plus an unconditional allow for `clone`,
+`unshare` and `setns` (§8). Without it the browser fails to launch
+("Chromium sandboxing failed!") rather than running unsandboxed; the plain
+fetch still works.
+
+**Service key isolation.** The key never is an environment variable of the
+worker or of anything it starts. `worker/docker-entrypoint.sh` runs as root
+(the only root process besides `tini`), opens `SUPABASE_SECRET_KEY_FILE` — a
+root-only `0400` file — on fd 3, drops to the `bun` user with `setpriv`
+(no capabilities) and execs the worker with `SUPABASE_SECRET_KEY_FD=3`;
+`takeSupabaseConfig()` reads and closes the fd and deletes both variables
+from `process.env`. So the key is in no `/proc/<pid>/environ`, open fd or file
+the `bun` user can read (verified in the image: renderers in a separate user
+namespace; a root scan of every process's environ finds no key). A
+`SUPABASE_SECRET_KEY` variable still works (the entrypoint moves it to fd 3
+and unsets it) but stays visible in root-owned PID 1's environ and in
+`docker inspect`; it is the local-dev path.
 
 **Thumbnail guard** (`worker/src/storage.ts`). The oEmbed thumbnail URL gets
 the same `assertPublicUrl` check, redirects are refused (`redirect: "error"`),
@@ -565,8 +585,8 @@ dependency is unhealthy" errors (`isBreakerFailure`: 5xx, timeouts, network
 errors, a dead browser) — a 4xx or a page that fails to load doesn't trip
 them.
 
-**Process.** Exits at start if `SUPABASE_URL` or `SUPABASE_SECRET_KEY` is
-missing. Every Supabase request has a 15 s timeout, so a hung connection
+**Process.** Exits at start if `SUPABASE_URL` or the service key (fd or
+`SUPABASE_SECRET_KEY`) is missing. Every Supabase request has a 15 s timeout, so a hung connection
 can't stall the loop. SIGTERM/SIGINT stop picking up rows and give the
 in-flight bookmark 20 s to finish; if it doesn't, it goes back to `pending`
 (with `next_attempt_at` set so the reset trigger can tell it from a user
@@ -579,8 +599,8 @@ unhealthy when it is over 3 minutes old. Plain compose never acts on
 after 5 minutes without one it logs `poll loop stalled` and exits 1, and
 `restart: unless-stopped` brings up a fresh container. It is stopped on
 SIGTERM/SIGINT so a slow drain can't trip it. The image pins
-`oven/bun:1.3.14-slim`, runs as the image's non-root `bun` user under
-`tini`.
+`oven/bun:1.3.14-slim` and runs the worker as the image's non-root `bun`
+user (dropped to by the entrypoint) under `tini`.
 
 A duplicate leading heading
 that repeats the article title is stripped from the converted markdown
@@ -960,7 +980,14 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
   turns the worker's stall watchdog (exit 1 after 5 minutes without a
   heartbeat; §4) into an automatic restart. No public port; it needs outbound access
   to Supabase, YouTube's oEmbed endpoint and whatever the headless-browser
-  fallback has to reach. Env: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`.
+  fallback has to reach. Env: `SUPABASE_URL` and
+  `SUPABASE_SECRET_KEY_FILE=/run/secrets/supabase_secret_key`, a compose
+  `secrets:` file entry pointing at a host file owned by `root:root`, mode
+  `0400` (plain compose bind-mounts it with the host ownership), so only the
+  root entrypoint can read it (§4). It also sets
+  `security_opt: ["seccomp=<path>/seccomp-chromium.json"]` (a copy of
+  `worker/seccomp-chromium.json` on the server), which Chromium's sandbox
+  needs.
 - Edge functions — Supabase-hosted; secrets `CAPTURE_KEY`, `OWNER_USER_ID`
   (capture) and `DEEPL_API_KEY` (translate). `verify_jwt` is on for snippet,
   translate, file-import and pdf-import, off for capture and storage-sweep,
@@ -1070,10 +1097,12 @@ run one each.
 - **Worker plain fetch: DNS rebinding.** The SSRF check and `fetch()` resolve
   the host separately; only the browser fallback is pinned to the vetted IP
   (§4). Accepted: the plain fetch runs no page code.
-- **Chromium `--no-sandbox`** — the sandbox fails under Docker's default
-  seccomp profile; enabling it needs a custom profile. Mitigated by the
-  non-root user, the egress proxy and the minimal browser env. The worker
-  process itself still holds the service-role key.
+- **Chromium sandbox needs a wider seccomp profile** — the worker container
+  may create user namespaces (`clone`/`unshare`/`setns` allowed), which adds
+  kernel attack surface for any code in it; the trade is a sandboxed
+  renderer. The Chromium browser process itself is not sandboxed and runs as
+  `bun`; the service key is kept out of its reach (no env, root-only file,
+  fd closed), but the worker process still holds the key in memory.
 - **CSP `connect-src https:`** — the offline cache `fetch()`es article images
   from their own hosts, so any https origin is allowed.
 - **CSP `style-src-elem 'unsafe-inline'`** — CodeMirror injects runtime

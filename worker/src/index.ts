@@ -5,7 +5,7 @@ import { parseYoutube, type ParsedYoutube } from "./parseYoutube";
 import { fetchMeta } from "./youtubeMeta";
 import { makeThumbnailUploader } from "./storage";
 import { closeBrowser, renderWithBrowser } from "./browserRender";
-import { writeFileSync } from "node:fs";
+import { closeSync, readFileSync, writeFileSync } from "node:fs";
 import { isTransientError } from "./errors";
 import { log } from "./logger";
 import { withTimeout } from "./timeout";
@@ -54,16 +54,52 @@ export const fetchWithTimeout: typeof fetch = Object.assign(
   { preconnect: fetch.preconnect },
 );
 
-/** The service-role client, or null when the environment doesn't configure one. */
-export function supabaseFromEnv(env: NodeJS.ProcessEnv): SupabaseClient | null {
-  return env.SUPABASE_URL && env.SUPABASE_SECRET_KEY
-    ? createClient(env.SUPABASE_URL, env.SUPABASE_SECRET_KEY, {
+export interface SupabaseConfig {
+  url: string | undefined;
+  secretKey: string | undefined;
+}
+
+function readAndCloseFd(fd: number): string {
+  try {
+    return readFileSync(fd, "utf8");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Takes the Supabase settings out of the environment. In the container the
+ * service key never is an environment variable: the entrypoint opens the
+ * key file as root and hands it over on SUPABASE_SECRET_KEY_FD, so it isn't
+ * in /proc/<pid>/environ of any process the `bun` user could read (a
+ * compromised browser included). SUPABASE_SECRET_KEY is the local-dev
+ * fallback. Both are deleted from `env` so nothing spawned later inherits
+ * them.
+ */
+export function takeSupabaseConfig(
+  env: NodeJS.ProcessEnv,
+  readFd: (fd: number) => string = readAndCloseFd,
+): SupabaseConfig {
+  const fd = env.SUPABASE_SECRET_KEY_FD;
+  const fromEnv = env.SUPABASE_SECRET_KEY;
+  delete env.SUPABASE_SECRET_KEY_FD;
+  delete env.SUPABASE_SECRET_KEY;
+  const secretKey = fd ? readFd(Number(fd)).trim() : fromEnv;
+  return { url: env.SUPABASE_URL || undefined, secretKey: secretKey || undefined };
+}
+
+/** The service-role client, or null when the config is incomplete. */
+export function supabaseFromConfig(config: SupabaseConfig): SupabaseClient | null {
+  return config.url && config.secretKey
+    ? createClient(config.url, config.secretKey, {
         global: { fetch: fetchWithTimeout },
       })
     : null;
 }
 
-export const supabase = supabaseFromEnv(process.env) as SupabaseClient;
+const supabaseConfig = takeSupabaseConfig(process.env);
+
+export const supabase = supabaseFromConfig(supabaseConfig) as SupabaseClient;
 
 export const uploadThumbnail = supabase
   ? makeThumbnailUploader(supabase)
@@ -433,7 +469,7 @@ export function resetWorkerState() {
 
 /** Everything main() reaches outside this module; tests substitute it. */
 export interface WorkerRuntime {
-  env: NodeJS.ProcessEnv;
+  config: SupabaseConfig;
   client: SupabaseClient;
   heartbeatPath: string;
   schedule: (loop: () => void, ms: number) => ReturnType<typeof setTimeout>;
@@ -448,7 +484,7 @@ export interface WorkerRuntime {
 /** Starts the poll loop and installs the SIGINT/SIGTERM handlers. */
 export function main(overrides: Partial<WorkerRuntime> = {}): void {
   const runtime: WorkerRuntime = {
-    env: process.env,
+    config: supabaseConfig,
     client: supabase,
     heartbeatPath: HEARTBEAT_PATH,
     schedule: setTimeout,
@@ -465,7 +501,10 @@ export function main(overrides: Partial<WorkerRuntime> = {}): void {
     ...overrides,
   };
 
-  const missing = ["SUPABASE_URL", "SUPABASE_SECRET_KEY"].filter((name) => !runtime.env[name]);
+  const missing = [
+    ...(runtime.config.url ? [] : ["SUPABASE_URL"]),
+    ...(runtime.config.secretKey ? [] : ["SUPABASE_SECRET_KEY"]),
+  ];
   if (missing.length > 0) {
     log.error("missing required environment variables; exiting", { missing });
     runtime.exit(1);

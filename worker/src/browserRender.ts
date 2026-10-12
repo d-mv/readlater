@@ -46,14 +46,15 @@ export function browserLaunchOptions(
       PATH: env.PATH ?? "/usr/local/bin:/usr/bin:/bin",
       HOME: env.HOME ?? "/tmp",
     },
+    // Renderers run in Chromium's user-namespace + seccomp-bpf sandbox, so a
+    // compromised one can't open files or read other processes. In Docker
+    // this needs the container's seccomp profile to allow clone/unshare/setns
+    // (worker/seccomp-chromium.json; see worker/Dockerfile) — under the
+    // default profile the launch fails instead of silently running unsandboxed.
+    chromiumSandbox: true,
     args: [
-      // Docker's default seccomp profile blocks the user namespaces Chromium's
-      // sandbox needs, so it can't sandbox even as a non-root user there (see
-      // worker/Dockerfile). The container runs as an unprivileged user and the
-      // browser only reaches the network through the egress proxy instead.
-      "--no-sandbox",
+      // No setuid helper is shipped; use the namespace sandbox only.
       "--disable-setuid-sandbox",
-      "--no-zygote",
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--disable-software-rasterizer",

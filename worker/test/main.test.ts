@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { fstatSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,13 +7,14 @@ import {
   main,
   resetWorkerState,
   supabaseCircuitBreaker,
-  supabaseFromEnv,
+  supabaseFromConfig,
+  takeSupabaseConfig,
   uploadThumbnail,
   type WorkerRuntime,
 } from "../src/index";
 import { log } from "../src/logger";
 
-const ENV = { SUPABASE_URL: "https://project.supabase.co", SUPABASE_SECRET_KEY: "sb_secret_x" };
+const CONFIG = { url: "https://project.supabase.co", secretKey: "sb_secret_x" };
 
 let dir: string;
 
@@ -74,7 +75,7 @@ function fakeRuntime(overrides: Partial<WorkerRuntime> = {}) {
   const handlers = new Map<string, () => void>();
   let browserClosed = 0;
   const runtime: Partial<WorkerRuntime> = {
-    env: ENV,
+    config: CONFIG,
     heartbeatPath: join(dir, "heartbeat"),
     schedule: (loop, ms) => {
       const token = scheduled.length + 1;
@@ -113,7 +114,7 @@ function fakeRuntime(overrides: Partial<WorkerRuntime> = {}) {
 describe("main", () => {
   test("exits with status 1 when the Supabase environment is missing", () => {
     const { client, polls } = queueClient();
-    const fake = fakeRuntime({ env: { SUPABASE_URL: "https://project.supabase.co" }, client });
+    const fake = fakeRuntime({ config: { url: CONFIG.url, secretKey: undefined }, client });
 
     main(fake.runtime);
 
@@ -264,11 +265,44 @@ describe("main", () => {
   });
 });
 
+describe("takeSupabaseConfig", () => {
+  test("reads the key from the inherited file descriptor, closes it and clears the env", () => {
+    const keyFile = join(dir, "key");
+    writeFileSync(keyFile, "sb_secret_from_fd\n");
+    const fd = openSync(keyFile, "r");
+    const env: NodeJS.ProcessEnv = {
+      SUPABASE_URL: CONFIG.url,
+      SUPABASE_SECRET_KEY_FD: String(fd),
+      SUPABASE_SECRET_KEY: "sb_secret_from_env",
+    };
+
+    expect(takeSupabaseConfig(env)).toEqual({ url: CONFIG.url, secretKey: "sb_secret_from_fd" });
+    expect(env).toEqual({ SUPABASE_URL: CONFIG.url });
+    expect(() => fstatSync(fd)).toThrow();
+  });
+
+  test("falls back to SUPABASE_SECRET_KEY for local development and removes it", () => {
+    const env: NodeJS.ProcessEnv = { SUPABASE_URL: CONFIG.url, SUPABASE_SECRET_KEY: "sb_secret_x" };
+
+    expect(takeSupabaseConfig(env)).toEqual(CONFIG);
+    expect(env).toEqual({ SUPABASE_URL: CONFIG.url });
+  });
+
+  test("an empty key or URL counts as missing", () => {
+    expect(
+      takeSupabaseConfig({ SUPABASE_URL: "", SUPABASE_SECRET_KEY_FD: "3" }, () => " \n"),
+    ).toEqual({
+      url: undefined,
+      secretKey: undefined,
+    });
+  });
+});
+
 describe("Supabase client", () => {
   test("is only created when both the URL and the secret key are set", () => {
-    expect(supabaseFromEnv({})).toBeNull();
-    expect(supabaseFromEnv({ SUPABASE_URL: ENV.SUPABASE_URL })).toBeNull();
-    expect(supabaseFromEnv(ENV)).not.toBeNull();
+    expect(supabaseFromConfig({ url: undefined, secretKey: undefined })).toBeNull();
+    expect(supabaseFromConfig({ url: CONFIG.url, secretKey: undefined })).toBeNull();
+    expect(supabaseFromConfig(CONFIG)).not.toBeNull();
   });
 
   test("sends every request with a timeout signal", async () => {
@@ -281,7 +315,7 @@ describe("Supabase client", () => {
       return Response.json([]);
     }) as typeof fetch);
 
-    await supabaseFromEnv(ENV)!.from("bookmarks").select("id");
+    await supabaseFromConfig(CONFIG)!.from("bookmarks").select("id");
 
     expect(signals).toHaveLength(1);
     expect(signals[0]).toBeInstanceOf(AbortSignal);
