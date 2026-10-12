@@ -1008,10 +1008,8 @@ run one each.
     suite, function changes run `deno check` and the functions gate.
   - pre-push: every suite (app, e2e, worker, bookmarklet, functions, db) and
     the app build, whatever changed.
-- **CI** (`.github/workflows/ci.yml`, every push and PR): jobs `app`
-  (typecheck, lint, format, unused deps, coverage gate, build), `e2e`,
-  `worker` (with Chromium), `bookmarklet`, `functions` (check + gate) and `db`
-  (Supabase CLI 2.120.0 + pgTAP).
+- **No hosted CI** — lefthook is the only gate; don't skip it
+  (`--no-verify`).
 - **Deploy order** — §8.
 
 ## 10. Known trade-offs

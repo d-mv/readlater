@@ -32,9 +32,8 @@ frontend.
 format, typecheck, unused deps and the full test suite of every touched
 package (with e2e for app changes and the pgTAP suite for SQL changes); on
 push, every suite plus the app build. `bun run test:all` runs everything by
-hand. All unit/integration suites enforce 100% coverage; CI
-(`.github/workflows/ci.yml`) runs the same suites, e2e and the database
-tests on every push. Exact
+hand. All unit/integration suites enforce 100% coverage. There is no hosted
+CI: lefthook is the gate. Exact
 commands and the deploy order: architecture
 [§9 Development & testing](docs/architecture.md#9-development--testing) and
 [§8 Deployment](docs/architecture.md#8-deployment).

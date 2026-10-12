@@ -160,7 +160,7 @@ per-user tags with owner-only RLS; rate limits, body caps, generic errors
 and server-side translate text in the edge functions; `storage-sweep`;
 worker egress proxy, response caps, retries/backoff, SIGTERM drain,
 heartbeat; store writes that check the server's answer; sign-out that
-clears the device; CSP and security headers; a11y fixes; CI.
+clears the device; CSP and security headers; a11y fixes.
 
 **Still open — production state** (not in the code, do in the dashboard /
 SQL editor):
