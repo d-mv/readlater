@@ -9,6 +9,7 @@ const { signInWithPassword, signOut, getSession, onAuthStateChange } = vi.hoiste
 }));
 
 vi.mock("../lib/supabase", () => ({
+  AUTH_STORAGE_KEY: "sb-test-auth-token",
   supabase: {
     auth: { signInWithPassword, signOut, getSession, onAuthStateChange },
   },
@@ -350,11 +351,64 @@ describe("useAuthStore", () => {
 
   test("signOut still clears the local login when the server sign-out throws", async () => {
     storeOfflineUser();
+    localStorage.setItem("sb-test-auth-token", "{}");
     signOut.mockRejectedValue(new Error("Failed to fetch"));
 
     const store = useAuthStore();
     await expect(store.signOut()).resolves.toBeUndefined();
 
+    expect(store.isAuthenticated).toBe(false);
+    expect(localStorage.getItem("sb-test-auth-token")).toBeNull();
+  });
+
+  test("signOut removes the stored session supabase-js left behind when its refresh failed", async () => {
+    localStorage.setItem("sb-test-auth-token", '{"refresh_token":"still-valid"}');
+    // What supabase-js does offline with an expired token: the refresh it
+    // tries first fails, so it returns that error and keeps the session.
+    signOut.mockResolvedValue({ error: new AuthRetryableFetchError("Failed to fetch", 0) });
+
+    await useAuthStore().signOut();
+
+    expect(localStorage.getItem("sb-test-auth-token")).toBeNull();
+  });
+
+  test("offline, signOut drops the stored session before supabase-js would try a refresh", async () => {
+    vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+    localStorage.setItem("sb-test-auth-token", '{"refresh_token":"still-valid"}');
+    let storedWhenCalled: string | null = "unset";
+    signOut.mockImplementation(async () => {
+      storedWhenCalled = localStorage.getItem("sb-test-auth-token");
+      return { error: null };
+    });
+
+    await useAuthStore().signOut();
+
+    expect(storedWhenCalled).toBeNull();
+    expect(localStorage.getItem("sb-test-auth-token")).toBeNull();
+  });
+
+  test("online, signOut leaves the stored session for supabase-js to revoke first", async () => {
+    localStorage.setItem("sb-test-auth-token", '{"refresh_token":"still-valid"}');
+    let storedWhenCalled: string | null = null;
+    signOut.mockImplementation(async () => {
+      storedWhenCalled = localStorage.getItem("sb-test-auth-token");
+      return { error: null };
+    });
+
+    await useAuthStore().signOut();
+
+    expect(storedWhenCalled).toBe('{"refresh_token":"still-valid"}');
+    expect(localStorage.getItem("sb-test-auth-token")).toBeNull();
+  });
+
+  test("signOut completes when localStorage refuses access", async () => {
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("denied", "SecurityError");
+    });
+    signOut.mockResolvedValue({ error: null });
+
+    const store = useAuthStore();
+    await expect(store.signOut()).resolves.toBeUndefined();
     expect(store.isAuthenticated).toBe(false);
   });
 });

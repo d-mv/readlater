@@ -301,6 +301,12 @@ export class FakeBackend {
   revokedRefreshTokens = new Set<string>();
   /** Every PostgREST call answers 401 while set (expired/revoked JWT). */
   rejectJwt = false;
+  /**
+   * While set, every Supabase and external request fails at the network
+   * level. `context.setOffline(true)` alone doesn't do that: routed requests
+   * are still answered by the handlers here.
+   */
+  offline = false;
 
   private failures: Failure[] = [];
   // Seeded rows go back in time from here; writes go forward from `clock`, so
@@ -403,6 +409,10 @@ export class FakeBackend {
   }
 
   private async handleExternal(route: Route) {
+    if (this.offline) {
+      await route.abort("internetdisconnected");
+      return;
+    }
     const resource = this.external.get(route.request().url());
     if (!resource) {
       await route.fulfill({ status: 404, headers: CORS_HEADERS, body: "" });
@@ -418,6 +428,10 @@ export class FakeBackend {
 
   private async handle(route: Route) {
     const request = route.request();
+    if (this.offline) {
+      await route.abort("internetdisconnected");
+      return;
+    }
     if (request.method() === "OPTIONS") {
       await route.fulfill({ status: 204, headers: CORS_HEADERS });
       return;

@@ -197,3 +197,45 @@ test("sign out clears the device's copy and routes to the login screen", async (
   await page.goto("/");
   await expect(page).toHaveURL(/\/login$/);
 });
+
+test("signing out offline with an expired token stays signed out once back online", async ({
+  page,
+  context,
+  backend,
+}) => {
+  backend.addBookmark({ title: "Private reading" });
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(1);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(page.getByTestId("sign-out-btn")).toBeVisible();
+  // The dev server has no service worker: load the login route's lazy chunk
+  // while still online, as the precache would have.
+  await page.evaluate((path) => import(path), "/src/views/LoginView.vue");
+
+  // Time passes offline: the stored access token expires, so supabase-js's
+  // signOut() would first try a refresh that can't reach the server — and on
+  // that error it returns without removing the stored session.
+  await context.setOffline(true);
+  backend.offline = true;
+  await expect.poll(() => page.evaluate(() => navigator.onLine)).toBe(false);
+  await page.evaluate((key) => {
+    const session = JSON.parse(localStorage.getItem(key)!);
+    session.expires_at = Math.floor(Date.now() / 1000) - 60;
+    localStorage.setItem(key, JSON.stringify(session));
+  }, AUTH_STORAGE_KEY);
+  await page.getByTestId("sign-out-btn").click();
+
+  await expect(page).toHaveURL(/\/login$/);
+  await expect
+    .poll(() => page.evaluate((key) => localStorage.getItem(key), AUTH_STORAGE_KEY))
+    .toBeNull();
+
+  // Back online, a fresh load finds no session to refresh and restore.
+  await context.setOffline(false);
+  backend.offline = false;
+  await page.goto("/");
+  await expect(page.getByLabel("Email")).toBeVisible();
+  await expect(page).toHaveURL(/\/login$/);
+  expect(backend.callsTo("auth", "token:refresh_token")).toHaveLength(0);
+  expect(await page.evaluate((key) => localStorage.getItem(key), AUTH_STORAGE_KEY)).toBeNull();
+});

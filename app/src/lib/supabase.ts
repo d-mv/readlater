@@ -7,7 +7,16 @@ if (!url || !publishableKey) {
   throw new Error("VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY must be set");
 }
 
-export const supabase = createClient(url, publishableKey);
+// Where supabase-js keeps the session in localStorage. Set explicitly (to the
+// value supabase-js would derive itself, so sessions stored before this stay
+// valid) because the auth store's signOut() removes it by hand: supabase-js
+// skips its own cleanup when the token refresh it tries first can't reach
+// the server.
+export const AUTH_STORAGE_KEY = `sb-${new URL(url).hostname.split(".")[0]}-auth-token`;
+
+export const supabase = createClient(url, publishableKey, {
+  auth: { storageKey: AUTH_STORAGE_KEY },
+});
 
 export interface Tag {
   id: string;

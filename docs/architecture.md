@@ -986,8 +986,13 @@ router watcher on `isAuthenticated` then sends any protected page to
 `/login`. **Sign out** (Settings) unsubscribes Realtime, resets the list
 and offline-cache stores, clears every IndexedDB store
 (`offlineDb.clearAll()`, revoking image blob URLs) and only then calls
-`supabase.auth.signOut()`. Edge case: signing out offline with an expired
-token may leave supabase-js's stored session behind. See §3 for the
+`supabase.auth.signOut()`. supabase-js refreshes an expired token before
+signing out and, when that refresh can't reach the server, returns without
+removing its stored session — so the store removes it itself
+(`AUTH_STORAGE_KEY`, `lib/supabase.ts`: passed to `createClient` as
+`storageKey`, with the value supabase-js would derive, `sb-<host's first
+label>-auth-token`). Offline it does that before calling `signOut()`,
+which then has no session to refresh. See §3 for the
 capture-path auth model (bookmarklet/share-target/worker/public-view each
 use a different mechanism, on purpose).
 
@@ -1140,8 +1145,6 @@ run one each.
   `<style>` elements; article HTML can't add one (DOMPurify forbids `style`).
 - **Thumbnail delete is denied from the client** — no client delete policy on
   `bookmark-assets`; the orphan sweep removes them (once scheduled).
-- **Offline sign-out** with an expired token may leave supabase-js's stored
-  session behind (local data is cleared regardless).
 - **Rate limits are fixed windows** (`rate_limits.window_start`), so up to
   twice the limit can pass around a window boundary.
 

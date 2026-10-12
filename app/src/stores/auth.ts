@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, shallowRef } from "vue";
 import { isAuthRetryableFetchError, type AuthError, type Session } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabase";
+import { AUTH_STORAGE_KEY, supabase } from "../lib/supabase";
 import * as offlineDb from "../lib/offlineDb";
 import { useBookmarksStore } from "./bookmarks";
 import { useOfflineCacheStore } from "./offlineCache";
@@ -29,6 +29,12 @@ function saveOfflineUser(user: StoredUser | null) {
     } else {
       localStorage.removeItem(OFFLINE_AUTH_KEY);
     }
+  } catch {}
+}
+
+function removeStoredSession() {
+  try {
+    localStorage.removeItem(AUTH_STORAGE_KEY);
   } catch {}
 }
 
@@ -144,9 +150,17 @@ export const useAuthStore = defineStore("auth", () => {
     useOfflineCacheStore().reset();
     await offlineDb.clearAll().catch(() => {});
     forgetUser();
+    // supabase-js refreshes an expired token before signing out and, if that
+    // refresh can't reach the server, returns without removing the stored
+    // session — the next online load would then restore it. So the stored
+    // session is removed here too. Offline that happens first: the server
+    // can't be told anyway, and with no session left supabase-js skips the
+    // doomed refresh (retried with backoff for up to ~30 s).
+    if (!isOnline()) removeStoredSession();
     try {
       await supabase.auth.signOut();
     } catch {}
+    removeStoredSession();
   }
 
   return {
