@@ -128,16 +128,21 @@ export async function handleRequest(
   return handlePdfImport(makeClient(req.headers.get("Authorization") ?? ""), parsed.body);
 }
 
-// import.meta.main is only true when this file is the process entry point
-// (the deployed edge function), not when index.test.ts imports handlePdfImport
-// — so the test run never tries to bind a port.
-if (import.meta.main) {
-  Deno.serve((req) =>
+// The deployed request handler, wired to the environment: each request gets
+// a client acting as the caller (their Authorization header, so RLS applies).
+// Exported so the tests can exercise the env wiring without binding a port.
+export function handlerFromEnv(): (req: Request) => Promise<Response> {
+  return (req) =>
     handleRequest(req, (authorization) =>
       createClient(
         Deno.env.get("SUPABASE_URL")!,
         Deno.env.get("SUPABASE_ANON_KEY")!,
         { global: { headers: { Authorization: authorization } } },
-      ))
-  );
+      ));
 }
+
+// import.meta.main is only true when this file is the process entry point
+// (the deployed edge function), not when index.test.ts imports handlePdfImport
+// — so the test run never binds a port. The one line tests can't reach.
+// deno-coverage-ignore
+if (import.meta.main) Deno.serve(handlerFromEnv());

@@ -37,12 +37,9 @@ async function insertPendingUrl(
   url: string,
   title?: string,
 ): Promise<Response> {
-  let type: ReturnType<typeof detectType>;
-  try {
-    type = detectType(url);
-  } catch {
-    return json("invalid url", 400);
-  }
+  // Every caller has already parsed `url` (hasAllowedScheme / isBareUrl), so
+  // detectType's own URL parse can't throw here.
+  const type = detectType(url);
 
   const { data, error } = await client
     .from("bookmarks")
@@ -179,20 +176,23 @@ export async function handleRequest(
   return handleCapture(client, env.ownerUserId, parsed.body);
 }
 
-// import.meta.main is only true when this file is the process entry point
-// (the deployed edge function), not when index.test.ts imports the handlers
-// — so the test run never tries to construct a client from unset env vars
-// or bind a port.
-if (import.meta.main) {
+// The deployed request handler, wired to the environment. Exported so the
+// tests can exercise the env wiring without binding a port.
+export function handlerFromEnv(): (req: Request) => Promise<Response> {
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
-  Deno.serve((req) =>
+  return (req) =>
     handleRequest(req, supabase, {
       captureKey: Deno.env.get("CAPTURE_KEY") ?? "",
       ownerUserId: Deno.env.get("OWNER_USER_ID"),
-    })
-  );
+    });
 }
+
+// import.meta.main is only true when this file is the process entry point
+// (the deployed edge function), not when index.test.ts imports the handlers
+// — so the test run never binds a port. The one line tests can't reach.
+// deno-coverage-ignore
+if (import.meta.main) Deno.serve(handlerFromEnv());

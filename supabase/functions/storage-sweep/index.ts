@@ -82,10 +82,18 @@ export async function handleRequest(
   return sweep(admin, { dryRun });
 }
 
-if (import.meta.main) {
+// The deployed request handler, wired to the environment. Exported so the
+// tests can exercise the env wiring without binding a port.
+export function handlerFromEnv(): (req: Request) => Promise<Response> {
   const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
   const admin = createClient(Deno.env.get("SUPABASE_URL")!, serviceRoleKey, {
     auth: { persistSession: false },
   });
-  Deno.serve((req) => handleRequest(req, admin, serviceRoleKey));
+  return (req) => handleRequest(req, admin, serviceRoleKey);
 }
+
+// import.meta.main is only true when this file is the process entry point
+// (the deployed edge function), not when index.test.ts imports handleRequest
+// — so the test run never binds a port. The one line tests can't reach.
+// deno-coverage-ignore
+if (import.meta.main) Deno.serve(handlerFromEnv());
