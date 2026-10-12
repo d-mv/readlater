@@ -43,10 +43,17 @@ function reply(socket: Socket, status: string) {
 }
 
 export async function startEgressProxy(
-  deps: { lookup?: LookupAll; isPrivate?: (ip: string) => boolean } = {},
+  deps: {
+    lookup?: LookupAll;
+    isPrivate?: (ip: string) => boolean;
+    connectUpstream?: (options: { host: string; port: number }) => Socket;
+    connectTimeoutMs?: number;
+  } = {},
 ): Promise<EgressProxy> {
   const lookup = deps.lookup ?? lookupAll;
   const isPrivate = deps.isPrivate ?? isPrivateAddress;
+  const connectUpstream = deps.connectUpstream ?? connect;
+  const connectTimeoutMs = deps.connectTimeoutMs ?? UPSTREAM_CONNECT_TIMEOUT_MS;
   const sockets = new Set<Socket>();
 
   /** Resolves once and returns the address to connect to, or null if refused. */
@@ -64,12 +71,12 @@ export async function startEgressProxy(
 
   function openUpstream(address: string, port: number): Promise<Socket> {
     return new Promise((resolve, reject) => {
-      const upstream = connect({ host: address, port });
+      const upstream = connectUpstream({ host: address, port });
       track(upstream);
       const timer = setTimeout(() => {
         upstream.destroy();
         reject(new Error("upstream connect timed out"));
-      }, UPSTREAM_CONNECT_TIMEOUT_MS);
+      }, connectTimeoutMs);
       upstream.once("connect", () => {
         clearTimeout(timer);
         resolve(upstream);
