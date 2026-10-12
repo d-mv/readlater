@@ -40,3 +40,8 @@ Scale (62.5% root): 10 / 11 / 13 / 14 / 17 / 22 / 26px. The kairos sheet's
 - `xl` is 26px (see above); `base` stays 14px.
 - The reading page sits on `raised` (lightest) rather than `canvas`, so long
   text gets the brightest, calmest surface.
+- `ink-muted` and `ink-faint` keep the kairos hue but are darker (lighter in
+  dark mode) so both clear WCAG AA 4.5:1 on every surface; kairos's faint
+  was ~2.5:1 (app 0.8.0).
+- On phones (below `sm`) list titles and metadata, tabs and tag pills are a
+  step larger than on desktop (app 0.7.1).

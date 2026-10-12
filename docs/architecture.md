@@ -1,8 +1,9 @@
 # Read Later — architecture
 
 Personal read-it-later app, single owner, self-hosted. Capture a link (or a
-snippet, or a raw note) via bookmarklet / PWA share-target / in-app dialog,
-parse it into clean markdown on a VPS worker, read it later in a Vue 3 PWA.
+snippet, a raw note, or a Markdown/Word/PDF file) via bookmarklet / PWA
+share-target / iOS Shortcut / in-app dialog, parse it into clean markdown on
+a VPS worker, read it later in a Vue 3 PWA.
 
 This is the current-state reference — kept in sync with the code, including
 the reasoning behind decisions where it matters. Open work lives in
@@ -12,8 +13,8 @@ the reasoning behind decisions where it matters. Open work lives in
 
 ```mermaid
 flowchart TD
-    BM["Bookmarklet popup (/capture)"] -->|store.add, session| Client[PWA client insert]
-    ST["Share target (/share-target)"] -->|store.add / store.addNote, session| Client
+    BM["Bookmarklet popup (/capture), Save click"] -->|store.add, session| Client[PWA client insert]
+    ST["Share target (/share-target), Save click"] -->|store.add / store.addNote, session| Client
     Dlg["Add dialog (URL mode)"] -->|store.add, session| Client
     Short[iOS Shortcut] -->|POST url/text, CAPTURE_KEY| Cap[capture edge function]
     Snip["Add dialog (Snippet mode)"] -->|HTML/text, JWT| Snippet[snippet edge function]
@@ -25,10 +26,11 @@ flowchart TD
     Snippet -->|Turndown HTML→MD| Ready
     FileFn -->|MD / docx→MD / PDF text| Ready
     Pending --> Worker[VPS worker — Docker, polls 15s→60s backoff]
-    Worker -->|fetch, retry via headless browser if too little extracted| Parse[Readability + Turndown / YouTube oEmbed]
-    Worker -->|write markdown, status=ready| DB[(Postgres: bookmarks, tags, bookmark_tags)]
+    Worker -->|SSRF-guarded fetch, headless browser via egress proxy if too little extracted| Parse[Readability + Turndown / YouTube oEmbed]
+    Worker -->|write markdown, status=ready / retry / failed| DB[(Postgres: bookmarks, tags, bookmark_tags)]
     Ready --> DB
     Worker -->|upload YouTube thumbnails, random UUID paths| Storage[(Supabase Storage)]
+    Sweep["storage-sweep edge function (service-role bearer)"] -->|remove objects no bookmark references| Storage
     PWA[Vue 3 PWA] -->|first-page query + Realtime subscription| DB
     PWA -->|tag / search / share / mark-read / edit / progress writes| DB
     PWA -->|translate, JWT| Translate[translate edge function → DeepL]
@@ -47,8 +49,9 @@ Independently replaceable pieces:
 | `capture` edge function | `CAPTURE_KEY`-authed insert/dedupe for url/text captures from non-browser callers (iOS Shortcut); `POST /capture/:id/refresh` | Deno (Supabase Edge Functions) |
 | `snippet` edge function | JWT-authed HTML→Markdown insert for pasted snippets | Deno |
 | `file-import` / `pdf-import` edge functions | JWT-authed Markdown/Word → note, PDF → stored original + extracted text | Deno (`npm:mammoth`, `npm:unpdf`) |
-| `translate` edge function | JWT-authed DeepL translation, cached on the row | Deno |
-| VPS worker | Poll `pending`, parse, write back | Bun + TypeScript, Docker, Playwright for JS-rendered pages |
+| `translate` edge function | JWT-authed DeepL translation of the row's own `content_md` (loaded server-side), cached on the row | Deno |
+| `storage-sweep` edge function | Service-role-only removal of Storage objects no bookmark references (`?dry_run=1` to count only) | Deno |
+| VPS worker | Poll `pending`, parse, write back; transient failures retried with backoff | Bun + TypeScript, Docker, Playwright for JS-rendered pages |
 | Vue 3 PWA | Reading list, reader, editing, tags, search, sharing, offline cache, export/import | Vue 3, Pinia, Tailwind v4, `vite-plugin-pwa` |
 
 ## 2. Data model
@@ -87,37 +90,37 @@ create table bookmarks (
   error_message   text,
   created_at      timestamptz not null default now(),
   processed_at    timestamptz,
-  updated_at      timestamptz not null default now(), -- trigger-bumped; delta sync
+  updated_at      timestamptz not null default now(), -- trigger-bumped; delta sync (20261011120000)
+  attempts        int not null default 0,  -- worker retries (20261011170000)
+  next_attempt_at timestamptz,             -- retry backoff; null = due now
 
   constraint bookmarks_url_required_unless_note check (type in ('note', 'pdf') or url is not null),
-  constraint bookmarks_pdf_path_requires_type check (pdf_path is null or type = 'pdf')
+  constraint bookmarks_pdf_path_requires_type check (pdf_path is null or type = 'pdf'),
+  -- 20261011160000, NOT VALID: enforced on every insert/update, older rows not re-checked
+  constraint bookmarks_url_http_only check (url is null or url ~* '^https?://')
 );
 
-create index bookmarks_status_idx on bookmarks (status) where status = 'pending';
--- replaced by (user_id, created_at desc, id desc) in 20261011172000 for (created_at, id) keyset paging
-create index bookmarks_user_created_idx on bookmarks (user_id, created_at desc);
+create index bookmarks_pending_due_idx on bookmarks (next_attempt_at nulls first) where status = 'pending';
+create index bookmarks_user_created_id_idx on bookmarks (user_id, created_at desc, id desc); -- keyset paging
+create index bookmarks_user_updated_idx on bookmarks (user_id, updated_at);                -- delta sync
 create index bookmarks_search_idx on bookmarks using gin(search_vector);
 create unique index bookmarks_url_normalized_uniq on bookmarks (url_normalized);
 
+-- Triggers: bookmarks_touch_updated_at (before update → updated_at = now());
+-- bookmarks_reset_retry (before update of status: a re-queue to 'pending'
+-- that changes neither attempts nor next_attempt_at is the user's refresh →
+-- both reset); bookmarks_record_deletion (after delete → tombstone below).
+
 alter table bookmarks enable row level security;
-create policy "owner access" on bookmarks for all using (auth.uid() = user_id);
-
--- bookmark-pdfs: private (unlike bookmark-assets), objects at
--- `{user_id}/{uuid}.pdf` so ownership checks read straight from the path.
-insert into storage.buckets (id, name, public, file_size_limit)
-values ('bookmark-pdfs', 'bookmark-pdfs', false, 20971520);
-
-create policy "owner read own pdfs" on storage.objects
-  for select using (bucket_id = 'bookmark-pdfs' and (storage.foldername(name))[1] = auth.uid()::text);
-create policy "owner write own pdfs" on storage.objects
-  for insert with check (bucket_id = 'bookmark-pdfs' and (storage.foldername(name))[1] = auth.uid()::text);
-create policy "owner delete own pdfs" on storage.objects
-  for delete using (bucket_id = 'bookmark-pdfs' and (storage.foldername(name))[1] = auth.uid()::text);
+create policy "owner access" on bookmarks for all to authenticated
+  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
 
 create table tags (
-  id    uuid primary key default gen_random_uuid(),
-  name  text unique not null,
-  color text default '#888888'
+  id      uuid primary key default gen_random_uuid(),
+  name    text not null,
+  color   text default '#888888',
+  user_id uuid not null default auth.uid() references auth.users(id) on delete cascade,
+  constraint tags_user_id_name_key unique (user_id, name)
 );
 
 create table bookmark_tags (
@@ -130,15 +133,46 @@ create index bookmark_tags_tag_idx on bookmark_tags (tag_id); -- tag → bookmar
 
 alter table tags enable row level security;
 alter table bookmark_tags enable row level security;
--- Since 20261011171000_audit_hardening: tags carry user_id (default
--- auth.uid(), unique (user_id, name)) and are owner-only; a bookmark_tags
--- link needs both its bookmark and its tag to belong to the caller. All
--- policies use (select auth.uid()) so it is evaluated once per query.
+create policy "owner access" on tags for all to authenticated
+  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+-- A link needs both ends to belong to the caller: owning the bookmark must
+-- not let you attach someone else's tag id.
+create policy "owner access" on bookmark_tags for all to authenticated
+  using (exists (select 1 from bookmarks b where b.id = bookmark_id and b.user_id = (select auth.uid()))
+     and exists (select 1 from tags t where t.id = tag_id and t.user_id = (select auth.uid())))
+  with check (/* same */);
 grant select, insert, update, delete on tags, bookmark_tags to authenticated;
+-- bookmark_tags_touch_bookmark (security definer, after insert/delete on
+-- bookmark_tags) bumps the bookmark's updated_at.
 
--- Returns a table of public-safe columns only (no user_id, pdf_path, url,
--- status, error_message, progress, translation, …) — see the
--- 20260826120001 migration.
+-- Delete tombstones for delta sync, kept indefinitely; written only by the
+-- security-definer trigger.
+create table bookmark_deletions (
+  bookmark_id uuid primary key,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  deleted_at  timestamptz not null default now()
+);
+create policy "owner read" on bookmark_deletions for select to authenticated
+  using (user_id = (select auth.uid()));
+
+-- Per-user fixed-window rate limits for the edge functions. RLS on, no
+-- policies, all access revoked from anon/authenticated: only the functions
+-- below touch it.
+create table rate_limits (
+  user_id      uuid not null references auth.users(id) on delete cascade,
+  action       text not null,
+  window_start timestamptz not null,
+  count        int not null,
+  primary key (user_id, action)
+);
+-- bump_rate_limit_for_user(p_user_id, p_action, p_max, p_window) → boolean:
+--   one atomic upsert; refused calls keep counting (capped at p_max + 1).
+--   security definer, execute: service_role only.
+-- bump_rate_limit(p_action, p_max, p_window) → boolean: the same, keyed on
+--   the caller's own auth.uid(); execute: authenticated.
+
+-- Returns public-safe columns only (no user_id, pdf_path, url, status,
+-- error_message, progress, translation, …).
 create function get_public_bookmark(bookmark_id uuid)
 returns table (id uuid, type text, title text, author text, excerpt text,
   content_md text, thumbnail_url text, youtube_video_id text, word_count int,
@@ -149,24 +183,37 @@ as $$ select id, type, title, author, excerpt, content_md, thumbnail_url,
   from bookmarks where id = bookmark_id and is_public = true; $$;
 grant execute on function get_public_bookmark(uuid) to anon, authenticated;
 
--- The bookmarks table is in the supabase_realtime publication with an explicit
--- column list (no content_md / translated_content_md / search_vector), so the
--- PWA gets live row changes over one websocket instead of polling.
--- Replica identity is a covering unique index, not FULL: DELETE events must
--- carry user_id for Realtime to evaluate RLS, but FULL requires the
--- publication's column list to cover every column, so every DELETE failed
--- with 42P10.
+-- Storage buckets. bookmark-pdfs is private, objects at `{user_id}/{uuid}.pdf`
+-- so ownership checks read straight from the path.
+insert into storage.buckets (id, name, public) values ('bookmark-assets', 'bookmark-assets', true);
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('bookmark-pdfs', 'bookmark-pdfs', false, 20971520);
+-- allowed_mime_types: bookmark-pdfs = application/pdf;
+-- bookmark-assets = image/jpeg, image/png, image/webp, image/gif, image/avif.
+
+create policy "owner read own pdfs" on storage.objects for select to authenticated
+  using (bucket_id = 'bookmark-pdfs' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "owner write own pdfs" on storage.objects for insert to authenticated
+  with check (bucket_id = 'bookmark-pdfs' and (storage.foldername(name))[1] = (select auth.uid())::text);
+create policy "owner delete own pdfs" on storage.objects for delete to authenticated
+  using (bucket_id = 'bookmark-pdfs' and (storage.foldername(name))[1] = (select auth.uid())::text);
+-- No client policies on bookmark-assets: the worker writes with service_role.
+
+-- list_orphaned_storage_objects(p_min_age default '1 day', p_limit default 1000)
+--   → (bucket_id, name): objects older than p_min_age that no bookmark's
+--   pdf_path / thumbnail_url (or a youtube row's content_md) references.
+--   security definer, execute: service_role only — used by storage-sweep.
+
+-- Realtime: bookmarks is in the supabase_realtime publication with an
+-- explicit column list (every column except content_md,
+-- translated_content_md, search_vector, url_normalized, attempts and
+-- next_attempt_at), so the PWA gets live row changes over one websocket
+-- instead of polling. Replica identity is a covering unique index, not FULL:
+-- DELETE events must carry user_id for Realtime to evaluate RLS, but FULL
+-- requires the publication's column list to cover every column, so every
+-- DELETE failed with 42P10.
 create unique index bookmarks_replica_identity_idx on bookmarks (id, user_id);
 alter table bookmarks replica identity using index bookmarks_replica_identity_idx;
-
--- Delta sync (20261011120000): before-update trigger bumps updated_at; an
--- insert/delete on bookmark_tags bumps its bookmark's updated_at; an
--- after-delete trigger records a tombstone.
-create table bookmark_deletions (
-  bookmark_id uuid primary key,
-  user_id     uuid not null references auth.users(id) on delete cascade,
-  deleted_at  timestamptz not null default now()
-); -- RLS: owner select only; written by the security-definer trigger
 ```
 
 Notes on the shape:
@@ -185,10 +232,22 @@ Notes on the shape:
   'markdown' : 'original')` rather than written eagerly, so a bookmark that
   was inserted before the user ever opens the reader doesn't need a second
   write just to pick a default.
-- `url_normalized` (lowercase host, strip trailing slash — not stripping
-  `utm_*`/`fbclid` yet) backs a real unique index, so the capture endpoint's
-  duplicate check can rely on a Postgres constraint violation (`23505`)
-  instead of a racy find-then-insert.
+- `url_normalized` (the whole URL lowercased, trailing slashes stripped —
+  not stripping `utm_*`/`fbclid` yet) backs a real unique index, so both
+  insert paths' duplicate check can rely on a Postgres constraint violation
+  (`23505`) instead of a racy find-then-insert. The index is global, not per
+  user — a single-owner assumption.
+- `bookmarks_url_http_only`: saved URLs end up in `href`s ("Open original"),
+  so only http(s) may be stored — a `javascript:`/`data:` URL would run
+  script on the app origin. The app (`isHttpUrl`, `utils/bookmarkType.ts`)
+  and `capture` (`hasAllowedScheme`) check the same thing; the constraint
+  covers every other writer.
+- Tags are per user (`user_id` defaults to `auth.uid()`, unique
+  `(user_id, name)`); the client upserts on `onConflict: "user_id,name"`.
+  Before `20261011171000_audit_hardening.sql` names were global and any
+  authenticated user could read and edit every tag and link.
+- Every policy is written `(select auth.uid())`, so Postgres evaluates it
+  once per statement rather than once per row.
 - `bookmark_tags_tag_idx` exists because the composite primary key
   `(bookmark_id, tag_id)` only serves `bookmark_id`-first lookups, but the
   actual query ("bookmarks with tag X") goes the other direction.
@@ -202,9 +261,17 @@ Notes on the shape:
   explicit `grant` in addition to RLS policies, or they're invisible to the
   Data API regardless of policy.
 
-Migrations: `20260825000001_initial_schema.sql` — a single flattened schema
-(tables, indexes, replica identity, RLS, `get_public_bookmark`, storage
-buckets/policies, Realtime publication). New changes go in new migration files.
+Migrations (`supabase/migrations/`): `20260825000001_initial_schema.sql` — the
+flattened base schema (tables, indexes, replica identity, RLS,
+`get_public_bookmark`, storage buckets/policies, Realtime publication) — then
+`20261011120000_bookmarks_delta_sync` (`updated_at`, tombstones),
+`20261011160000_bookmarks_url_http_only`, `20261011170000_bookmarks_retry`
+(`attempts`, `next_attempt_at`, reset trigger, due index),
+`20261011171000_audit_hardening` (per-user tags, owner-only RLS on
+`(select auth.uid())`, `rate_limits`, bucket MIME lists,
+`list_orphaned_storage_objects`, a commented `cron.schedule` for the sweep)
+and `20261011172000_bookmarks_keyset_index`. New changes go in new migration
+files.
 
 ## 3. Capture paths
 
@@ -212,8 +279,8 @@ Seven ways in, all funneling into the same `bookmarks` table:
 
 | Path | Entry point | Auth | Result |
 |---|---|---|---|
-| Bookmarklet | `bookmarklet/source.js` → `/capture` popup route | Existing PWA Supabase session | `store.add()`, same path as the in-app dialog |
-| PWA share-target (Chrome/Android only) | `/share-target` (manifest `share_target`) → `store.add()` / `store.addNote()` | Existing PWA Supabase session | url (or text that is a bare URL) → `pending`; free text → `note`, `ready` |
+| Bookmarklet | `bookmarklet/source.js` → `/capture` popup route, Save click | Existing PWA Supabase session | `store.add()`, same path as the in-app dialog |
+| PWA share-target (Chrome/Android only) | `/share-target` (manifest `share_target`), Save click → `store.add()` / `store.addNote()` | Existing PWA Supabase session | url (or text that is a bare URL) → `pending`; free text → `note`, `ready` |
 | iOS Shortcut | `POST` to the `capture` edge fn | `CAPTURE_KEY` bearer | url → `pending`; free text → `note`, `ready` |
 | Add dialog — URL mode | `AddBookmarkDialog.vue` | Supabase session (client insert) | `pending` |
 | Add dialog — Snippet mode | `AddBookmarkDialog.vue` → `snippet` edge fn | JWT (session) | `note`, `ready` |
@@ -226,17 +293,20 @@ Seven ways in, all funneling into the same `bookmarks` table:
 ```js
 (() => {
   const params = new URLSearchParams({ url: location.href, title: document.title });
-  window.open('__APP_ORIGIN__/capture?' + params.toString(), 'readlater-capture', 'width=380,height=260');
+  window.open("__APP_ORIGIN__/capture?" + params.toString(), "readlater-capture", "width=380,height=260");
 })();
 ```
-`CaptureView.vue` reads `url`/`title` from the query string, shows them with
-a focused **Save** button (Enter saves), and on that click calls
+`CaptureView.vue` reads `url`/`title` from the query string, refuses anything
+that isn't http(s) (`isHttpUrl`) up front, shows title and URL with a
+focused **Save** button (Enter saves) and Cancel, and on that click calls
 `useBookmarksStore().add()` — the same client-side path the Add dialog uses —
 authenticated with whatever Supabase session is already active in that
 browser. It never saves on load: `/capture?url=…` is an ordinary URL any
 website can open, and an auto-save would let it plant arbitrary URLs in the
-list (which the worker then fetches). Why a popup instead of a direct `fetch()` from the source page: a
-page's CSP (`connect-src`/`script-src`) governs requests *that page's own
+list (which the worker then fetches). After a save the popup shows "Saved"
+and closes itself after 0.8 s (a Close button stays for tabs the browser
+won't let script close). Why a popup instead of a direct `fetch()` from the
+source page: a page's CSP (`connect-src`/`script-src`) governs requests *that page's own
 script* makes, not where it navigates or opens a window to. Wikipedia is the
 concrete case that forced this — its CSP has no `connect-src` override for
 Supabase, so a bookmarklet `fetch()`ing the capture endpoint directly from
@@ -248,13 +318,16 @@ visible popup rather than an inline toast.
 (`app/vite.config.ts` → `VitePWA({ manifest: { share_target } })`); WebKit/
 Safari has never implemented it, so iOS has no equivalent — the bookmarklet,
 or a one-tap iOS Shortcut POSTing to `capture` with the `CAPTURE_KEY` bearer,
-covers that case instead. `ShareTargetView.vue` reads `url`/`text`/`title`
-from the query string and saves through the store under the PWA's own
-session: a `url` (or `text` that `isBareUrl()` accepts) goes to `store.add()`,
+covers that case instead. `ShareTargetView.vue` reads `url`/`text` from the
+query string (the shared `title` is ignored; the worker fills it) and saves
+through the store under the PWA's own session: a `url` (or `text` that
+`isBareUrl()` accepts) goes to `store.add()` — which rejects anything not
+http(s) —
 anything else to `store.addNote()` — again only after a Save click, since the
 manifest's share target is `method: "GET"` and so just as reachable from a
-cross-site link as `/capture`. The `capture` edge function is now only
-reached by non-browser callers (the iOS Shortcut).
+cross-site link as `/capture`. A successful save routes to the list. The
+`capture` edge function is only reached by non-browser callers (the iOS
+Shortcut).
 
 **Snippet paste.** `AddBookmarkDialog.vue` has a URL/Snippet mode switch.
 Snippet mode is a single textarea; on paste it reads both
@@ -264,8 +337,8 @@ insert under the user's own session/RLS — deliberately not layered onto
 `capture`, which authenticates non-browser callers via the static
 `CAPTURE_KEY` and hardcodes the owner id):
 ```ts
-const converted = typeof html === "string" ? new TurndownService().turndown(html).trim() : "";
-const content = converted || (typeof text === "string" ? text.trim() : "");
+const converted = html ? createTurndownService().turndown(html) : ""; // _shared/turndown.ts
+const content = resolveContent(converted, text); // trimmed Markdown, else trimmed plain text
 // insert: { url: null, type: "note", status: "ready", content_md: content, title: truncateTitle(content) }
 ```
 The HTML is paired with the exact text the paste left in the textarea and
@@ -343,7 +416,7 @@ caught and the existing row is looked up by normalized URL.
   dialog): a cheap local check against already-loaded rows runs first; the
   unique index is the source of truth for anything not loaded. The result
   carries `{ duplicate: true, existingId, existingTitle, existingSavedAt }`.
-  `CaptureView`/`ShareTargetView` offer "save again", which calls
+  `CaptureView`/`ShareTargetView` show "Already saved on …" with Continue, which calls
   `store.refresh(id)` — resets the row to `status=pending` so the worker
   re-fetches; id, tags and `is_public` are preserved, so a share link keeps
   working. The Add dialog's "Add anyway" does the same `store.refresh(id)`.
@@ -359,20 +432,41 @@ confirmation (`window.confirm` client-side; `409 confirm_required` unless
 
 ### Capture-path auth model
 
-Three trust levels, kept distinct on purpose:
+Separate trust levels, kept distinct on purpose:
 
 | Actor | Mechanism | Why |
 |---|---|---|
-| iOS Shortcut | `capture` edge fn, static `CAPTURE_KEY` bearer | No browser session to lean on; intentionally weak — personal, single-user, low-value target |
+| iOS Shortcut | `capture` edge fn, static `CAPTURE_KEY` bearer (constant-time compare, `_shared/checkAuth.ts`); the function then writes with the service-role key as `OWNER_USER_ID` | No browser session to lean on; intentionally weak — personal, single-user, low-value target |
 | Bookmarklet popup, share target, Add dialog (all modes), reader actions (edit, translate) | PWA's own Supabase session (JWT) | Browser-facing, already logged in — client inserts and the snippet/file-import/pdf-import/translate functions all run under the user's own RLS rather than the shared capture key |
 | VPS worker | Supabase `service_role` (`SUPABASE_SECRET_KEY`) | Needs unconditional read/write on every row; bypasses RLS by design, never reaches a browser |
 | Public view (`/s/:id`) | Supabase anon key + `get_public_bookmark` RPC | No session at all; scoped to a single exact-id match, not a table policy |
+| `storage-sweep` | Bearer must equal the service-role key (constant-time compare, `verify_jwt = false`) | Meant for a pg_cron job, never the app |
 
 `service_role` leaking means full database read/write/delete; `CAPTURE_KEY`
 leaking means someone can insert junk rows. Different blast radius, kept on
-separate secrets. RLS (`auth.uid() = user_id`) stays on even though there's
-only one user — it costs nothing and bounds a compromised PWA session to
-"your own rows" if the app is ever reachable outside the VPN/LAN.
+separate secrets. RLS (`user_id = (select auth.uid())`) stays on even
+though there's only one user — it costs nothing and bounds a compromised
+PWA session to "your own rows".
+
+**Edge-function plumbing** (`supabase/functions/_shared/`). `http.ts`: every
+function that takes a body reads it through `readJsonBody()` with a cap
+(`MAX_BODY_BYTES`: capture and snippet 1 MB, translate 64 KB, file-import
+10 MB, pdf-import 28 MB — checked against `Content-Length` and again while
+streaming): oversize → 413, empty/malformed/non-object JSON → 400 (only
+`capture`'s `/refresh` treats a missing body as "not forced"). Failures
+go through `serverError()`, which logs the cause and answers a generic
+`"internal error"` 500 — Postgres, Storage and DeepL error text never reaches
+the caller. `rateLimit.ts`: per-user fixed windows enforced in Postgres —
+capture 120/h, translate 20/h, snippet, file-import and pdf-import 30/h each
+(JWT functions call `bump_rate_limit` as the user; `capture` calls
+`bump_rate_limit_for_user` for `OWNER_USER_ID`); over the limit → 429, an
+RPC failure → 500 (never "allowed"). `turndown.ts` (Turndown with the
+worker's linked-image rule), `noteRow.ts`, `file.ts`, `checkAuth.ts`.
+Imports are pinned to exact versions (`jsr:@supabase/supabase-js@2.110.8`,
+`npm:turndown@7.2.4`, `npm:mammoth@1.12.0`, `npm:unpdf@1.8.0`) and locked by
+the committed root `deno.lock`. `capture` also caps fields (URL 8192 chars,
+note text 200 000, title cut at 500) and refuses non-http(s) schemes
+(`hasAllowedScheme`).
 
 ## 4. Worker processing
 
@@ -384,57 +478,99 @@ avoids holding a websocket open just for this.
 // worker/src/index.ts — recursive setTimeout, not setInterval, so cycles
 // never overlap and the delay grows while the queue is empty.
 // 15s when there's work → doubles toward a 60s ceiling on empty cycles.
-// Stale-'processing' recovery runs once every 4 cycles, not every one.
+// Each cycle takes up to 5 rows: status = 'pending' and next_attempt_at
+// null or past. Stale-'processing' recovery (> 5 min → failed) runs once
+// every 4 cycles, not every one.
 
-// per pending row: pending → processing, parse, processing → ready | failed.
-// Every status write is compare-and-set (transition(): .eq("status", from)),
-// so a row re-queued by a refresh mid-parse, or taken by a second worker,
-// makes the later write match nothing instead of overwriting it. Pending
-// rows of a type the worker can't parse (note/pdf) are failed explicitly.
+// per pending row: pending → processing, parse (45 s cap), processing →
+// ready | pending (retry) | failed. Every status write is compare-and-set
+// (transition(): .eq("status", from)), so a row re-queued by a refresh
+// mid-parse, or taken by a second worker, makes the later write match
+// nothing instead of overwriting it. Pending rows of a type the worker can't
+// parse (note/pdf) are failed explicitly. processing → ready also clears
+// translated_content_md / translated_lang: a refresh re-parses the page, and
+// the reader would otherwise keep preferring the old translation.
 ```
 
 **Article pipeline** (`worker/src/parseArticle.ts`) — fetch → Readability →
 Turndown, with a headless-browser fallback for JS-rendered pages:
 ```ts
-const html = await fetchHtml(url);
-let article = extractArticle(html, url); // Readability, requires >= 200 chars of textContent
+article = extractArticle(await fetchHtml(url), url); // Readability, requires >= 200 chars of textContent
+// BlockedUrlError / UnsupportedContentTypeError / ResponseTooLargeError → thrown, no fallback
 
 if (!article && renderHtml) {
-  const rendered = await renderHtml(url); // worker/src/browserRender.ts, Playwright chromium
-  article = extractArticle(rendered, url);
+  article = extractArticle(await renderHtml(url), url); // worker/src/browserRender.ts, Playwright chromium
 }
 ```
 Plain `fetch()` only ever sees server-rendered HTML, so SPA pages whose
 content is assembled client-side (e.g. Perplexity search results) came back
 empty and failed extraction outright. `browserRender.ts` retries with a
-headless Chromium page (`page.goto(url, { waitUntil: "domcontentloaded",
-timeout: 30_000 })`) only when the plain fetch wasn't substantial enough —
+headless Chromium page only when the plain fetch failed (other than the
+three errors above) or wasn't substantial enough. `page.goto` waits for
 `domcontentloaded` rather than `networkidle`, because pages with persistent
-background polling/streaming never reach network-idle and would otherwise
-always time out; a navigation timeout is caught and whatever DOM loaded is
-used rather than failing the bookmark outright.
+background polling/streaming never reach network-idle; a navigation timeout
+is caught and whatever DOM loaded is used (unless it's under 50 chars). One
+render has a 25 s total deadline that every step (launch ≤ 15 s, context,
+navigation, `page.content()`, context close) draws from, so no render
+outlives it and races the next job for the shared browser. A browser that
+crashes or disconnects is dropped and relaunched on the next render.
+
+**Fetch limits** (`worker/src/http.ts`). The plain fetch has one 15 s budget
+for the whole redirect chain (≤ 5 hops) and body, sends a browser-like
+`USER_AGENT`, and reads bodies through `readBodyCapped()` — 5 MB for HTML and
+thumbnails, checked against `Content-Length` and while streaming. A declared
+non-HTML `Content-Type` is refused before the body is read (a missing one is
+let through), and the rendered DOM is refused past 5 MB too.
 
 **SSRF guard** (`worker/src/urlGuard.ts`). Only http(s) URLs whose host
 resolves exclusively to public addresses are fetched: loopback, RFC 1918,
-CGNAT, link-local (incl. the `169.254.169.254` metadata service), multicast,
-reserved and IPv4-mapped/NAT64 equivalents are refused. The plain fetch
-follows redirects by hand and checks every hop; a refused URL fails the
-bookmark instead of falling back to the browser, and the headless browser
-routes every request (navigation, redirects, subresources) through the same
-check. The plain fetch still has a DNS-rebinding window between the check and
-the connection. The browser fallback does not: all Chromium traffic goes
-through a local egress proxy (`worker/src/egressProxy.ts`) that resolves each
-host once, refuses private addresses and connects to exactly the vetted IP;
-service workers, downloads and WebSockets are blocked, and Chromium gets a
-minimal env (no Supabase key). Responses are capped at 5 MB and non-HTML is
-refused without the browser fallback.
+CGNAT, link-local (incl. the `169.254.169.254` metadata service),
+documentation/benchmark, multicast and reserved IPv4 ranges; and for IPv6 the
+IPv4-mapped / SIIT / NAT64 (`64:ff9b::/96`, `64:ff9b:1::/48`) / 6to4
+(`2002::/16`) forms, unique-local `fc00::/7`, link-local `fe80::/10`, and the
+rest of the block list. The plain fetch follows redirects by hand and checks
+every hop; a refused URL fails the bookmark instead of falling back to the
+browser. It still has a DNS-rebinding window between the check and the
+connection (accepted: it runs no page code). The browser fallback does not:
+all Chromium traffic goes through a local egress proxy
+(`worker/src/egressProxy.ts`, `--proxy-server`, loopback not bypassed) that
+resolves each host once, refuses private addresses and connects to exactly
+the vetted IP, for CONNECT tunnels and plain http alike; a Playwright route
+handler (`routeIfPublic`) checks every request as well. Contexts block
+service workers and downloads, WebSockets are closed, WebRTC may not send
+non-proxied UDP, QUIC is off, and Chromium is launched with a minimal env
+(`PATH`, `HOME` only — never the Supabase key). It runs `--no-sandbox`: under
+Docker's default seccomp profile Chromium's sandbox fails to start even as
+non-root (see `worker/Dockerfile`).
 
-**Retries.** Transient failures (open breaker, 429, 5xx, network, timeout)
-return the row to `pending` with `attempts + 1` and `next_attempt_at`
-backoff (1m / 5m / 30m); the 4th failure is final. A user re-queue resets
-both (trigger). SIGTERM drains the in-flight bookmark for up to 20 s, then
-returns it to `pending`. Logs are single-line JSON; a heartbeat file backs
-the Docker HEALTHCHECK.
+**Thumbnail guard** (`worker/src/storage.ts`). The oEmbed thumbnail URL gets
+the same `assertPublicUrl` check, redirects are refused (`redirect: "error"`),
+the body is capped at 5 MB, and only raster types (jpeg, png, webp, gif,
+avif — never SVG) are stored; anything else fails the bookmark.
+
+**Retries and breakers.** Transient failures — an open circuit breaker, 429,
+5xx, timeouts, connection errors (`errors.ts` `isTransientError`) — return
+the row to `pending` with `attempts + 1` and `next_attempt_at` backoff
+(1 m / 5 m / 30 m); the 4th failure is final. Other errors (4xx, blocked URL,
+non-HTML, too large, unparseable) fail at once. A user re-queue resets both
+columns (`bookmarks_reset_retry` trigger). Circuit breakers (3 failures):
+`supabase-db` (60 s reset; an open breaker skips the poll cycle),
+`playwright-browser` and `youtube-oembed` (30 s). They count only "the
+dependency is unhealthy" errors (`isBreakerFailure`: 5xx, timeouts, network
+errors, a dead browser) — a 4xx or a page that fails to load doesn't trip
+them.
+
+**Process.** Exits at start if `SUPABASE_URL` or `SUPABASE_SECRET_KEY` is
+missing. Every Supabase request has a 15 s timeout, so a hung connection
+can't stall the loop. SIGTERM/SIGINT stop picking up rows and give the
+in-flight bookmark 20 s to finish; if it doesn't, it goes back to `pending`
+(with `next_attempt_at` set so the reset trigger can tell it from a user
+refresh) without spending an attempt, then the browser closes. Logs are
+single-line JSON (`logger.ts`). The loop touches `/tmp/worker-heartbeat`
+every cycle and before each bookmark; the Dockerfile's HEALTHCHECK reports
+unhealthy when it is over 3 minutes old. The image pins
+`oven/bun:1.3.14-slim`, runs as the image's non-root `bun` user under
+`tini`.
 
 A duplicate leading heading
 that repeats the article title is stripped from the converted markdown
@@ -485,12 +621,24 @@ the click-to-play embed.
   60-second signed URLs generated on demand (`store.getPdfSignedUrl()`),
   never a bare public URL. Uploaded Markdown/Word files are read, converted,
   and discarded — they never touch Storage at all.
+- Bucket MIME allow-lists: `bookmark-pdfs` takes only `application/pdf`
+  (20 MB file limit); `bookmark-assets` only jpeg/png/webp/gif/avif.
 - Deleting a bookmark (`store.remove()`), once the row delete succeeded,
-  fire-and-forgets removal of its `pdf_path` object and of a thumbnail whose
-  URL lies under the `bookmark-assets` public prefix (path derived via
-  `getPublicUrl("")`). Best-effort — not awaited, failures ignored; rows not
-  loaded on the device, failed removals, and a missing client delete policy
-  on `bookmark-assets` are left to the server-side orphan sweep.
+  fire-and-forgets removal of its `pdf_path` object (allowed by the owner
+  delete policy) and of a thumbnail whose URL lies under the
+  `bookmark-assets` public prefix (path derived via `getPublicUrl("")`).
+  The thumbnail removal is always denied — `bookmark-assets` has no client
+  delete policy — so those, failed removals and rows that weren't loaded on
+  the device are left to the orphan sweep.
+- **Orphan sweep** (`supabase/functions/storage-sweep`). Postgres decides
+  what is orphaned (`list_orphaned_storage_objects()`: objects older than a
+  day that no `pdf_path`, `thumbnail_url` or YouTube `content_md`
+  references, at most 1000 per call); the function removes them through the
+  Storage API in batches of 500 (Supabase refuses direct deletes from
+  `storage.objects`). `?dry_run=1` only counts. It is meant to run daily
+  from pg_cron + pg_net; the `cron.schedule` snippet is commented at the end
+  of `20261011171000_audit_hardening.sql` (needs both extensions and the
+  service-role key in Vault as `service_role_key`).
 
 ## 6. Frontend — Vue 3 PWA
 
@@ -507,7 +655,20 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   pulls the body via `fetchOne()` (`DETAIL_SELECT = "*, tags(id, name, color)"`)
   on open, and again on the Realtime pending→ready transition. Tag
   filtering and the tag bar are derived client-side from the loaded rows
-  (match-all); no query on toggle.
+  (match-all); no query on toggle. Paging: an IntersectionObserver sentinel
+  600 px below the viewport (`v-if="store.hasMore"`) calls `loadMore()` and
+  keeps paging while it stays in range — a sparse tab (Archived, a tag
+  filter) can add no visible rows, so the observer alone would stall — plus a
+  **Load more** button for retries. Coming back to the app
+  (`visibilitychange` → visible) re-runs `fetch()` at most every 30 s:
+  iOS suspends a backgrounded PWA and its Realtime socket with it.
+- **Writes** — every store write returns `WriteResult { error }` and changes
+  local state only after the server accepted it (a failed write would
+  otherwise leave this device showing a state delta sync never corrects,
+  since `updated_at` didn't move). `remove()` is the exception: optimistic,
+  with the row put back where it was if the delete fails. `add()` /
+  `addNote()` / snippet / file imports put the returned row in place by id,
+  so a Realtime INSERT that arrived first isn't listed twice.
 - **Delta sync** — the unfiltered list is persisted to IndexedDB with a sync
   state (`watermark` = newest `updated_at`/`deleted_at` it reflects, plus the
   `(created_at, id)` keyset `cursor`/`hasMore`), written in one transaction
@@ -526,16 +687,29 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   owner-read RLS, kept indefinitely).
 - **Live updates** — `store.subscribeToChanges()` opens one Realtime
   `postgres_changes` channel (RLS-scoped, no body columns in the payload).
-  INSERT prepends, UPDATE merges (keeping a body the reader already loaded),
-  DELETE drops. Replaces the former list/reader `setInterval` polls.
+  INSERT prepends (unless already listed), UPDATE merges into a loaded row
+  (keeping its body and tags) but **keeps the local `updated_at`** — the
+  merged row may still carry stale tags or body, and the old stamp makes the
+  next delta sync replace it with the full projection. DELETE drops. An
+  UPDATE that only moved `progress` (the reader's saves) isn't persisted to
+  IndexedDB. Replaces the former list/reader `setInterval` polls.
 - **Reader** (`ReaderView.vue`, `ArticleContent.vue`) — markdown rendered via
-  `markdown-it`, sanitized through `DOMPurify` before `v-html`. Header
+  `markdown-it` (`html: true`), sanitized by a private `DOMPurify` instance
+  before `v-html`. Post-processing happens inside DOMPurify's
+  `afterSanitizeAttributes` hook, never by re-parsing sanitized HTML
+  (mutation XSS): external links get `target="_blank"` +
+  `rel="noopener noreferrer"`, images `loading="lazy"` /
+  `decoding="async"`. `FORBID_TAGS`: `form`, `style`, `input`, `button`,
+  `textarea`, `select`. Header
   (`ReaderHeader.vue`) holds back/domain/actions; all row-level actions
   (open original, mark read/unread, share, archive, delete, font size, and
   — PDF only — trash original) are consolidated into a single overflow menu
-  (`ReaderMenu.vue`) rather than a row of separate icon buttons. Delete and
-  trash-original both ask for confirmation (`window.confirm`); share opens
-  `ShareDialog.vue`. Tagging is
+  (`ReaderMenu.vue`, `role="menu"`: opening focuses the first item,
+  Up/Down/Home/End move between items, Escape returns focus to the trigger)
+  rather than a row of separate icon buttons. Delete and trash-original both
+  ask for confirmation (`window.confirm`); share opens `ShareDialog.vue`. A
+  failed write shows an error banner above the article (`action-error`).
+  Tagging is
   `TagInput.vue`, create-on-type against the `tags` table via upsert
   (`{ name, user_id }`, `onConflict: "user_id,name"` — tags are per user;
   import upserts the same way).
@@ -550,7 +724,10 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   iframe (not in the DOM before the tap). Online-only by nature.
 - **Editing** — "Edit" in `ReaderMenu.vue` swaps the rendered view for
   `md-editor-v3` (lazy-loaded via `defineAsyncComponent` to keep it out of the
-  base bundle), plus a plain title input. Toolbar trimmed to basic formatting;
+  base bundle; its chunks are emitted under `assets/editor/`, see *Offline*),
+  plus a plain title input. Runs with `no-prettier` / `no-highlight`, which
+  would otherwise inject scripts from unpkg.com that the CSP blocks. Toolbar
+  trimmed to basic formatting;
   preview sanitized through the app's `DOMPurify` (the library does not escape
   raw HTML by default); theme bound to the theme store; single-pane
   edit/preview toggle below 640px. Save recomputes `word_count`/`reading_time`
@@ -559,10 +736,17 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   `translate` edge function (DeepL, `DEEPL_API_KEY`), which stores
   `translated_content_md`/`translated_lang` on the row. The request carries
   only `bookmark_id` and `target_lang`; the function loads the article text
-  server-side. A cached translation is
-  shown by default with a translated/original toggle. Long articles are split
-  at paragraph boundaries into ≤60 KB requests (DeepL caps a request at
-  128 KiB) and reassembled. Bookmarks with a URL also offer "Translate page",
+  server-side under the caller's RLS — so a caller only spends DeepL quota on
+  their own content — refusing over 200 000 chars (413). DeepL errors are
+  mapped: its 429 → 429, 456 (quota) → 503, timeout (30 s per request) → 504,
+  anything else → 502. A cached translation is shown by default with a
+  translated/original toggle. Long articles are sent as ≤60 000-byte chunks
+  (DeepL caps a request at 128 KiB), split at paragraph boundaries; a
+  paragraph that is still too long is cut at the last line break, else
+  sentence end, else whitespace, else hard — each chunk carries the
+  separator it was cut at as its `glue`, so the translation is reassembled
+  with the original paragraph/line/space structure even if DeepL trims
+  whitespace. Bookmarks with a URL also offer "Translate page",
   a link to Google Translate's page proxy for the live page. `ReaderView` keeps
   reading / translating / editing as one `ContentMode`, so a second Translate
   is ignored while one is in flight and a late result only lands on the
@@ -575,7 +759,8 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   missing optional fields, malformed rows reported as skipped), dedupes
   against existing normalized URLs and is batched: one existing-URL select,
   one bulk bookmark insert, one bulk tag upsert, one bulk `bookmark_tags`
-  upsert.
+  upsert. Export and the existing-URL select page with `.range()` in
+  1000-row steps (PostgREST's `max_rows`). **Sign out** lives here too (§7).
 - **Sharing** (`ShareDialog.vue`) — toggle bound to `bookmark.is_public`
   (`store.setPublic()`), a read-only `/s/:id` link with copy button and
   `navigator.share()` where available. First-time enabling a share gets a
@@ -591,8 +776,11 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
 - **Search** — `.textSearch('search_vector', query, { type: 'websearch' })`,
   run on submit (Enter) / clear only, not per keystroke. An empty query is
   skipped client-side (an empty `websearch_to_tsquery` matches nothing) and
-  falls back to the normal `order('created_at')` list query. A search loads
-  its whole result set unpaged.
+  falls back to the normal list query. A search loads its whole result set
+  unpaged.
+- **Dialogs and labels** — `shared/ui/Dialog.vue` is a native `<dialog>`
+  opened with `showModal()` (page inert behind it, Escape closes, focus goes
+  back to the opener). The search and tag inputs carry `aria-label`s.
 - **Fonts** — self-hosted woff2 via `@fontsource` (not a CDN). Literata
   for article text, Space Grotesk for UI chrome, IBM Plex Mono for labels and
   metadata (domain, reading time, byline, tabs, buttons).
@@ -606,13 +794,17 @@ theme, preflight and utilities layers; a `dark` custom variant keyed on
 
 - **Design language: Braun / Dieter Rams**, shared with kairos-v2,
   drive_read and forth-circle-ims (spec: `docs/redesign/README.md`). Tokens
-  are the kairos-v2 sheet verbatim: `recessed` (wells, inputs, code) /
+  are the kairos-v2 sheet, except `ink-muted` / `ink-faint`, darkened (light)
+  and lightened (dark) to clear WCAG AA 4.5:1 on every surface:
+  `recessed` (wells, inputs, code) /
   `canvas` (the enclosure) / `raised` (cards, dialogs, the reading page)
   surfaces, `line` / `line-strong` hairlines, `ink` / `ink-muted` /
   `ink-faint` / `ink-inverse`, one signal-red `accent` (+ `accent-hover`,
   `accent-wash`, `accent-wash-ink`, `accent-ink`; `danger` is the same red),
   `scrim`, `focus` (ink), `drop-target`. Fonts: `font-sans` (Space Grotesk),
   `font-serif` (Literata), `font-mono` (IBM Plex Mono).
+- **Phones:** below `sm`, list titles and metadata, tabs and tag pills use
+  the next text step up (e.g. `text-sm sm:text-xs`).
 - **Scale:** root `font-size: 62.5%` (1rem = 10px); `--spacing: 0.1rem`, so
   one spacing unit is 1px (`p-16` = 16px); a replaced minor-third text scale
   (`text-2xs` 10px … `text-xl` 26px) that sets only font-size. Radius tokens
@@ -648,8 +840,10 @@ preference (stored under `localStorage.theme`; nothing stored means `system`),
 resolved to a concrete `theme` that is written to
 `document.documentElement.dataset.theme`. While on `system` it follows OS
 changes live via `matchMedia('(prefers-color-scheme: dark)')`. `ThemeToggle`
-cycles light → dark → system. An inline script in `index.html` applies the
-same resolution before the Vue bundle mounts, so there's no flash-of-wrong-theme.
+cycles light → dark → system. `public/theme-init.js`, a classic blocking
+`<script src>` in `index.html` (a file, not inline, so the CSP keeps
+`script-src 'self'`), applies the same resolution before the Vue bundle
+mounts, so there's no flash-of-wrong-theme.
 
 ### Offline / PWA
 
@@ -665,9 +859,9 @@ DB):
   body and translation. Every image referenced in the markdown (plus the
   thumbnail) is fetched and stored as a blob — mostly hot-linked source
   images; a CORS-blocked or non-OK download is recorded in the record's
-`missingImages` and surfaced — the row's offline icon becomes a "photo off"
-icon with the count in its title, and the reader notes it while offline — and swapped to `blob:` URLs
-  at render time when offline (one object URL per cached image, reused
+  `missingImages` and surfaced — the row's offline icon becomes a "photo
+  off" icon with the count in its title, and the reader notes it while
+  offline. Images are swapped to `blob:` URLs at render time when offline (one object URL per cached image, reused
   across offline loads and revoked when the article is re-cached or
   evicted). An already-cached id is not re-cached. The
   `offlineCache` store tracks each id as `saving` or `saved`: a second save
@@ -679,7 +873,8 @@ icon with the count in its title, and the reader notes it while offline — and 
   from search results or the offline snapshot, and not for a Realtime UPDATE
   that only moved `progress` (the reader's ~2 s saves) — and read as a
   fallback when `fetch()` fails offline. An online cold start reads only
-  this store, never the articles.
+  this store, never the articles, so snapshot rows stay body-less (no
+  offline `blob:` bodies in the list).
 - Never loading blobs just to list: `articles` has `cachedAt` and
   `missingImages` indexes (DB v3), and `listCachedArticles()` walks their key
   cursors, which yield (index key, id) without reading records.
@@ -689,25 +884,36 @@ icon with the count in its title, and the reader notes it while offline — and 
 
 `cacheBookmark(id)` (wrapped by the `offlineCache` Pinia store) has two
 triggers: automatically after `ReaderView` successfully loads an article, or
-manually via a download icon on unread rows in `BookmarkRow.vue` (tapping
-again evicts it). `archive(id)` and `remove(id)` both evict the `articles`
+manually via the offline toggle in `BookmarkRow.vue` — offered on unread
+rows to save, and on any row that already has a copy (read or archived
+included) to remove it. `archive(id)` and `remove(id)` both evict the `articles`
 cache entry for that id. On the session's first `offlineCache.init()` the
 store also asks for persistent storage (`navigator.storage.persist()`, if
 present) and evicts: copies of unread items are always kept; a read,
 archived or unlisted item's copy goes once it is more than 30 days old, or —
 oldest first — while more than 200 copies are cached (read state from the
-`bookmarksList` metadata, no article loaded). A `vite:preloadError` listener (`main.ts`) reloads
-the page when a lazy chunk from a previous deploy is gone. Manifest:
+`bookmarksList` metadata, no article loaded). A `vite:preloadError` listener
+(`main.ts`) reloads the page when a lazy chunk from a previous deploy is
+gone.
+
+Service worker (Workbox `generateSW`, `app/vite.config.ts`): the precache
+holds what the list and reader need offline (`**/*.{js,css,html,woff2,svg,png}`)
+minus `assets/editor/**` (md-editor-v3 / CodeMirror chunks, emitted there by
+`chunkFileNames`) and the Greek, Vietnamese and extended-Cyrillic font
+subsets; those are cached on first use by a `CacheFirst` runtime route
+(`lazy-assets`, 250 entries / 90 days). `navigateFallback: index.html`. Manifest:
 `display: standalone`, icons in
 `public/icons/`, `apple-touch-icon` + `apple-mobile-web-app-capable` meta
 tags for iOS "Add to Home Screen".
 
 ## 7. Authentication
 
-Single-user app — no signup flow. The one account is created directly in the
-Supabase dashboard; the PWA just needs a login form
-(`supabase.auth.signInWithPassword`). `supabase-js` persists the session and
-silently refreshes the token, so once logged in on a device it stays logged
+Single-user app — no signup flow in the UI. The one account is created
+directly in the Supabase dashboard, and signups must be disabled there
+(`supabase/config.toml` keeps `enable_signup = true` for local dev only,
+`minimum_password_length = 12`; production is still open, see `plan.md`
+§8); the PWA just needs a login form (`supabase.auth.signInWithPassword`).
+`supabase-js` persists the session and silently refreshes the token, so once logged in on a device it stays logged
 in — correct for something installed to a homescreen. The last user is also
 cached in localStorage so the app opens offline; that cached login ends when,
 online, `getSession()` finds no session (or a refresh the server rejected,
@@ -716,7 +922,8 @@ router watcher on `isAuthenticated` then sends any protected page to
 `/login`. **Sign out** (Settings) unsubscribes Realtime, resets the list
 and offline-cache stores, clears every IndexedDB store
 (`offlineDb.clearAll()`, revoking image blob URLs) and only then calls
-`supabase.auth.signOut()`. See §3 for the
+`supabase.auth.signOut()`. Edge case: signing out offline with an expired
+token may leave supabase-js's stored session behind. See §3 for the
 capture-path auth model (bookmarklet/share-target/worker/public-view each
 use a different mechanism, on purpose).
 
@@ -724,40 +931,80 @@ use a different mechanism, on purpose).
 
 Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
 `readlater.mlnkv.net`:
-- `readlater-app` — `app/Dockerfile`, port 80, `/*`, Supabase URL and
-  publishable key baked in as build args.
-- `readlater-worker` — `worker/Dockerfile` (non-root, pinned base image,
-  heartbeat HEALTHCHECK; the server compose sets `stop_grace_period: 30s`
-  and `mem_limit`), no public port, only needs
-  outbound access to Supabase (+ YouTube's oEmbed endpoint, + whatever the
-  headless-browser fallback needs to reach).
+- `readlater-app` — `app/Dockerfile` (Bun build stage, `nginx:1.27-alpine`
+  runtime), port 80, `/*`, Supabase URL and publishable key baked in as
+  build args.
+- `readlater-worker` — `worker/Dockerfile` (pinned `oven/bun:1.3.14-slim`,
+  non-root `bun` user, `tini`, heartbeat HEALTHCHECK; §4). The server-side
+  compose (not in this repo) sets `stop_grace_period: 30s`, enough for the
+  20 s drain, and `mem_limit: 1g`. No public port; it needs outbound access
+  to Supabase, YouTube's oEmbed endpoint and whatever the headless-browser
+  fallback has to reach. Env: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`.
+- Edge functions — Supabase-hosted; secrets `CAPTURE_KEY`, `OWNER_USER_ID`
+  (capture) and `DEEPL_API_KEY` (translate). `verify_jwt` is on for snippet,
+  translate, file-import and pdf-import, off for capture and storage-sweep,
+  which check their own bearer (`supabase/config.toml`).
 - Bookmarklet — nothing to deploy. `bookmarklet/build.ts` bakes the app's
   origin into `bookmarklet/source.js` once; the built snippet is dragged to
   the bookmarks bar. No secret inside it, nothing to rotate when the PWA
   changes.
 
-Edge functions are rate-limited per user (`rate_limits` table,
-`bump_rate_limit`): capture 120/h, translate 20/h, snippet/file-import/
-pdf-import 30/h each; request bodies are size-capped and errors are generic.
-`storage-sweep` (service-role only, `?dry_run=1`) deletes Storage objects no
-bookmark references; the app also removes a deleted bookmark's PDF itself.
-nginx sends a CSP and baseline security headers (`app/nginx.conf`; the
-Supabase origin is hardcoded there). CI: `.github/workflows/ci.yml`.
+**HTTP headers** (`app/nginx.conf`, one server-level `add_header` block so no
+location drops them): a Content-Security-Policy — `default-src 'self'`,
+`script-src 'self'`, `style-src 'self'`, `style-src-elem 'self'
+'unsafe-inline'` (CodeMirror), `img-src`/`media-src` `https: data:/blob:`,
+`connect-src 'self' https:` plus the Supabase origin and its `wss:`,
+`frame-src` YouTube-nocookie and the Supabase origin (signed PDF URLs),
+`object-src 'none'`, `frame-ancestors 'none'`, `base-uri`/`form-action
+'self'` — plus `Referrer-Policy: strict-origin-when-cross-origin`,
+`X-Content-Type-Options: nosniff` and HSTS. The Supabase project origin is
+hardcoded there; keep it in step with the `VITE_SUPABASE_URL` build arg.
+Cache policy: `/assets/` immutable for a year; `index.html`, `sw.js` and
+`theme-init.js` `no-cache`.
 
-## 9. Known trade-offs
+**Deploy order:** backend first — `sb db push --linked` (migrations), then
+`sb functions deploy --project-ref egkakmlkerlmsigoegoe` — then the app and
+worker images. The app depends on the new schema and functions (e.g. it
+sends `translate` only a `bookmark_id`), not the other way round. (`sb` is
+the per-project Supabase CLI wrapper; `supabase.id` names the profile.)
+
+## 9. Development & testing
+
+| Part | Typecheck | Lint | Format | Tests |
+|---|---|---|---|---|
+| `app/` | `bun run typecheck` (`vue-tsc`) | `bun run lint` (oxlint) | `bun run format[:check]` (oxfmt) | `bun run test` (Vitest); `bun run test:e2e` (Playwright) |
+| `worker/` | `bun run typecheck` (`tsc`) | `bun run lint` | `bun run format[:check]` | `bun run test` (`bun test`) |
+| `bookmarklet/` | — | — | `bun run format[:check]` | `bun test` |
+| `supabase/functions/` | `deno check --frozen --node-modules-dir=none supabase/functions/` | — | — | `deno test --frozen --allow-env --node-modules-dir=none supabase/functions/` |
+
+Run the Deno commands from the repo root: `--frozen` fails on an import not
+pinned in the committed `deno.lock`, `--node-modules-dir=none` stops the root
+`package.json` from making Deno want a `node_modules`, and `--allow-env` is
+for mammoth, which reads env vars at import time. `knip --dependencies`
+(`bun run unused-deps`) checks for unused dependencies in each Bun package.
+
+- **Git hooks** (`lefthook.yml`, installed by the root `prepare` script):
+  pre-commit runs lint, format check, typecheck and unused-deps for the
+  touched packages; pre-push runs the app build. Markdown isn't formatted.
+- **CI** (`.github/workflows/ci.yml`, every push and PR): app and worker —
+  `bun install --frozen-lockfile`, typecheck, lint, test; functions —
+  `deno check` and `deno test` as above. Formatting, the bookmarklet tests and
+  e2e run only locally.
+- **Deploy order** — §8.
+
+## 10. Known trade-offs
 
 - **Paging vs. derived state.** `bookmarks.fetch()` loads the first page (50
-  rows, newest first); an IntersectionObserver sentinel drives
-  `store.loadMore()`, which pages older rows on a `(created_at, id)` keyset
-  (`created_at < X or (created_at = X and id < Y)`, ordered `created_at desc,
-  id desc`; index `(user_id, created_at desc, id desc)`) — `created_at` alone
-  skipped rows when an import stamped a batch with one instant. A persisted
-  cursor from before that (a bare `created_at`) is read back as that instant
-  with the max uuid, so the next page re-covers it. A search loads its whole (bounded) result set unpaged. The unread
-  badge, tag bar and tag filter derive from the loaded set, so they reflect
-  only the pages loaded so far. The load-more sentinel is `v-if`'d on
-  `visibleBookmarks.length > 0` so an empty Archived tab doesn't auto-page the
-  whole library.
+  rows, newest first); `store.loadMore()` pages older rows on a
+  `(created_at, id)` keyset (`created_at < X or (created_at = X and id < Y)`,
+  ordered `created_at desc, id desc`; index `(user_id, created_at desc, id
+  desc)`) — `created_at` alone skipped rows when an import stamped a batch
+  with one instant. A persisted cursor from before that (a bare
+  `created_at`) is read back as that instant with the max uuid, so the next
+  page re-covers it. A search loads its whole (bounded) result set unpaged.
+  The unread badge, tag bar and tag filter derive from the loaded set, so
+  they reflect only the pages loaded so far; a sparse tab keeps paging until
+  it fills the viewport or the list runs out.
 - **Realtime INSERTs are dropped while a search is active** — a new row may
   not match; re-running the search shows it. UPDATE/DELETE still apply.
 - **List session.** The store tags what `bookmarks` holds (`recent` window
@@ -767,6 +1014,23 @@ Supabase origin is hardcoded there). CI: `.github/workflows/ci.yml`.
 - **Import bulk-insert failure** reports every row as skipped rather than
   falling back to per-row inserts (client-side dedup already removes the
   common unique-URL collisions).
+- **Worker plain fetch: DNS rebinding.** The SSRF check and `fetch()` resolve
+  the host separately; only the browser fallback is pinned to the vetted IP
+  (§4). Accepted: the plain fetch runs no page code.
+- **Chromium `--no-sandbox`** — the sandbox fails under Docker's default
+  seccomp profile; enabling it needs a custom profile. Mitigated by the
+  non-root user, the egress proxy and the minimal browser env. The worker
+  process itself still holds the service-role key.
+- **CSP `connect-src https:`** — the offline cache `fetch()`es article images
+  from their own hosts, so any https origin is allowed.
+- **CSP `style-src-elem 'unsafe-inline'`** — CodeMirror injects runtime
+  `<style>` elements; article HTML can't add one (DOMPurify forbids `style`).
+- **Thumbnail delete is denied from the client** — no client delete policy on
+  `bookmark-assets`; the orphan sweep removes them (once scheduled).
+- **Offline sign-out** with an expired token may leave supabase-js's stored
+  session behind (local data is cleared regardless).
+- **Rate limits are fixed windows** (`rate_limits.window_start`), so up to
+  twice the limit can pass around a window boundary.
 
 Open work — bugs, hardening, follow-ups and deferred features — lives in
 [`plan.md`](plan.md).
