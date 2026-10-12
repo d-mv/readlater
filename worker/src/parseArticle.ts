@@ -102,8 +102,10 @@ export function createTurndownService(): TurndownService {
   turndown.addRule("cleanLinkedImagesAndBlocks", {
     filter: (node) => {
       if (node.nodeName !== "A") return false;
+      // Turndown's DOM (domino) answers a querySelector miss with undefined,
+      // not null, so compare loosely.
       return (
-        node.querySelector("img") !== null ||
+        node.querySelector("img") != null ||
         Array.from(node.children).some((child) =>
           ["FIGURE", "DIV", "P", "SECTION"].includes(child.nodeName),
         )

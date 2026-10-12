@@ -118,6 +118,81 @@ describe("parseArticle", () => {
     expect(result.content_md).not.toContain("\n]");
   });
 
+  test("turns a link wrapping block elements into a plain markdown link, keeping its title", async () => {
+    const html = `
+<!doctype html>
+<html>
+<head><title>Article with a linked card</title></head>
+<body>
+  <article>
+    <h1>Article with a linked card</h1>
+    <p>This is a paragraph before the card that adds enough character count to pass the minimum extracted length check of 200 characters in Readability. Adding more descriptive words here to ensure it reaches two hundred characters easily.</p>
+    <a href="https://example.com/next" title="Next part"><div><p>Read the next part</p><p>of the series</p></div></a>
+    <p>This is a paragraph after the card that adds further content to the article to make sure everything parses nicely.</p>
+  </article>
+</body>
+</html>
+`;
+    const result = await parseArticle("https://example.com/card", async () => html);
+
+    expect(result.content_md).toContain(
+      '[Read the next part\nof the series](https://example.com/next "Next part")',
+    );
+  });
+
+  test("keeps the text of an anchor without an href instead of an empty link", async () => {
+    const html = FIXTURE_HTML.replace(
+      '<p class="byline">',
+      '<p>See <a name="ref">the reference</a> below.</p><p class="byline">',
+    );
+    const result = await parseArticle("https://example.com/anchor", async () => html);
+
+    expect(result.content_md).toContain("See the reference below.");
+    expect(result.content_md).not.toContain("]()");
+  });
+
+  test("unwraps an image that only links to its own file", async () => {
+    const html = `
+<!doctype html>
+<html>
+<head><title>Article with a self-linked image</title></head>
+<body>
+  <article>
+    <h1>Article with a self-linked image</h1>
+    <p>This is a paragraph before the image that adds enough character count to pass the minimum extracted length check of 200 characters in Readability. Adding more descriptive words here to ensure it reaches two hundred characters easily.</p>
+    <p><a href="https://example.com/photo.jpg" title="Full size"><img src="https://example.com/photo.jpg" alt=""></a></p>
+    <p>This is a paragraph after the image that adds further content to the article to make sure everything parses nicely.</p>
+  </article>
+</body>
+</html>
+`;
+    const result = await parseArticle("https://example.com/self-linked", async () => html);
+
+    expect(result.content_md).toContain('![](https://example.com/photo.jpg "Full size")');
+    expect(result.content_md).not.toContain("[![");
+  });
+
+  test("leaves ordinary text links to Turndown, which escapes their destination and title", async () => {
+    const html = `
+<!doctype html>
+<html>
+<head><title>Article with a tricky link</title></head>
+<body>
+  <article>
+    <h1>Article with a tricky link</h1>
+    <p>This is a paragraph that adds enough character count to pass the minimum extracted length check of 200 characters in Readability, with <a href="https://example.com/a)b" title='Say "hi"'>a tricky link</a> in the middle of it. More words follow to be safe.</p>
+    <p>This is a paragraph after the link that adds further content to the article to make sure everything parses nicely.</p>
+  </article>
+</body>
+</html>
+`;
+    const result = await parseArticle("https://example.com/tricky", async () => html);
+
+    expect(result.content_md).toContain(
+      '[a tricky link](https://example.com/a\\)b "Say \\"hi\\"")',
+    );
+  });
+
   test("falls back to renderHtml when fetchHtml throws (e.g. 403 Forbidden)", async () => {
     const result = await parseArticle(
       "https://example.com/blocked",
@@ -345,5 +420,46 @@ describe("createFetchHtml", () => {
     await expect(
       createFetchHtml({ fetchImpl, lookup: publicDns, maxRedirects: 3 })("https://example.com/"),
     ).rejects.toThrow(/redirects/);
+  });
+
+  describe("discards an unused body even when cancelling it fails", () => {
+    /** A body whose cancel() rejects, like a connection that already broke. */
+    const body = () =>
+      new ReadableStream<Uint8Array>({
+        cancel() {
+          throw new Error("cancel failed");
+        },
+      });
+
+    test("on a redirect", async () => {
+      const fetchImpl = (async (url: string) =>
+        url.endsWith("/a")
+          ? new Response(body(), { status: 302, headers: { location: "/b" } })
+          : new Response("<html>ok</html>")) as unknown as typeof fetch;
+
+      expect(await createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/a")).toBe(
+        "<html>ok</html>",
+      );
+    });
+
+    test("on a non-2xx response", async () => {
+      const fetchImpl = (async () =>
+        new Response(body(), { status: 500 })) as unknown as typeof fetch;
+
+      await expect(
+        createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/"),
+      ).rejects.toBeInstanceOf(HttpStatusError);
+    });
+
+    test("on a non-HTML response", async () => {
+      const fetchImpl = (async () =>
+        new Response(body(), {
+          headers: { "content-type": "image/png" },
+        })) as unknown as typeof fetch;
+
+      await expect(
+        createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/"),
+      ).rejects.toBeInstanceOf(UnsupportedContentTypeError);
+    });
   });
 });
