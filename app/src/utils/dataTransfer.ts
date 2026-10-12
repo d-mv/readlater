@@ -234,12 +234,13 @@ export function parseExportPayload(jsonText: string): ParsedImport {
     try {
       bookmarks.push(parseExportBookmark(raw));
     } catch (err) {
-      if (!(err instanceof InvalidRow)) throw err;
+      // parseExportBookmark only ever throws InvalidRow.
+      const { message } = err as InvalidRow;
       const row = (typeof raw === "object" && raw !== null ? raw : {}) as Record<string, unknown>;
       invalid.push({
         url: typeof row.url === "string" ? row.url : null,
         title: typeof row.title === "string" ? row.title : null,
-        reason: `invalid row: ${err.message}`,
+        reason: `invalid row: ${message}`,
       });
     }
   }

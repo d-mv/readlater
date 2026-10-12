@@ -437,4 +437,82 @@ describe("useDataTransferStore", () => {
       expect(bookmarkTagsUpsert.mock.calls[0][0]).toHaveLength(25);
     });
   });
+
+  describe("edge cases", () => {
+    const row = (overrides: Record<string, unknown> = {}) => ({
+      url: "https://new.example/y",
+      type: "article",
+      status: "ready",
+      title: "New",
+      tags: [],
+      ...overrides,
+    });
+    const payload = (bookmarks: unknown[]) =>
+      JSON.stringify({ version: EXPORT_VERSION, exported_at: "now", bookmarks });
+
+    test("a page that comes back without data counts as an empty library", async () => {
+      from.mockReturnValue({ select: () => pagedQuery([{ data: null, error: null }]) });
+
+      const result = await useDataTransferStore().exportBookmarks();
+
+      expect(result.error).toBeNull();
+      expect(result.payload!.bookmarks).toEqual([]);
+    });
+
+    test("an insert that returns fewer ids than rows skips them all as failed", async () => {
+      const insertSelect = vi.fn().mockResolvedValue({ data: [{ id: "only-one" }], error: null });
+      from.mockImplementation((table: string) => {
+        if (table === "bookmarks") {
+          return {
+            select: () => pagedQuery([{ data: [], error: null }]),
+            insert: () => ({ select: insertSelect }),
+          };
+        }
+        throw new Error(`unexpected table ${table}`);
+      });
+
+      const result = await useDataTransferStore().importBookmarks(
+        payload([
+          row({ url: "https://a.example/1", title: "A" }),
+          row({ url: "https://b.example/2", title: "B" }),
+        ]),
+      );
+
+      expect(result.imported).toBe(0);
+      expect(result.skipped).toEqual([
+        { url: "https://a.example/1", title: "A", reason: "insert failed" },
+        { url: "https://b.example/2", title: "B", reason: "insert failed" },
+      ]);
+    });
+
+    test("bookmarks still import when the tag upsert returns nothing; no tag links are written", async () => {
+      const bookmarkTagsUpsert = vi.fn();
+      from.mockImplementation((table: string) => {
+        if (table === "bookmarks") {
+          return {
+            select: () => pagedQuery([{ data: [], error: null }]),
+            insert: () => ({
+              select: vi.fn().mockResolvedValue({ data: [{ id: "new-1" }], error: null }),
+            }),
+          };
+        }
+        if (table === "tags") {
+          return {
+            upsert: () => ({
+              select: vi.fn().mockResolvedValue({ data: null, error: { message: "denied" } }),
+            }),
+          };
+        }
+        if (table === "bookmark_tags") return { upsert: bookmarkTagsUpsert };
+        throw new Error(`unexpected table ${table}`);
+      });
+
+      const result = await useDataTransferStore().importBookmarks(
+        payload([row({ tags: [{ name: "news", color: "#000000" }] })]),
+      );
+
+      expect(result).toEqual({ imported: 1, skipped: [], error: null });
+      expect(bookmarkTagsUpsert).not.toHaveBeenCalled();
+    });
+  });
 });

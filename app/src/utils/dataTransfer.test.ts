@@ -173,6 +173,64 @@ describe("parseExportPayload", () => {
   });
 });
 
+describe("parseExportPayload edge cases", () => {
+  test("rejects a file whose JSON isn't an object", () => {
+    expect(() => parseExportPayload("42")).toThrow(/doesn't look like a Read Later export/);
+    expect(() => parseExportPayload("null")).toThrow(/doesn't look like a Read Later export/);
+  });
+
+  describe("per-row field validation", () => {
+    const validRow = () =>
+      toExportBookmark(makeBookmark({ id: "1" })) as unknown as Record<string, unknown>;
+    const reasonFor = (overrides: Record<string, unknown>) =>
+      parseExportPayload(
+        JSON.stringify({
+          version: EXPORT_VERSION,
+          exported_at: "now",
+          bookmarks: [{ ...validRow(), ...overrides }],
+        }),
+      ).invalid[0]?.reason;
+
+    test.each([
+      [{ tags: "news" }, "invalid row: tags must be a list"],
+      [{ tags: [{ color: "#fff" }] }, "invalid row: tag without a name"],
+      [{ tags: [{ name: "  " }] }, "invalid row: tag without a name"],
+      [{ tags: [null] }, "invalid row: tag without a name"],
+      [{ word_count: "100" }, "invalid row: word_count must be a number"],
+      [{ progress: "half" }, "invalid row: progress must be a number"],
+      [{ view_mode: "slides" }, "invalid row: unknown view_mode"],
+    ])("rejects %j", (overrides, reason) => {
+      expect(reasonFor(overrides)).toBe(reason);
+    });
+
+    test("rejects a number that overflows to Infinity (1e999 in the file)", () => {
+      const json = JSON.stringify({
+        version: EXPORT_VERSION,
+        exported_at: "now",
+        bookmarks: [{ ...validRow(), reading_time: 0 }],
+      }).replace('"reading_time":0', '"reading_time":1e999');
+
+      expect(parseExportPayload(json).invalid[0]?.reason).toBe(
+        "invalid row: reading_time must be a number",
+      );
+    });
+
+    test("keeps a valid view mode and gives a colourless tag the default colour", () => {
+      const { bookmarks, invalid } = parseExportPayload(
+        JSON.stringify({
+          version: EXPORT_VERSION,
+          exported_at: "now",
+          bookmarks: [{ ...validRow(), view_mode: "original", tags: [{ name: "news" }] }],
+        }),
+      );
+
+      expect(invalid).toEqual([]);
+      expect(bookmarks[0].view_mode).toBe("original");
+      expect(bookmarks[0].tags).toEqual([{ name: "news", color: "#888888" }]);
+    });
+  });
+});
+
 describe("partitionForImport", () => {
   test("skips rows whose URL (normalized) already exists", () => {
     const rows = [

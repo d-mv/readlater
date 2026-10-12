@@ -6,6 +6,7 @@ import {
   parseExportPayload,
   partitionForImport,
   type ExportPayload,
+  type ImportPayloadError,
   type ParsedImport,
   type SkippedRow,
 } from "../utils/dataTransfer";
@@ -26,7 +27,7 @@ interface PageResult<T> {
 // Stops at the first error and returns it along with the rows read so far.
 async function fetchAllPages<T>(
   fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
-): Promise<PageResult<T>> {
+): Promise<{ data: T[]; error: { message: string } | null }> {
   const rows: T[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await fetchPage(from, from + PAGE_SIZE - 1);
@@ -59,7 +60,7 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
         .range(from, to),
     );
     if (error) return { payload: null, error: error.message };
-    return { payload: buildExportPayload((data ?? []) as Bookmark[]), error: null };
+    return { payload: buildExportPayload(data), error: null };
   }
 
   async function importBookmarks(jsonText: string): Promise<ImportResult> {
@@ -67,8 +68,9 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
     try {
       payload = parseExportPayload(jsonText);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "That file couldn't be read.";
-      return { imported: 0, skipped: [], error: message };
+      // parseExportPayload only throws ImportPayloadError (bad rows are
+      // reported in payload.invalid, not thrown).
+      return { imported: 0, skipped: [], error: (err as ImportPayloadError).message };
     }
 
     const userId = useAuthStore().userId;
@@ -80,7 +82,7 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
       (from, to) => supabase.from("bookmarks").select("url_normalized").order("id").range(from, to),
     );
     const existingNormalizedUrls = new Set(
-      (existingRows ?? [])
+      existingRows
         .map((row) => row.url_normalized)
         .filter((value: string | null): value is string => value !== null),
     );

@@ -15,7 +15,7 @@ interface StoredUser {
 
 function loadOfflineUser(): StoredUser | null {
   try {
-    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(OFFLINE_AUTH_KEY) : null;
+    const raw = localStorage.getItem(OFFLINE_AUTH_KEY);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -24,7 +24,6 @@ function loadOfflineUser(): StoredUser | null {
 
 function saveOfflineUser(user: StoredUser | null) {
   try {
-    if (typeof localStorage === "undefined") return;
     if (user) {
       localStorage.setItem(OFFLINE_AUTH_KEY, JSON.stringify(user));
     } else {

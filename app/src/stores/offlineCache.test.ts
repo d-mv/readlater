@@ -466,4 +466,148 @@ describe("useOfflineCacheStore", () => {
       expect.objectContaining({ translated_content_md: "traducción" }),
     );
   });
+
+  describe("coverage of the remaining edge cases", () => {
+    function deferred<T = void>() {
+      let resolve!: (value: T) => void;
+      let reject!: (err: unknown) => void;
+      const promise = new Promise<T>((res, rej) => {
+        resolve = res;
+        reject = rej;
+      });
+      return { promise, resolve, reject };
+    }
+
+    test("a refused persistent-storage request doesn't fail init", async () => {
+      const persist = vi.fn().mockRejectedValue(new Error("denied"));
+      vi.stubGlobal("navigator", { ...navigator, storage: { persist } });
+
+      const store = useOfflineCacheStore();
+      await expect(store.init()).resolves.toBeUndefined();
+
+      expect(persist).toHaveBeenCalledOnce();
+      vi.unstubAllGlobals();
+    });
+
+    test("without a thumbnail only the images in the body are downloaded", async () => {
+      const store = useOfflineCacheStore();
+      await store.cacheBookmark(makeBookmark({ thumbnail_url: null }));
+
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/a.png");
+    });
+
+    test("cachedIds lists saved articles only, not ones still being saved", async () => {
+      listCachedArticles.mockResolvedValue([
+        { id: "saved", cachedAt: new Date().toISOString(), missingImages: 0 },
+      ]);
+      const store = useOfflineCacheStore();
+      await store.init();
+      const write = deferred();
+      putArticle.mockReturnValueOnce(write.promise);
+
+      const saving = store.cacheBookmark(makeBookmark({ id: "pending" }));
+
+      expect([...store.cachedIds]).toEqual(["saved"]);
+      write.resolve();
+      await saving;
+      expect([...store.cachedIds].sort()).toEqual(["pending", "saved"]);
+    });
+
+    test("init drops an article saved earlier whose copy is no longer in IndexedDB", async () => {
+      const store = useOfflineCacheStore();
+      await store.cacheBookmark(makeBookmark());
+      expect(store.isCached("1")).toBe(true);
+
+      listCachedArticles.mockResolvedValue([]);
+      await store.init();
+
+      expect(store.isCached("1")).toBe(false);
+    });
+
+    test("eviction leaves an article that is being saved right now", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(Date.parse("2026-10-11T12:00:00Z"));
+      listCachedArticles.mockResolvedValue([
+        { id: "1", cachedAt: "2026-08-01T00:00:00Z", missingImages: 0 },
+      ]);
+      const write = deferred();
+      putArticle.mockReturnValueOnce(write.promise);
+      const store = useOfflineCacheStore();
+
+      const saving = store.cacheBookmark(makeBookmark({ read_at: "2026-09-01T00:00:00Z" }));
+      await vi.waitFor(() => expect(putArticle).toHaveBeenCalled());
+      await store.init();
+      write.resolve();
+      await saving;
+
+      expect(deleteArticle).not.toHaveBeenCalled();
+      expect(store.isCached("1")).toBe(true);
+      vi.useRealTimers();
+    });
+
+    test("an earlier offline copy that already has its metadata is reused untouched", async () => {
+      getArticle.mockResolvedValue({
+        id: "1",
+        content_md: "x",
+        images: [],
+        cachedAt: "t",
+        bookmark: { id: "1" },
+      });
+
+      const store = useOfflineCacheStore();
+      await store.cacheBookmark(makeBookmark());
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(putArticle).not.toHaveBeenCalled();
+      expect(putBookmarkMeta).not.toHaveBeenCalled();
+      expect(store.isCached("1")).toBe(true);
+    });
+
+    test("removing an article while its earlier copy is being looked up leaves it removed", async () => {
+      const lookup = deferred<unknown>();
+      getArticle.mockReturnValueOnce(lookup.promise);
+      const store = useOfflineCacheStore();
+
+      const saving = store.cacheBookmark(makeBookmark());
+      await store.removeCachedBookmark("1");
+      lookup.resolve({ id: "1", content_md: "x", images: [], cachedAt: "t", bookmark: {} });
+      await saving;
+
+      expect(store.isCached("1")).toBe(false);
+    });
+
+    test("a save superseded by a refresh while writing keeps the newer copy", async () => {
+      const firstWrite = deferred();
+      putArticle.mockReturnValueOnce(firstWrite.promise);
+      const store = useOfflineCacheStore();
+
+      const first = store.cacheBookmark(makeBookmark());
+      await vi.waitFor(() => expect(putArticle).toHaveBeenCalledTimes(1));
+      const second = store.refreshCached(makeBookmark({ content_md: "edited body" }));
+      firstWrite.resolve();
+      await Promise.all([first, second]);
+
+      expect(deleteArticle).not.toHaveBeenCalled();
+      expect(putArticle).toHaveBeenLastCalledWith(
+        expect.objectContaining({ content_md: "edited body" }),
+      );
+      expect(store.isCached("1")).toBe(true);
+    });
+
+    test("a superseded save that fails doesn't undo the newer one", async () => {
+      const firstWrite = deferred();
+      putArticle.mockReturnValueOnce(firstWrite.promise);
+      const store = useOfflineCacheStore();
+
+      const first = store.cacheBookmark(makeBookmark());
+      await vi.waitFor(() => expect(putArticle).toHaveBeenCalledTimes(1));
+      const second = store.refreshCached(makeBookmark({ content_md: "edited body" }));
+      firstWrite.reject(new Error("QuotaExceededError"));
+
+      await expect(first).rejects.toThrow("QuotaExceededError");
+      await second;
+      expect(store.isCached("1")).toBe(true);
+    });
+  });
 });

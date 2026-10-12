@@ -29,6 +29,10 @@ describe("truncateTitle", () => {
     const text = "word ".repeat(30).trim();
     expect(truncateTitle(text).endsWith("…")).toBe(true);
   });
+
+  test("hard-cuts a single word longer than the limit", () => {
+    expect(truncateTitle("x".repeat(150), 10)).toBe("xxxxxxxxxx…");
+  });
 });
 
 describe("toCaptureOutcome", () => {

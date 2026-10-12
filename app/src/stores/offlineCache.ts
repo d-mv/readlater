@@ -12,7 +12,6 @@ const MAX_CACHED_ARTICLES = 200;
 // offline copies are the point of having it. Only a request: browsers may
 // decide by engagement or ask the user, and some don't implement it.
 function requestPersistentStorage() {
-  if (typeof navigator === "undefined") return;
   navigator.storage?.persist?.().catch(() => {});
 }
 
@@ -139,25 +138,24 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
   function cacheBookmark(bookmark: Bookmark): Promise<void> {
     if (!bookmark.content_md || entries.value.get(bookmark.id) === "saved")
       return Promise.resolve();
-    return inFlight.get(bookmark.id) ?? startSave(bookmark, { reuseExisting: true });
+    return inFlight.get(bookmark.id) ?? startSave(bookmark, bookmark.content_md, true);
   }
 
   // Re-caches an article that is already offline (or being saved) after its
   // body or translation changed, so the offline copy doesn't go stale.
   function refreshCached(bookmark: Bookmark): Promise<void> {
     if (!bookmark.content_md || !entries.value.has(bookmark.id)) return Promise.resolve();
-    return startSave(bookmark, { reuseExisting: false });
+    return startSave(bookmark, bookmark.content_md, false);
   }
 
-  function startSave(bookmark: Bookmark, opts: { reuseExisting: boolean }): Promise<void> {
-    const { id, content_md: contentMd } = bookmark;
-    if (!contentMd) return Promise.resolve();
+  function startSave(bookmark: Bookmark, contentMd: string, reuseExisting: boolean): Promise<void> {
+    const { id } = bookmark;
 
     const save: Promise<void> = (async () => {
       const isCurrent = () => inFlight.get(id) === save;
       try {
         const meta = offlineDb.stripContentMd(bookmark);
-        if (opts.reuseExisting) {
+        if (reuseExisting) {
           const existing = await offlineDb.getArticle(id);
           if (existing) {
             if (!existing.bookmark) {
@@ -233,6 +231,10 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
   };
 });
 
+// Dev-server HMR wiring: whether import.meta.hot exists depends on the runner,
+// not on any app behaviour, so coverage of this branch is meaningless.
+/* v8 ignore start */
 if (import.meta.hot) {
   import.meta.hot.accept(acceptHMRUpdate(useOfflineCacheStore, import.meta.hot));
 }
+/* v8 ignore stop */

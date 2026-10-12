@@ -278,4 +278,83 @@ describe("useAuthStore", () => {
     expect(store.userId).toBeNull();
     expect(localStorage.getItem("rl-auth-user")).toBeNull();
   });
+
+  test("a corrupted stored offline login is ignored rather than crashing the store", () => {
+    localStorage.setItem("rl-auth-user", "{not json");
+
+    const store = useAuthStore();
+
+    expect(store.isAuthenticated).toBe(false);
+    expect(store.userId).toBeNull();
+  });
+
+  test("a session found while localStorage refuses writes still signs the user in", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("quota", "QuotaExceededError");
+    });
+    signInWithPassword.mockResolvedValue({
+      data: { session: { user: { id: "u1", email: "a@b.c" } } },
+      error: null,
+    });
+
+    const store = useAuthStore();
+    await store.signIn("a@b.c", "pw");
+
+    expect(store.isAuthenticated).toBe(true);
+    expect(store.userId).toBe("u1");
+  });
+
+  test("a session without an email caches the offline login with an empty email", async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: "u1" } } } });
+
+    await useAuthStore().init();
+
+    expect(JSON.parse(localStorage.getItem("rl-auth-user")!)).toEqual({ id: "u1", email: "" });
+  });
+
+  test("auth events after init: a new session signs in, SIGNED_OUT signs out, others are ignored", async () => {
+    const store = useAuthStore();
+    await store.init();
+    const [onChange] = onAuthStateChange.mock.calls.at(-1) as unknown as [
+      (event: string, session: unknown) => void,
+    ];
+
+    onChange("TOKEN_REFRESHED", { user: { id: "u2", email: "x@y.z" } });
+    expect(store.userId).toBe("u2");
+
+    onChange("USER_UPDATED", null);
+    expect(store.userId).toBe("u2");
+
+    onChange("SIGNED_OUT", null);
+    expect(store.isAuthenticated).toBe(false);
+  });
+
+  test("checkSession reports false and keeps the cached login when getSession throws", async () => {
+    storeOfflineUser();
+    getSession.mockRejectedValue(new Error("Failed to fetch"));
+
+    const store = useAuthStore();
+
+    await expect(store.checkSession()).resolves.toBe(false);
+    expect(store.isAuthenticated).toBe(true);
+  });
+
+  test("signIn without a session (e.g. awaiting email confirmation) stays signed out", async () => {
+    signInWithPassword.mockResolvedValue({ data: { session: null }, error: null });
+
+    const store = useAuthStore();
+
+    await expect(store.signIn("a@b.c", "pw")).resolves.toEqual({ error: null });
+    expect(store.isAuthenticated).toBe(false);
+  });
+
+  test("signOut still clears the local login when the server sign-out throws", async () => {
+    storeOfflineUser();
+    signOut.mockRejectedValue(new Error("Failed to fetch"));
+
+    const store = useAuthStore();
+    await expect(store.signOut()).resolves.toBeUndefined();
+
+    expect(store.isAuthenticated).toBe(false);
+  });
 });
