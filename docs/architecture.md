@@ -973,26 +973,45 @@ the per-project Supabase CLI wrapper; `supabase.id` names the profile.)
 
 ## 9. Development & testing
 
-| Part | Typecheck | Lint | Format | Tests |
+| Part | Typecheck | Lint | Format | Tests (100% coverage gate) |
 |---|---|---|---|---|
-| `app/` | `bun run typecheck` (`vue-tsc`) | `bun run lint` (oxlint) | `bun run format[:check]` (oxfmt) | `bun run test` (Vitest); `bun run test:e2e` (Playwright) |
-| `worker/` | `bun run typecheck` (`tsc`) | `bun run lint` | `bun run format[:check]` | `bun run test` (`bun test`) |
-| `bookmarklet/` | — | — | `bun run format[:check]` | `bun test` |
-| `supabase/functions/` | `deno check --frozen --node-modules-dir=none supabase/functions/` | — | — | `deno test --frozen --allow-env --node-modules-dir=none supabase/functions/` |
+| `app/` | `bun run typecheck` (`vue-tsc`, incl. `e2e/`) | `bun run lint` (oxlint) | `bun run format[:check]` (oxfmt) | `bun run test:coverage` (Vitest, v8: statements/branches/functions/lines) |
+| `app/e2e/` | — | — | — | `bun run test:e2e` (Playwright, Chromium desktop + 390 px phone) |
+| `worker/` | `bun run typecheck` (`tsc`) | `bun run lint` | `bun run format[:check]` | `bun run test:coverage` (`bun test`, lines/functions; real headless Chromium for the render tests) |
+| `bookmarklet/` | — | — | `bun run format[:check]` | `bun run test:coverage` |
+| `supabase/functions/` | `deno check --frozen --node-modules-dir=none supabase/functions/` | — | — | `deno task coverage:functions` (lines/branches/functions, `scripts/functions-coverage.ts`) |
+| database | — | — | — | `bun run test:db` (pgTAP, `supabase/tests/`) |
 
-Run the Deno commands from the repo root: `--frozen` fails on an import not
-pinned in the committed `deno.lock`, `--node-modules-dir=none` stops the root
-`package.json` from making Deno want a `node_modules`, and `--allow-env` is
-for mammoth, which reads env vars at import time. `knip --dependencies`
-(`bun run unused-deps`) checks for unused dependencies in each Bun package.
+From the repo root, `bun run test:all` runs every suite; `test:app`,
+`test:e2e`, `test:worker`, `test:bookmarklet`, `test:functions` and `test:db`
+run one each.
 
+- **Coverage exclusions** are explicit and few: `app/src/main.ts` (bootstrap;
+  the e2e suite runs it), Vite HMR blocks, one IndexedDB upgrade guard, and
+  each edge function's `if (import.meta.main) Deno.serve(...)` line.
+- **e2e** runs against an in-memory fake Supabase (`e2e/fakeBackend.ts`,
+  served with `page.route`/`routeWebSocket`); nothing reaches the network and
+  `app/.env` isn't needed. Setup: `bunx playwright install chromium`.
+- **Database tests** start their OWN local stack (`project_id`
+  `read-later-dbtest`, ports 553xx — `supabase/run-db-tests.sh`), so a
+  developer's local stack and its data are never reset. Needs Docker.
+- **Worker tests** clear `SUPABASE_*` env before loading (`test/setup.ts`),
+  because Bun auto-loads `worker/.env`.
+- Deno flags: `--frozen` fails on an import not pinned in the committed
+  `deno.lock`, `--node-modules-dir=none` stops the root `package.json` from
+  making Deno want a `node_modules`, `--allow-env` is for mammoth.
+  `knip --dependencies` (`bun run unused-deps`) checks each Bun package.
 - **Git hooks** (`lefthook.yml`, installed by the root `prepare` script):
-  pre-commit runs lint, format check, typecheck and unused-deps for the
-  touched packages; pre-push runs the app build. Markdown isn't formatted.
-- **CI** (`.github/workflows/ci.yml`, every push and PR): app and worker —
-  `bun install --frozen-lockfile`, typecheck, lint, test; functions —
-  `deno check` and `deno test` as above. Formatting, the bookmarklet tests and
-  e2e run only locally.
+  - pre-commit: lint, format check, typecheck and unused-deps for touched
+    packages, plus each touched package's full test suite with its coverage
+    gate — app changes also run e2e, `supabase/` SQL changes run the pgTAP
+    suite, function changes run `deno check` and the functions gate.
+  - pre-push: every suite (app, e2e, worker, bookmarklet, functions, db) and
+    the app build, whatever changed.
+- **CI** (`.github/workflows/ci.yml`, every push and PR): jobs `app`
+  (typecheck, lint, format, unused deps, coverage gate, build), `e2e`,
+  `worker` (with Chromium), `bookmarklet`, `functions` (check + gate) and `db`
+  (Supabase CLI 2.120.0 + pgTAP).
 - **Deploy order** — §8.
 
 ## 10. Known trade-offs

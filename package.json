@@ -4,7 +4,13 @@
   "type": "module",
   "scripts": {
     "prepare": "lefthook install",
-    "test:db": "bash supabase/run-db-tests.sh"
+    "test:app": "cd app && bun run test:coverage",
+    "test:e2e": "cd app && bun run test:e2e",
+    "test:worker": "cd worker && bun run test:coverage",
+    "test:bookmarklet": "cd bookmarklet && bun run test:coverage",
+    "test:functions": "deno task coverage:functions",
+    "test:db": "bash supabase/run-db-tests.sh",
+    "test:all": "bun run test:app && bun run test:worker && bun run test:bookmarklet && bun run test:functions && bun run test:e2e && bun run test:db"
   },
   "devDependencies": {
     "lefthook": "^2.1.10"

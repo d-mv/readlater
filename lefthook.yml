@@ -42,10 +42,58 @@ pre-commit:
       glob: "*.{ts,js}"
       run: bun run unused-deps
 
+    # Tests: every package with staged changes runs its whole suite, with the
+    # 100% coverage gates. App changes also run the e2e suite; SQL changes
+    # run the pgTAP suite (needs Docker; uses its own isolated stack).
+    test-app:
+      root: "app/"
+      glob: "*.{ts,vue,css,json}"
+      run: bun run test:coverage
+    test-e2e:
+      root: "app/"
+      glob: "*.{ts,vue,css,json,html}"
+      run: bun run test:e2e
+    test-worker:
+      root: "worker/"
+      glob: "*.{ts,json,toml}"
+      run: bun run test:coverage
+    test-bookmarklet:
+      root: "bookmarklet/"
+      glob: "*.{ts,js,json,toml}"
+      run: bun run test:coverage
+    check-functions:
+      root: "supabase/functions/"
+      glob: "*.ts"
+      run: deno check --frozen --node-modules-dir=none .
+    test-functions:
+      root: "supabase/functions/"
+      glob: "*.ts"
+      run: deno task coverage:functions
+    test-db:
+      root: "supabase/"
+      glob: "*.{sql,psql,sh,toml}"
+      run: bash run-db-tests.sh
+
+# Before anything leaves the machine: every suite, whatever changed.
 pre-push:
   parallel: true
   commands:
     build-app:
       root: "app/"
-      glob: "*.{ts,vue}"
       run: bun run build
+    test-app:
+      root: "app/"
+      run: bun run test:coverage
+    test-e2e:
+      root: "app/"
+      run: bun run test:e2e
+    test-worker:
+      root: "worker/"
+      run: bun run test:coverage
+    test-bookmarklet:
+      root: "bookmarklet/"
+      run: bun run test:coverage
+    test-functions:
+      run: deno task coverage:functions
+    test-db:
+      run: bun run test:db

@@ -25,13 +25,16 @@ frontend.
 |---|---|
 | `app/` | Vue 3 PWA (Bun, Vite, Vitest, Playwright e2e) |
 | `worker/` | Bun worker, Docker (`bun test`) |
-| `supabase/` | migrations, `config.toml`, Deno edge functions (`deno test`) |
+| `supabase/` | migrations, `config.toml`, Deno edge functions (`deno test`), pgTAP tests (`supabase/tests/`) |
 | `bookmarklet/` | bookmarklet source and builder (`bun test`) |
 
-`bun install` at the root installs the lefthook git hooks (lint, format,
-typecheck, unused deps on commit; app build on push). CI
-(`.github/workflows/ci.yml`) runs typecheck, lint and tests for the app and
-the worker, and `deno check` + `deno test` for the edge functions. Exact
+`bun install` at the root installs the lefthook git hooks: on commit, lint,
+format, typecheck, unused deps and the full test suite of every touched
+package (with e2e for app changes and the pgTAP suite for SQL changes); on
+push, every suite plus the app build. `bun run test:all` runs everything by
+hand. All unit/integration suites enforce 100% coverage; CI
+(`.github/workflows/ci.yml`) runs the same suites, e2e and the database
+tests on every push. Exact
 commands and the deploy order: architecture
 [§9 Development & testing](docs/architecture.md#9-development--testing) and
 [§8 Deployment](docs/architecture.md#8-deployment).
