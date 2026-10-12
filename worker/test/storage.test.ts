@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { UnsupportedContentTypeError } from "../src/errors";
+import { HttpStatusError, UnsupportedContentTypeError } from "../src/errors";
 import { makeThumbnailUploader } from "../src/storage";
 import { BlockedUrlError } from "../src/urlGuard";
 
-function fakeSupabase(opts: { uploadedOptions: unknown[]; paths?: string[] }) {
+function fakeSupabase(opts: { uploadedOptions: unknown[]; paths?: string[]; uploadError?: Error }) {
   return {
     storage: {
       from: (_bucket: string) => ({
         upload: (path: string, _bytes: Uint8Array, uploadOptions: unknown) => {
           opts.uploadedOptions.push(uploadOptions);
           opts.paths?.push(path);
-          return Promise.resolve({ error: null });
+          return Promise.resolve({ error: opts.uploadError ?? null });
         },
         getPublicUrl: (path: string) => ({ data: { publicUrl: `https://example.test/${path}` } }),
       }),
@@ -26,6 +26,15 @@ function imageFetch(contentType: string, calls: RequestInit[] = []) {
     calls.push(init);
     return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": contentType } });
   }) as unknown as typeof fetch;
+}
+
+/** A response body whose cancel() rejects, like a connection that already broke. */
+function unCancellableBody(): ReadableStream<Uint8Array> {
+  return new ReadableStream<Uint8Array>({
+    cancel() {
+      throw new Error("cancel failed");
+    },
+  });
 }
 
 describe("uploadThumbnail", () => {
@@ -81,4 +90,58 @@ describe("uploadThumbnail", () => {
       expect(uploadedOptions).toHaveLength(0);
     },
   );
+
+  test("a non-2xx thumbnail response fails with its status and stores nothing", async () => {
+    const uploadedOptions: unknown[] = [];
+    const upload = makeThumbnailUploader(fakeSupabase({ uploadedOptions }), {
+      fetchImpl: (async () =>
+        new Response(unCancellableBody(), {
+          status: 404,
+          statusText: "Not Found",
+        })) as unknown as typeof fetch,
+      lookup: publicDns,
+    });
+
+    const err = await upload("https://img.example/gone.jpg").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(HttpStatusError);
+    expect((err as HttpStatusError).status).toBe(404);
+    expect(uploadedOptions).toHaveLength(0);
+  });
+
+  test("an unsupported type is refused even when discarding its body fails", async () => {
+    const upload = makeThumbnailUploader(fakeSupabase({ uploadedOptions: [] }), {
+      fetchImpl: (async () =>
+        new Response(unCancellableBody(), {
+          headers: { "content-type": "text/html" },
+        })) as unknown as typeof fetch,
+      lookup: publicDns,
+    });
+
+    await expect(upload("https://img.example/thumb")).rejects.toBeInstanceOf(
+      UnsupportedContentTypeError,
+    );
+  });
+
+  test("a failed Storage upload is surfaced instead of returning a URL", async () => {
+    const uploadError = new Error("bucket not found");
+    const upload = makeThumbnailUploader(fakeSupabase({ uploadedOptions: [], uploadError }), {
+      fetchImpl: imageFetch("image/png"),
+      lookup: publicDns,
+    });
+
+    await expect(upload("https://img.example/thumb.png")).rejects.toBe(uploadError);
+  });
+
+  test("returns the public URL of the stored copy", async () => {
+    const paths: string[] = [];
+    const upload = makeThumbnailUploader(fakeSupabase({ uploadedOptions: [], paths }), {
+      fetchImpl: imageFetch("image/webp"),
+      lookup: publicDns,
+    });
+
+    const url = await upload("https://img.example/thumb.webp");
+
+    expect(paths[0]).toEndWith(".webp");
+    expect(url).toBe(`https://example.test/${paths[0]}`);
+  });
 });

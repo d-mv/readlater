@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { assertPublicUrl, BlockedUrlError, isPrivateAddress, routeIfPublic } from "../src/urlGuard";
+import {
+  assertPublicUrl,
+  BlockedUrlError,
+  isPrivateAddress,
+  lookupAll,
+  routeIfPublic,
+} from "../src/urlGuard";
 
 const resolvesTo =
   (...ips: string[]) =>
@@ -86,6 +92,26 @@ describe("assertPublicUrl", () => {
     await expect(
       assertPublicUrl("http://intranet.example/", resolvesTo("93.184.216.34", "10.0.0.5")),
     ).rejects.toBeInstanceOf(BlockedUrlError);
+  });
+
+  test("rejects a string that isn't a URL", async () => {
+    await expect(assertPublicUrl("not a url", resolvesTo("93.184.216.34"))).rejects.toThrow(
+      "Not a valid URL",
+    );
+  });
+
+  test("rejects a hostname that resolves to no addresses at all", async () => {
+    await expect(assertPublicUrl("https://nowhere.example/", resolvesTo())).rejects.toBeInstanceOf(
+      BlockedUrlError,
+    );
+  });
+
+  test("the default lookup uses the system resolver, and localhost is refused", async () => {
+    // "localhost" comes from the hosts file, so this needs no network.
+    const addresses = await lookupAll("localhost");
+    expect(addresses.length).toBeGreaterThan(0);
+    expect(addresses.every(isPrivateAddress)).toBe(true);
+    await expect(assertPublicUrl("http://localhost:3000/")).rejects.toBeInstanceOf(BlockedUrlError);
   });
 
   test("rejects non-http schemes", async () => {
