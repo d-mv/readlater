@@ -79,23 +79,20 @@ pre-commit:
 # build compete for the machine.
 pre-push:
   piped: true
+  # No `root:` here: lefthook skips a rooted command when the push touches
+  # no file under that root, and this hook must run every suite regardless.
   commands:
-    build-app:
-      root: "app/"
-      run: bun run build
     test-app:
-      root: "app/"
-      run: bun run test:coverage
-    test-e2e:
-      root: "app/"
-      run: bun run test:e2e
+      run: bun run test:app
     test-worker:
-      root: "worker/"
-      run: bun run test:coverage
+      run: bun run test:worker
     test-bookmarklet:
-      root: "bookmarklet/"
-      run: bun run test:coverage
+      run: bun run test:bookmarklet
     test-functions:
-      run: deno task coverage:functions
+      run: bun run test:functions
+    build-app:
+      run: cd app && bun run build
+    test-e2e:
+      run: bun run test:e2e
     test-db:
       run: bun run test:db
