@@ -27,3 +27,6 @@ blob-report
 *.njsproj
 *.sln
 *.sw?
+
+# Vitest coverage reports
+coverage
