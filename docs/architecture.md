@@ -971,6 +971,21 @@ worker images. The app depends on the new schema and functions (e.g. it
 sends `translate` only a `bookmark_id`), not the other way round. (`sb` is
 the per-project Supabase CLI wrapper; `supabase.id` names the profile.)
 
+### Backup and restore
+
+- **Backup** — `bash scripts/backup.sh` (read-only against production, via
+  `sb`): `schema.sql`, `data.sql` (public, auth, storage metadata) and every
+  object of `bookmark-pdfs` and `bookmark-assets`, into
+  `backups/<UTC timestamp>/` (gitignored). Override with `BACKUP_DIR`.
+- **Restore** — bring the target to the same migrations (`sb db push` to a
+  new project, or a local `db reset`), then
+  `bash scripts/restore.sh <backup dir> <postgres URL>`: one transaction,
+  triggers off, replaces all rows in public, auth and storage metadata. It
+  refuses a hosted URL unless `RESTORE_TO_HOSTED=1`. Then upload the Storage
+  objects with the `sb storage cp` loop it prints.
+- Verified 2026-10-12 by restoring a production backup into the isolated
+  local test stack (101 bookmarks, 2 tags, 1 user, 2 objects).
+
 ## 9. Development & testing
 
 | Part | Typecheck | Lint | Format | Tests (100% coverage gate) |
