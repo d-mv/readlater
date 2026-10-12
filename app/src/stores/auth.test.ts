@@ -340,13 +340,26 @@ describe("useAuthStore", () => {
     expect(store.isAuthenticated).toBe(true);
   });
 
-  test("signIn without a session (e.g. awaiting email confirmation) stays signed out", async () => {
+  test("signIn without a session (awaiting email confirmation) says so and stays signed out", async () => {
     signInWithPassword.mockResolvedValue({ data: { session: null }, error: null });
 
     const store = useAuthStore();
 
-    await expect(store.signIn("a@b.c", "pw")).resolves.toEqual({ error: null });
+    await expect(store.signIn("a@b.c", "pw")).resolves.toEqual({
+      error: "Check your email to confirm your account, then sign in.",
+    });
     expect(store.isAuthenticated).toBe(false);
+  });
+
+  test("signIn turns Auth's email_not_confirmed error into what to do next", async () => {
+    signInWithPassword.mockResolvedValue({
+      data: { session: null },
+      error: new AuthApiError("Email not confirmed", 400, "email_not_confirmed"),
+    });
+
+    const result = await useAuthStore().signIn("a@b.c", "pw");
+
+    expect(result.error).toBe("Check your email to confirm your account, then sign in.");
   });
 
   test("signOut still clears the local login when the server sign-out throws", async () => {

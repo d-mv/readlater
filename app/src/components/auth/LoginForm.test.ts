@@ -43,6 +43,22 @@ describe("LoginForm", () => {
     expect(wrapper.text()).toContain("Invalid login credentials");
     expect(wrapper.emitted("success")).toBeUndefined();
   });
+
+  test("an account awaiting email confirmation is told so and stays on the form", async () => {
+    signIn.mockResolvedValue({
+      error: "Check your email to confirm your account, then sign in.",
+    });
+    const wrapper = mount(LoginForm);
+
+    await wrapper.find("form").trigger("submit");
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="error"]').text()).toBe(
+      "Check your email to confirm your account, then sign in.",
+    );
+    expect(wrapper.emitted("success")).toBeUndefined();
+    expect(wrapper.find("button[type=submit]").attributes("disabled")).toBeUndefined();
+  });
 });
 
 function flushPromises() {

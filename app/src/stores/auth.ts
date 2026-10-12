@@ -8,6 +8,8 @@ import { useOfflineCacheStore } from "./offlineCache";
 
 const OFFLINE_AUTH_KEY = "rl-auth-user";
 
+export const SIGN_IN_UNCONFIRMED = "Check your email to confirm your account, then sign in.";
+
 interface StoredUser {
   id: string;
   email: string;
@@ -59,13 +61,11 @@ export const useAuthStore = defineStore("auth", () => {
   // In-memory user id for insert paths — avoids a getUser() network call.
   const userId = computed(() => session.value?.user.id ?? offlineUser.value?.id ?? null);
 
-  function syncUser(sess: Session | null) {
+  function syncUser(sess: Session) {
     session.value = sess;
-    if (sess?.user) {
-      const u = { id: sess.user.id, email: sess.user.email ?? "" };
-      offlineUser.value = u;
-      saveOfflineUser(u);
-    }
+    const u = { id: sess.user.id, email: sess.user.email ?? "" };
+    offlineUser.value = u;
+    saveOfflineUser(u);
   }
 
   // Drops the session and the cached offline login, which flips
@@ -134,7 +134,13 @@ export const useAuthStore = defineStore("auth", () => {
 
   async function signIn(email: string, password: string): Promise<{ error: string | null }> {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    // An unconfirmed account comes back as Auth's terse "Email not
+    // confirmed"; say what to do instead. No session without an error means
+    // the same (the password matched, the confirmation link is still
+    // pending) — without this the form would report success and stay put.
+    if (error?.code === "email_not_confirmed") return { error: SIGN_IN_UNCONFIRMED };
     if (error) return { error: error.message };
+    if (!data.session) return { error: SIGN_IN_UNCONFIRMED };
     syncUser(data.session);
     return { error: null };
   }

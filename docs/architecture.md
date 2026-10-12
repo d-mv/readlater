@@ -992,7 +992,9 @@ removing its stored session — so the store removes it itself
 (`AUTH_STORAGE_KEY`, `lib/supabase.ts`: passed to `createClient` as
 `storageKey`, with the value supabase-js would derive, `sb-<host's first
 label>-auth-token`). Offline it does that before calling `signOut()`,
-which then has no session to refresh. See §3 for the
+which then has no session to refresh. A login form answer of "Email not
+confirmed" (or no session without an error) reads "Check your email to
+confirm your account, then sign in." See §3 for the
 capture-path auth model (bookmarklet/share-target/worker/public-view each
 use a different mechanism, on purpose).
 

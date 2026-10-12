@@ -38,6 +38,22 @@ test.describe("signed out", () => {
     await expect(page).toHaveURL(/\/login$/);
     await expect(page.getByRole("button", { name: "Sign in" })).toBeEnabled();
   });
+
+  test("signing in before confirming the email says what to do", async ({ page, backend }) => {
+    backend.fail((c) => c.service === "auth" && c.name === "token:password", {
+      status: 400,
+      body: { code: 400, error_code: "email_not_confirmed", msg: "Email not confirmed" },
+    });
+    await page.goto("/login");
+    await page.getByLabel("Email").fill(USER.email);
+    await page.getByLabel("Password").fill(USER.password);
+    await page.getByRole("button", { name: "Sign in" }).click();
+
+    await expect(page.getByTestId("error")).toHaveText(
+      "Check your email to confirm your account, then sign in.",
+    );
+    await expect(page).toHaveURL(/\/login$/);
+  });
 });
 
 test("a signed-in visit to /login goes to the list", async ({ page, backend }) => {
