@@ -20,6 +20,8 @@ import {
  * everything online first — which also pulls the lazy route chunks — then go
  * offline and keep navigating inside the app: the data paths under test
  * (IndexedDB list snapshot, downloaded articles) are the same either way.
+ * The cold start (a reload with no network) is offline-sw.spec.ts, against
+ * a production build with its service worker.
  *
  * IndexedDB writes go through offlineDb.toPlain: rows from the Pinia store
  * carry Vue reactive proxies, which structured clone refuses.

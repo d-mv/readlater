@@ -1074,7 +1074,7 @@ the per-project Supabase CLI wrapper; `supabase.id` names the profile.)
 | Part | Typecheck | Lint | Format | Tests (100% coverage gate) |
 |---|---|---|---|---|
 | `app/` | `bun run typecheck` (`vue-tsc`, incl. `e2e/`) | `bun run lint` (oxlint) | `bun run format[:check]` (oxfmt) | `bun run test:coverage` (Vitest, v8: statements/branches/functions/lines) |
-| `app/e2e/` | — | — | — | `bun run test:e2e` (Playwright, Chromium desktop + 390 px phone) |
+| `app/e2e/` | — | — | — | `bun run test:e2e` (Playwright, Chromium desktop + 390 px phone, plus a service-worker build) |
 | `worker/` | `bun run typecheck` (`tsc`) | `bun run lint` | `bun run format[:check]` | `bun run test:coverage` (`bun test`, lines/functions; real headless Chromium for the render tests) |
 | `bookmarklet/` | — | — | `bun run format[:check]` | `bun run test:coverage` |
 | `supabase/functions/` | `deno check --frozen --node-modules-dir=none supabase/functions/` | — | — | `deno task coverage:functions` (lines/branches/functions, `scripts/functions-coverage.ts`) |
@@ -1090,6 +1090,16 @@ run one each.
 - **e2e** runs against an in-memory fake Supabase (`e2e/fakeBackend.ts`,
   served with `page.route`/`routeWebSocket`); nothing reaches the network and
   `app/.env` isn't needed. Setup: `bunx playwright install chromium`.
+  The `desktop`/`mobile` projects run against the dev server, which has no
+  service worker; the `offline-sw` project (`e2e/offline-sw.spec.ts`) runs
+  against a production build (`vite build --outDir dist-e2e` + `vite
+  preview`, port 5184, ~5 s extra) and covers an offline cold start: shell
+  from the precache, list from IndexedDB, a downloaded article with its
+  image blobs. Chromium forgets Playwright's offline emulation on a
+  navigation the service worker answers, so that spec pins
+  `navigator.onLine` to false after the reload; `FakeBackend.offline`
+  aborts routed requests (`context.setOffline()` doesn't stop route
+  handlers).
 - **Database tests** start their OWN local stack (`project_id`
   `read-later-dbtest`, ports 553xx — `supabase/run-db-tests.sh`), so a
   developer's local stack and its data are never reset. Needs Docker.
