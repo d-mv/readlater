@@ -568,7 +568,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       );
       Object.assign(existing, fields);
       if (progressOnly) return;
-    } else if (payload.eventType === "DELETE") {
+    } else {
+      // DELETE — the only event type left.
       const id = (payload.old as { id?: string }).id;
       if (id) bookmarks.value = bookmarks.value.filter((b) => b.id !== id);
     }
@@ -1072,7 +1073,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const publicPrefix = assets.getPublicUrl("").data.publicUrl;
     const thumbnail = bookmark.thumbnail_url;
     if (thumbnail?.startsWith(publicPrefix)) {
-      const path = decodeURIComponent(thumbnail.slice(publicPrefix.length).split("?")[0] ?? "");
+      const path = decodeURIComponent(thumbnail.slice(publicPrefix.length).split("?")[0]);
       if (path) removals.push(assets.remove([path]));
     }
     void Promise.allSettled(removals);
@@ -1127,6 +1128,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   };
 });
 
+// Dev-server HMR wiring: whether import.meta.hot exists depends on the runner,
+// not on any app behaviour, so coverage of this branch is meaningless.
+/* v8 ignore start */
 if (import.meta.hot) {
   import.meta.hot.accept(acceptHMRUpdate(useBookmarksStore, import.meta.hot));
 }
+/* v8 ignore stop */

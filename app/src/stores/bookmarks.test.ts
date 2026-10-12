@@ -2212,4 +2212,839 @@ describe("useBookmarksStore", () => {
       expect(eqUpdate).toHaveBeenCalledWith("id", "bm-1");
     });
   });
+
+  /** A promise plus the functions that settle it, for holding a call in flight. */
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  }
+
+  const syncState = (overrides: Record<string, unknown> = {}) => ({
+    watermark: "2026-10-09T00:00:00Z",
+    cursor: null,
+    hasMore: false,
+    ...overrides,
+  });
+
+  const dated = (id: string, created: string, updated = created, extra: Partial<Bookmark> = {}) =>
+    makeBookmark({
+      id,
+      created_at: `2026-10-${created}T00:00:00Z`,
+      updated_at: `2026-10-${updated}T00:00:00Z`,
+      ...extra,
+    });
+
+  /** Route `from(table)` to a per-table list query stub. */
+  function routeTables(bookmarks: ReturnType<typeof listQuery>, deletions = listQuery([])) {
+    from.mockImplementation((table: string) => ({
+      select: () => (table === "bookmark_deletions" ? deletions : bookmarks),
+    }));
+  }
+
+  describe("list edge cases", () => {
+    test("a list response with no data and no error shows an empty list", async () => {
+      from.mockReturnValue({ select: () => listQuery(null) });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(store.bookmarks).toEqual([]);
+      expect(store.hasMore).toBe(false);
+    });
+
+    test("rows without an embedded tags array never match a tag filter and add no tags", async () => {
+      const tag = { id: "t1", name: "vue", color: "#888888" };
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "untagged", tags: null as unknown as Bookmark["tags"] }),
+        makeBookmark({ id: "tagged", tags: [tag] }),
+      ];
+      store.setActiveTagIds(["t1"]);
+
+      expect(store.visibleBookmarks.map((b) => b.id)).toEqual(["tagged"]);
+      expect(store.allTags).toEqual([tag]);
+    });
+
+    test("loadMore with more pages flagged but no cursor stops paging without a query", async () => {
+      getSyncState.mockResolvedValue(syncState({ hasMore: true }));
+      routeTables(listQuery([]));
+      const store = useBookmarksStore();
+      await store.fetch();
+      expect(store.hasMore).toBe(true);
+      from.mockClear();
+
+      await store.loadMore();
+
+      expect(store.hasMore).toBe(false);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    test("an empty older page ends paging and keeps the existing cursor", async () => {
+      const firstPage = Array.from({ length: 50 }, (_, i) =>
+        dated(`p${String(i).padStart(2, "0")}`, String(30 - Math.floor(i / 5)).padStart(2, "0")),
+      );
+      from.mockReturnValueOnce({ select: () => listQuery(firstPage) });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      from.mockReturnValueOnce({ select: () => listQuery([]) });
+      await store.loadMore();
+
+      expect(store.hasMore).toBe(false);
+      expect(store.bookmarks).toHaveLength(50);
+      expect(replaceBookmarksList).toHaveBeenLastCalledWith(expect.any(Array), {
+        watermark: "2026-10-30T00:00:00Z",
+        cursor: { created_at: "2026-10-21T00:00:00Z", id: "p49" },
+        hasMore: false,
+      });
+    });
+  });
+
+  describe("offline snapshot", () => {
+    test("both offline stores failing leaves an empty list rather than an error", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      getBookmarksList.mockRejectedValue(new Error("IndexedDB blocked"));
+      getAllArticles.mockRejectedValue(new Error("IndexedDB blocked"));
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(store.bookmarks).toEqual([]);
+      expect(store.loading).toBe(false);
+      vi.unstubAllGlobals();
+    });
+
+    test("rows are newest first, with rows missing a created_at last", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      getBookmarksList.mockResolvedValue([
+        dated("older", "01"),
+        makeBookmark({ id: "undated", created_at: "" }),
+        dated("newer", "05"),
+      ]);
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["newer", "older", "undated"]);
+      vi.unstubAllGlobals();
+    });
+
+    test("an offline search matches the title or excerpt, case-insensitively", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      getBookmarksList.mockResolvedValue([
+        dated("by-title", "03", "03", { title: "Vue tips" }),
+        dated("by-excerpt", "02", "02", { title: null, excerpt: "All about vue" }),
+        dated("unrelated", "01", "01", { title: "Rust", excerpt: null }),
+      ]);
+
+      const store = useBookmarksStore();
+      store.setSearchQuery("VUE");
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["by-title", "by-excerpt"]);
+      vi.unstubAllGlobals();
+    });
+
+    test("an INSERT while the unfiltered offline snapshot is up is shown", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      getBookmarksList.mockResolvedValue([dated("cached", "01")]);
+      const store = useBookmarksStore();
+      await store.fetch();
+      vi.unstubAllGlobals();
+      store.subscribeToChanges();
+
+      emitRealtime({ eventType: "INSERT", new: dated("live", "05") });
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["live", "cached"]);
+    });
+  });
+
+  describe("results that arrive after reset", () => {
+    test("a persisted snapshot loaded after reset is not shown", async () => {
+      getSyncState.mockResolvedValue(syncState());
+      const snapshot = deferred<Bookmark[]>();
+      getBookmarksList.mockReturnValue(snapshot.promise);
+
+      const store = useBookmarksStore();
+      const pending = store.fetch();
+      await vi.waitFor(() => expect(getBookmarksList).toHaveBeenCalled());
+      store.reset();
+      snapshot.resolve([dated("stale", "01")]);
+      await pending;
+
+      expect(store.bookmarks).toEqual([]);
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    test("a delta that lands after reset is discarded", async () => {
+      routeTables(listQuery([dated("a", "01")]));
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      const delta = listQuery();
+      const response = deferred<unknown>();
+      delta.result.mockReturnValue(response.promise);
+      routeTables(delta);
+      const pending = store.fetch();
+      await vi.waitFor(() => expect(delta.result).toHaveBeenCalled());
+      store.reset();
+      response.resolve({ data: [dated("b", "05")], error: null });
+      await pending;
+
+      expect(store.bookmarks).toEqual([]);
+      expect(replaceBookmarksList).toHaveBeenCalledTimes(1);
+    });
+
+    test("a delta whose tombstone cleanup finishes after reset is discarded", async () => {
+      routeTables(listQuery([dated("a", "01"), dated("b", "02")]));
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      const cleanup = deferred<void>();
+      removeCachedBookmark.mockReturnValue(cleanup.promise);
+      routeTables(
+        listQuery([]),
+        listQuery([{ bookmark_id: "a", deleted_at: "2026-10-10T00:00:00Z" }]),
+      );
+      const pending = store.fetch();
+      await vi.waitFor(() => expect(removeCachedBookmark).toHaveBeenCalledWith("a"));
+      store.reset();
+      cleanup.resolve();
+      await pending;
+
+      expect(store.bookmarks).toEqual([]);
+      expect(replaceBookmarksList).toHaveBeenCalledTimes(1);
+    });
+
+    test("a list request failing after reset doesn't put up the offline snapshot", async () => {
+      const query = listQuery();
+      const response = deferred<unknown>();
+      query.result.mockReturnValue(response.promise);
+      from.mockReturnValue({ select: () => query });
+      getBookmarksList.mockResolvedValue([dated("cached", "01")]);
+
+      const store = useBookmarksStore();
+      const pending = store.fetch();
+      await vi.waitFor(() => expect(query.result).toHaveBeenCalled());
+      store.reset();
+      response.reject(new Error("Failed to fetch"));
+      await pending;
+
+      expect(store.bookmarks).toEqual([]);
+      expect(getBookmarksList).not.toHaveBeenCalled();
+    });
+
+    test("an offline snapshot loaded after reset is not shown", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      const list = deferred<Bookmark[]>();
+      getBookmarksList.mockReturnValue(list.promise);
+
+      const store = useBookmarksStore();
+      const pending = store.fetch();
+      await vi.waitFor(() => expect(getBookmarksList).toHaveBeenCalled());
+      store.reset();
+      list.resolve([dated("cached", "01")]);
+      await pending;
+
+      expect(store.bookmarks).toEqual([]);
+      vi.unstubAllGlobals();
+    });
+  });
+
+  describe("delta sync edge cases", () => {
+    async function synced() {
+      routeTables(listQuery([dated("b", "05"), dated("a", "01")]));
+      const store = useBookmarksStore();
+      await store.fetch();
+      return store;
+    }
+
+    test("a 401 on the deletions query ends the login", async () => {
+      const store = await synced();
+      const deletions = listQuery();
+      deletions.result.mockResolvedValue({ data: null, error: { message: "JWT" }, status: 401 });
+      routeTables(listQuery([]), deletions);
+      authState.sessionExpired.mockImplementation(() => {
+        authState.userId = null;
+      });
+
+      await store.fetch();
+
+      expect(authState.sessionExpired).toHaveBeenCalledOnce();
+      expect(getBookmarksList).not.toHaveBeenCalled();
+    });
+
+    test("a failed deletions query falls back to the offline copy", async () => {
+      const store = await synced();
+      getBookmarksList.mockResolvedValue([dated("cached", "01")]);
+      routeTables(listQuery([]), listQuery(null, { message: "network" }));
+
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["cached"]);
+    });
+
+    test("empty delta responses leave the list as it was", async () => {
+      const store = await synced();
+      routeTables(listQuery(null), listQuery(null));
+
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["b", "a"]);
+    });
+
+    test("a row changed and then deleted in the same delta is not shown", async () => {
+      const store = await synced();
+      routeTables(
+        listQuery([dated("c", "07")]),
+        listQuery([{ bookmark_id: "c", deleted_at: "2026-10-08T00:00:00Z" }]),
+      );
+
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["b", "a"]);
+    });
+
+    test("a tombstone is applied even when clearing its offline data fails", async () => {
+      const store = await synced();
+      deleteBookmarkMeta.mockRejectedValue(new Error("IndexedDB blocked"));
+      routeTables(
+        listQuery([]),
+        listQuery([{ bookmark_id: "a", deleted_at: "2026-10-10T00:00:00Z" }]),
+      );
+
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["b"]);
+    });
+
+    test("an unreadable sync state loads a fresh first page", async () => {
+      getSyncState.mockRejectedValue(new Error("IndexedDB blocked"));
+      const page = listQuery([dated("fresh", "05")]);
+      routeTables(page);
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(page.limit).toHaveBeenCalledWith(50);
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["fresh"]);
+    });
+
+    test("an unreadable persisted list on a cold start is rebuilt from the delta", async () => {
+      getSyncState.mockResolvedValue(syncState());
+      getBookmarksList.mockRejectedValue(new Error("IndexedDB blocked"));
+      const delta = listQuery([dated("b", "06", "10")]);
+      routeTables(delta);
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(delta.gte).toHaveBeenCalledWith("updated_at", "2026-10-08T23:55:00.000Z");
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["b"]);
+    });
+  });
+
+  describe("realtime edge cases", () => {
+    test("an INSERT without embedded tags gets an empty tag list", async () => {
+      from.mockReturnValue({ select: () => listQuery([]) });
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+
+      emitRealtime({ eventType: "INSERT", new: { ...dated("n", "05"), tags: undefined } });
+
+      expect(store.bookmarks[0]?.tags).toEqual([]);
+    });
+
+    test("a DELETE without an id in its payload changes nothing", async () => {
+      from.mockReturnValue({ select: () => listQuery([dated("a", "01")]) });
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+
+      emitRealtime({ eventType: "DELETE", old: {} });
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["a"]);
+    });
+
+    test("unsubscribing without a subscription is a no-op", () => {
+      const store = useBookmarksStore();
+      store.unsubscribeFromChanges();
+
+      expect(removeChannel).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("fetchOne fallbacks", () => {
+    function failingSingle() {
+      from.mockReturnValue({
+        select: () => ({
+          eq: () => ({
+            single: vi.fn().mockResolvedValue({ data: null, error: { message: "down" } }),
+          }),
+        }),
+      });
+    }
+
+    test("offline, it reads the downloaded copy without touching the network", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      getArticle.mockResolvedValue({
+        id: "dl",
+        content_md: "cached body",
+        translated_content_md: null,
+        images: [],
+        cachedAt: "2026-01-01T00:00:00Z",
+        bookmark: makeBookmark({ id: "dl", title: "Downloaded" }),
+      });
+
+      const store = useBookmarksStore();
+      const result = await store.fetchOne("dl");
+
+      expect(from).not.toHaveBeenCalled();
+      expect(result?.title).toBe("Downloaded");
+      expect(result?.content_md).toBe("cached body");
+      vi.unstubAllGlobals();
+    });
+
+    test("with nothing readable anywhere it returns null", async () => {
+      failingSingle();
+      getArticle.mockRejectedValue(new Error("IndexedDB blocked"));
+      getBookmarksList.mockRejectedValue(new Error("IndexedDB blocked"));
+
+      const store = useBookmarksStore();
+      const result = await store.fetchOne("missing");
+
+      expect(result).toBeNull();
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("listed metadata without a downloaded copy has no body", async () => {
+      failingSingle();
+      const meta = makeBookmark({ id: "m" }) as Partial<Bookmark>;
+      delete meta.content_md;
+      delete meta.translated_content_md;
+      getBookmarksList.mockResolvedValue([meta]);
+
+      const store = useBookmarksStore();
+      const result = await store.fetchOne("m");
+
+      expect(result?.content_md).toBeNull();
+      expect(result?.translated_content_md).toBeNull();
+    });
+
+    test("a loaded row without a downloaded copy keeps its body and translation", async () => {
+      failingSingle();
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "m", content_md: "body", translated_content_md: "tr" }),
+      ];
+
+      const result = await store.fetchOne("m");
+
+      expect(result?.content_md).toBe("body");
+      expect(result?.translated_content_md).toBe("tr");
+      expect(store.bookmarks).toHaveLength(1);
+    });
+
+    test("a downloaded copy without stored metadata is readable as a placeholder", async () => {
+      failingSingle();
+      getArticle.mockResolvedValue({
+        id: "legacy",
+        content_md: "old body",
+        translated_content_md: "old translation",
+        images: [],
+        cachedAt: "2026-01-02T00:00:00Z",
+      });
+
+      const store = useBookmarksStore();
+      const result = await store.fetchOne("legacy");
+
+      expect(result).toMatchObject({
+        id: "legacy",
+        title: "Offline Article",
+        content_md: "old body",
+        translated_content_md: "old translation",
+        created_at: "2026-01-02T00:00:00Z",
+      });
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["legacy"]);
+    });
+  });
+
+  describe("adding: failures", () => {
+    function failingInsert(error: unknown) {
+      return {
+        insert: () => ({ select: () => ({ single: async () => ({ data: null, error }) }) }),
+      };
+    }
+
+    test("add reports a non-duplicate insert error", async () => {
+      from.mockReturnValue(failingInsert({ code: "42501", message: "permission denied" }));
+
+      const store = useBookmarksStore();
+      const result = await store.add("https://arc90.com/new");
+
+      expect(result).toEqual({ error: "permission denied" });
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("add reports the unique violation when the existing row can't be found", async () => {
+      from.mockReturnValueOnce(failingInsert({ code: "23505", message: "duplicate key" }));
+      from.mockReturnValueOnce({
+        select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+      });
+
+      const store = useBookmarksStore();
+      const result = await store.add("https://arc90.com/new");
+
+      expect(result).toEqual({ error: "duplicate key" });
+    });
+
+    test("addNote signed out reports an error without writing", async () => {
+      authState.userId = null;
+
+      const store = useBookmarksStore();
+      const result = await store.addNote("hello");
+
+      expect(result.error).toBeTruthy();
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    test("addNote reports an insert error", async () => {
+      from.mockReturnValue(failingInsert({ message: "insert failed" }));
+
+      const store = useBookmarksStore();
+      const result = await store.addNote("hello");
+
+      expect(result).toEqual({ error: "insert failed" });
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("addFile rejects a .docx over 5MB without calling the edge function", async () => {
+      const store = useBookmarksStore();
+      const big = new Uint8Array(5 * 1024 * 1024 + 1);
+      const result = await store.addFile(new File([big], "big.docx"));
+
+      expect(result.error).toContain("5MB");
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    test("addFile reports an edge function error", async () => {
+      invoke.mockResolvedValue({ data: null, error: { message: "conversion failed" } });
+
+      const store = useBookmarksStore();
+      const result = await store.addFile(new File(["x"], "a.docx"));
+
+      expect(result).toEqual({ error: "conversion failed" });
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("addPdf rejects a file that isn't a PDF", async () => {
+      const store = useBookmarksStore();
+      const result = await store.addPdf(new File(["x"], "notes.md"));
+
+      expect(result.error).toBe("Unsupported file type. Use .pdf.");
+      expect(invoke).not.toHaveBeenCalled();
+    });
+
+    test("addPdf reports an edge function error", async () => {
+      invoke.mockResolvedValue({ data: null, error: { message: "extraction failed" } });
+
+      const store = useBookmarksStore();
+      const result = await store.addPdf(new File(["%PDF"], "a.pdf"));
+
+      expect(result).toEqual({ error: "extraction failed" });
+      expect(store.bookmarks).toEqual([]);
+    });
+  });
+
+  describe("more failed writes leave local state as the server has it", () => {
+    const failingEq = () => vi.fn().mockResolvedValue({ error: { message: "network down" } });
+
+    test("setViewMode reports the error and keeps the mode", async () => {
+      from.mockReturnValue({ update: () => ({ eq: failingEq() }) });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", view_mode: "markdown" })];
+
+      const result = await store.setViewMode("1", "original");
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks[0]?.view_mode).toBe("markdown");
+    });
+
+    test("setPublic reports the error and keeps is_public", async () => {
+      from.mockReturnValue({ update: () => ({ eq: failingEq() }) });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", is_public: false })];
+
+      const result = await store.setPublic("1", true);
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks[0]?.is_public).toBe(false);
+    });
+
+    test("markUnread reports the error and keeps read_at", async () => {
+      from.mockReturnValue({ update: () => ({ eq: failingEq() }) });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", read_at: "2026-01-01T00:00:00Z" })];
+
+      const result = await store.markUnread("1");
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks[0]?.read_at).toBe("2026-01-01T00:00:00Z");
+    });
+
+    test("removeTag reports the error and keeps the tag", async () => {
+      const tag = { id: "t1", name: "vue", color: "#888888" };
+      from.mockReturnValue({ delete: () => ({ eq: () => ({ eq: failingEq() }) }) });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", tags: [tag] })];
+
+      const result = await store.removeTag("1", "t1");
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks[0]?.tags).toEqual([tag]);
+    });
+
+    test("trashOriginalPdf reports a Storage error and keeps the original", async () => {
+      storageRemove.mockResolvedValue({ error: { message: "storage down" } });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", pdf_path: "user-1/a.pdf" })];
+
+      const result = await store.trashOriginalPdf("1");
+
+      expect(result).toEqual({ error: "storage down" });
+      expect(store.bookmarks[0]?.pdf_path).toBe("user-1/a.pdf");
+      expect(from).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("writes to a bookmark that isn't loaded here", () => {
+    // The reader can open a row that never entered this session's list
+    // (e.g. via a direct link); the write still goes to the server.
+    const okUpdate = () => {
+      const eq = vi.fn().mockResolvedValue({ error: null });
+      from.mockReturnValue({
+        update: vi.fn(() => ({ eq })),
+        delete: () => ({ eq: () => ({ eq }) }),
+      });
+      return eq;
+    };
+
+    test.each([
+      ["setViewMode", (s: ReturnType<typeof useBookmarksStore>) => s.setViewMode("x", "original")],
+      ["setPublic", (s: ReturnType<typeof useBookmarksStore>) => s.setPublic("x", true)],
+      ["markRead", (s: ReturnType<typeof useBookmarksStore>) => s.markRead("x")],
+      ["markUnread", (s: ReturnType<typeof useBookmarksStore>) => s.markUnread("x")],
+      ["archive", (s: ReturnType<typeof useBookmarksStore>) => s.archive("x")],
+      ["removeTag", (s: ReturnType<typeof useBookmarksStore>) => s.removeTag("x", "t1")],
+      [
+        "updateContent",
+        (s: ReturnType<typeof useBookmarksStore>) =>
+          s.updateContent("x", { title: "T", content_md: "b", word_count: 1, reading_time: 1 }),
+      ],
+    ])("%s is sent to the server and reports success", async (_name, write) => {
+      const eq = okUpdate();
+      const store = useBookmarksStore();
+
+      const result = await write(store);
+
+      expect(result.error).toBeNull();
+      expect(eq).toHaveBeenCalled();
+      expect(store.bookmarks).toEqual([]);
+      expect(refreshCached).not.toHaveBeenCalled();
+    });
+
+    test("updateProgress is sent to the server", async () => {
+      const eq = okUpdate();
+      const store = useBookmarksStore();
+
+      await store.updateProgress("x", 0.5);
+
+      expect(eq).toHaveBeenCalledWith("id", "x");
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("translateBookmark returns the translation without caching it locally", async () => {
+      invoke.mockResolvedValue({
+        data: { translated_text: "Hallo", translated_lang: "DE" },
+        error: null,
+      });
+      const store = useBookmarksStore();
+
+      const result = await store.translateBookmark("x", "Hello", "DE");
+
+      expect(result).toEqual({ translatedText: "Hallo", error: null });
+      expect(refreshCached).not.toHaveBeenCalled();
+      expect(from).not.toHaveBeenCalled();
+    });
+  });
+
+  test("refresh reports a failed reset and keeps the row's status", async () => {
+    from.mockReturnValue({
+      update: () => ({ eq: vi.fn().mockResolvedValue({ error: { message: "down" } }) }),
+    });
+    const store = useBookmarksStore();
+    store.bookmarks = [makeBookmark({ id: "1", status: "failed", error_message: "boom" })];
+
+    const result = await store.refresh("1");
+
+    expect(result.error).toBeTruthy();
+    expect(store.bookmarks[0]).toMatchObject({ status: "failed", error_message: "boom" });
+  });
+
+  describe("addTag edge cases", () => {
+    const tag = { id: "t1", name: "vue", color: "#888888" };
+
+    function tagTables(tagResult: { data: unknown; error: unknown }, joinError: unknown = null) {
+      const joinUpsert = vi.fn().mockResolvedValue({ error: joinError });
+      from.mockImplementation((table: string) =>
+        table === "tags"
+          ? { upsert: () => ({ select: () => ({ single: async () => tagResult }) }) }
+          : { upsert: joinUpsert },
+      );
+      return joinUpsert;
+    }
+
+    test("a blank name is ignored without writing", async () => {
+      const store = useBookmarksStore();
+      const result = await store.addTag("1", "   ");
+
+      expect(result.error).toBeNull();
+      expect(from).not.toHaveBeenCalled();
+    });
+
+    test("a failed tag upsert reports the error and links nothing", async () => {
+      const joinUpsert = tagTables({ data: null, error: { message: "denied" } });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", tags: [] })];
+
+      const result = await store.addTag("1", "vue");
+
+      expect(result.error).toBeTruthy();
+      expect(joinUpsert).not.toHaveBeenCalled();
+      expect(store.bookmarks[0]?.tags).toEqual([]);
+    });
+
+    test("a tag upsert returning no row is treated as a failure", async () => {
+      const joinUpsert = tagTables({ data: null, error: null });
+      const store = useBookmarksStore();
+
+      const result = await store.addTag("1", "vue");
+
+      expect(result.error).toBeTruthy();
+      expect(joinUpsert).not.toHaveBeenCalled();
+    });
+
+    test("a failed link reports the error and leaves the bookmark's tags alone", async () => {
+      tagTables({ data: tag, error: null }, { message: "denied" });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", tags: [] })];
+
+      const result = await store.addTag("1", "vue");
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks[0]?.tags).toEqual([]);
+    });
+
+    test("a tag the bookmark already carries is not listed twice", async () => {
+      tagTables({ data: tag, error: null });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", tags: [tag] })];
+
+      const result = await store.addTag("1", "vue");
+
+      expect(result.error).toBeNull();
+      expect(store.bookmarks[0]?.tags).toEqual([tag]);
+    });
+  });
+
+  describe("best-effort offline cleanup", () => {
+    test("archive succeeds even when evicting the offline copy fails", async () => {
+      from.mockReturnValue({ update: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }) });
+      removeCachedBookmark.mockRejectedValue(new Error("IndexedDB blocked"));
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1" })];
+
+      const result = await store.archive("1");
+
+      expect(result.error).toBeNull();
+      expect(store.bookmarks[0]?.archived).toBe(true);
+    });
+
+    test("updateContent succeeds even when refreshing the offline copy fails", async () => {
+      from.mockReturnValue({ update: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }) });
+      refreshCached.mockRejectedValue(new Error("IndexedDB blocked"));
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", content_md: "old" })];
+
+      const result = await store.updateContent("1", {
+        title: "T",
+        content_md: "new",
+        word_count: 1,
+        reading_time: 1,
+      });
+
+      expect(result.error).toBeNull();
+      expect(store.bookmarks[0]?.content_md).toBe("new");
+      expect(refreshCached).toHaveBeenCalled();
+    });
+
+    test("remove succeeds even when clearing offline data fails", async () => {
+      from.mockReturnValue({ delete: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }) });
+      deleteBookmarkMeta.mockRejectedValue(new Error("IndexedDB blocked"));
+      removeCachedBookmark.mockRejectedValue(new Error("IndexedDB blocked"));
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1" })];
+
+      const result = await store.remove("1");
+
+      expect(result.error).toBeNull();
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("a thumbnail URL pointing at the assets bucket root names nothing to remove", async () => {
+      from.mockReturnValue({ delete: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }) });
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({
+          id: "1",
+          thumbnail_url: "https://proj.supabase.co/storage/v1/object/public/bookmark-assets/?v=1",
+        }),
+      ];
+
+      await store.remove("1");
+
+      expect(storageRemoveFrom).not.toHaveBeenCalled();
+    });
+
+    test("a failed delete of a row that isn't loaded leaves the list empty", async () => {
+      from.mockReturnValue({
+        delete: () => ({ eq: vi.fn().mockResolvedValue({ error: { message: "down" } }) }),
+      });
+      const store = useBookmarksStore();
+
+      const result = await store.remove("elsewhere");
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks).toEqual([]);
+      expect(deleteBookmarkMeta).not.toHaveBeenCalled();
+    });
+
+    test("removing a row that isn't loaded still clears its offline data, with no Storage cleanup", async () => {
+      from.mockReturnValue({ delete: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }) });
+      const store = useBookmarksStore();
+
+      const result = await store.remove("elsewhere");
+
+      expect(result.error).toBeNull();
+      expect(deleteBookmarkMeta).toHaveBeenCalledWith("elsewhere");
+      expect(removeCachedBookmark).toHaveBeenCalledWith("elsewhere");
+      expect(storageRemoveFrom).not.toHaveBeenCalled();
+    });
+  });
 });
