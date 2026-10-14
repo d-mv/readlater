@@ -68,13 +68,15 @@ let progressSession: ProgressSession | null = null;
 // page goes away or the reader switches bookmarks.
 const PROGRESS_WRITE_DELTA = 0.02;
 
-function flushProgress() {
+// Resolves to whether the write landed (true when there was nothing to write).
+async function flushProgress(): Promise<boolean> {
   const session = progressSession;
-  if (!session || session.pending === null) return;
+  if (!session || session.pending === null) return true;
   const value = session.pending;
   session.pending = null;
   session.lastWritten = value;
-  store.updateProgress(session.id, value);
+  const { error } = await store.updateProgress(session.id, value);
+  return error === null;
 }
 
 const flushProgressDebounced = useDebouncedFn(flushProgress, 2000);
@@ -135,11 +137,38 @@ function onPageHide() {
   flushProgress();
 }
 
+// The reader stays open across app switches, and a backgrounded tab or PWA
+// (iOS suspends it, Realtime socket included) misses positions saved on
+// another device meanwhile. On return: send what this device still owes, then
+// move to the saved position if it's elsewhere. Only while tracking — before
+// that the restore reads the row fresh anyway.
+async function catchUpProgress() {
+  const session = progressSession;
+  if (!session || session.phase !== "tracking" || !navigator.onLine) return;
+  const tracking = () => progressSession === session && session.phase === "tracking";
+  // Something still unsent means this device has the newest position.
+  if (!(await flushProgress()) || !(await store.sendUnsentProgress())) return;
+  const row = await store.fetchOne(session.id);
+  if (!row || !tracking() || session.pending !== null) return;
+  const target = row.progress ?? 0;
+  if (Math.abs(target - progress.value) < PROGRESS_WRITE_DELTA) return;
+  session.lastWritten = target;
+  restoreScroll(target);
+}
+
+// iOS often skips pagehide when a PWA is swiped away — hidden is the last
+// reliable moment to write.
+function onVisibilityChange() {
+  if (document.visibilityState === "hidden") flushProgress();
+  else catchUpProgress();
+}
+
 // Offline, the reader shows the cached copy; images it couldn't save
 // (CORS-blocked hot links) render broken, so say how many up front.
 const online = ref(typeof navigator === "undefined" || navigator.onLine);
 function onConnectivityChange() {
   online.value = navigator.onLine;
+  if (online.value) catchUpProgress();
 }
 const imagesNotCachedNote = computed(() => {
   const count = online.value ? 0 : offlineCache.missingImageCount(props.id);
@@ -151,11 +180,13 @@ const imagesNotCachedNote = computed(() => {
 
 onMounted(() => {
   window.addEventListener("pagehide", onPageHide);
+  document.addEventListener("visibilitychange", onVisibilityChange);
   window.addEventListener("online", onConnectivityChange);
   window.addEventListener("offline", onConnectivityChange);
 });
 onUnmounted(() => {
   window.removeEventListener("pagehide", onPageHide);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
   window.removeEventListener("online", onConnectivityChange);
   window.removeEventListener("offline", onConnectivityChange);
   flushProgress();

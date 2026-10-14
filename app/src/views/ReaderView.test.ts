@@ -1,7 +1,7 @@
 import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { flushPromises, mount } from "@vue/test-utils";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import type { Bookmark } from "../lib/supabase";
 
 const { from, invoke, storageCreateSignedUrl, storageRemove, pushMock, realtimeChannel } =
@@ -72,6 +72,10 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
     ...overrides,
   } as Bookmark;
 }
+
+// A reader left mounted keeps its window/document listeners, and would answer
+// the visibility and connectivity events later tests dispatch.
+enableAutoUnmount(afterEach);
 
 describe("ReaderView", () => {
   beforeEach(() => {
@@ -1288,6 +1292,216 @@ describe("ReaderView", () => {
       window.dispatchEvent(new Event("pagehide"));
       await vi.advanceTimersByTimeAsync(2000);
       expect(update).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("reading progress across devices", () => {
+    afterEach(() => vi.restoreAllMocks());
+
+    function setVisibility(state: DocumentVisibilityState) {
+      vi.spyOn(document, "visibilityState", "get").mockReturnValue(state);
+      document.dispatchEvent(new Event("visibilitychange"));
+    }
+
+    function scrollArea(wrapper: ReturnType<typeof mount>) {
+      const el = wrapper.get('[data-testid="scroll-area"]').element as HTMLDivElement;
+      Object.defineProperty(el, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(el, "clientHeight", { value: 200, configurable: true });
+      return el;
+    }
+
+    /** Reader open and tracking at 50% (scrollTop 400). */
+    async function openAtHalf(serverRow: () => Bookmark) {
+      const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
+      const single = vi.fn(
+        async (): Promise<{ data: Bookmark | null; error: unknown }> => ({
+          data: serverRow(),
+          error: null,
+        }),
+      );
+      from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })), update });
+      useBookmarksStore().bookmarks = [
+        makeBookmark({ id: "1", status: "ready", progress: 0.5, content_md: "Text" }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      const el = scrollArea(wrapper);
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+      el.dispatchEvent(new Event("scroll"));
+      expect(el.scrollTop).toBe(400);
+      return { el, update, single };
+    }
+
+    test("hiding the app writes the pending position", async () => {
+      const { el, update } = await openAtHalf(() => makeBookmark({}));
+      el.scrollTop = 600;
+      el.dispatchEvent(new Event("scroll"));
+      await nextTick();
+
+      setVisibility("hidden");
+
+      expect(update).toHaveBeenCalledWith({ progress: 0.75 });
+    });
+
+    test("coming back moves to a position saved on another device", async () => {
+      const { el } = await openAtHalf(() =>
+        makeBookmark({ id: "1", status: "ready", progress: 0.25, content_md: "Text" }),
+      );
+
+      setVisibility("visible");
+      await flushPromises();
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(el.scrollTop).toBe(200);
+      expect(useBookmarksStore().bookmarks[0]!.progress).toBe(0.25);
+    });
+
+    test("coming back stays put when the saved position is where the reader is", async () => {
+      const { el, single } = await openAtHalf(() =>
+        makeBookmark({ id: "1", status: "ready", progress: 0.51, content_md: "Text" }),
+      );
+
+      setVisibility("visible");
+      await flushPromises();
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(single).toHaveBeenCalled();
+      expect(el.scrollTop).toBe(400);
+    });
+
+    test("reconnecting sends the position read offline instead of pulling an older one", async () => {
+      const { el, single } = await openAtHalf(() =>
+        makeBookmark({ id: "1", status: "ready", progress: 0.25, content_md: "Text" }),
+      );
+      const eq = vi.fn().mockResolvedValue({ error: { message: "Failed to fetch" } });
+      const update = vi.fn(() => ({ eq }));
+      from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })), update });
+      el.scrollTop = 600;
+      el.dispatchEvent(new Event("scroll"));
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(update).toHaveBeenCalledWith({ progress: 0.75 });
+
+      // Still failing: nothing pulled, nothing moved.
+      window.dispatchEvent(new Event("online"));
+      await flushPromises();
+      expect(single).not.toHaveBeenCalled();
+
+      // Back for real: the unsent write lands first, so the pull agrees with it.
+      eq.mockResolvedValue({ error: null });
+      single.mockImplementation(async () => ({
+        data: makeBookmark({ id: "1", status: "ready", progress: 0.75, content_md: "Text" }),
+        error: null,
+      }));
+      window.dispatchEvent(new Event("online"));
+      await flushPromises();
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(update).toHaveBeenLastCalledWith({ progress: 0.75 });
+      expect(single).toHaveBeenCalled();
+      expect(el.scrollTop).toBe(600);
+    });
+
+    test("a pending write that fails on return leaves the position alone", async () => {
+      const { el, single } = await openAtHalf(() => makeBookmark({}));
+      const eq = vi.fn().mockResolvedValue({ error: { message: "Failed to fetch" } });
+      from.mockReturnValue({
+        select: vi.fn(() => ({ eq: () => ({ single }) })),
+        update: () => ({ eq }),
+      });
+      el.scrollTop = 600;
+      el.dispatchEvent(new Event("scroll"));
+      await nextTick();
+
+      setVisibility("visible");
+      await flushPromises();
+
+      expect(eq).toHaveBeenCalled();
+      expect(single).not.toHaveBeenCalled();
+    });
+
+    test("scrolling while the saved position loads keeps the reader where it is", async () => {
+      const { el, single } = await openAtHalf(() => makeBookmark({}));
+      const row = deferredRow();
+      single.mockImplementation(() => row.promise);
+
+      setVisibility("visible");
+      await flushPromises();
+      el.scrollTop = 800;
+      el.dispatchEvent(new Event("scroll"));
+      row.resolve(makeBookmark({ id: "1", status: "ready", progress: 0.1, content_md: "Text" }));
+      await flushPromises();
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(el.scrollTop).toBe(800);
+    });
+
+    test("a saved position cleared elsewhere goes back to the top", async () => {
+      const { el } = await openAtHalf(() =>
+        makeBookmark({ id: "1", status: "ready", progress: null, content_md: "Text" }),
+      );
+
+      setVisibility("visible");
+      await flushPromises();
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(el.scrollTop).toBe(0);
+    });
+
+    test("a bookmark gone by the time it loads leaves the position alone", async () => {
+      const { el, single } = await openAtHalf(() => makeBookmark({}));
+      const row = deferredRow();
+      single.mockImplementation(() => row.promise);
+
+      setVisibility("visible");
+      await flushPromises();
+      useBookmarksStore().bookmarks = [];
+      row.resolve(null);
+      await flushPromises();
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+
+      expect(el.scrollTop).toBe(400);
+    });
+
+    /** A `.single()` response held until the test resolves it (null: not found). */
+    function deferredRow() {
+      let resolve!: (row: Bookmark | null) => void;
+      const promise = new Promise<{ data: Bookmark | null; error: unknown }>((res) => {
+        resolve = (row) =>
+          res(row ? { data: row, error: null } : { data: null, error: { code: "PGRST116" } });
+      });
+      return { promise, resolve };
+    }
+
+    test("offline, coming back doesn't try the server", async () => {
+      const { single } = await openAtHalf(() => makeBookmark({}));
+      vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+
+      setVisibility("visible");
+      await flushPromises();
+
+      expect(single).not.toHaveBeenCalled();
+    });
+
+    test("before the position is restored, coming back does nothing", async () => {
+      const single = vi.fn(() => new Promise(() => {}));
+      from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })) });
+      const listRow = makeBookmark({ id: "1", status: "ready", progress: 0.5 });
+      delete (listRow as unknown as Record<string, unknown>).content_md;
+      useBookmarksStore().bookmarks = [listRow];
+      mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      setVisibility("visible");
+      await flushPromises();
+
+      expect(single).toHaveBeenCalledTimes(1);
     });
   });
 });

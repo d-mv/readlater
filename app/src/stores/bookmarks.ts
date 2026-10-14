@@ -439,6 +439,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       if (isOffline || !auth.userId || (!auth.session && !(await auth.checkSession()))) {
         throw new Error("Offline or session unavailable");
       }
+      // Before the delta: it would otherwise bring back the server's older
+      // position for a row this device read offline.
+      await sendUnsentProgress();
       if (!query && (await syncRecent(isCurrent))) return;
       // A search result set is bounded and worth showing whole; only the
       // unfiltered list is paged.
@@ -1083,11 +1086,29 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     void Promise.allSettled(removals);
   }
 
-  async function updateProgress(id: string, progress: number) {
+  // Progress writes that failed (reading offline, a dropped request), by
+  // bookmark id — sent again before the next sync, or another device keeps
+  // showing the position from before. Kept in memory only.
+  const unsentProgress = new Map<string, number>();
+
+  // The local value moves even when the write fails: it is where the user is
+  // on this device.
+  async function updateProgress(id: string, progress: number): Promise<WriteResult> {
     const rounded = Math.round(progress * 10000) / 10000;
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) bookmark.progress = rounded;
-    await supabase.from("bookmarks").update({ progress: rounded }).eq("id", id);
+    const { error } = await supabase.from("bookmarks").update({ progress: rounded }).eq("id", id);
+    // An older write failing after a newer one landed resends the newest
+    // local value, not its own.
+    if (error) unsentProgress.set(id, bookmark?.progress ?? rounded);
+    else unsentProgress.delete(id);
+    return writeResult(error);
+  }
+
+  // Resolves to whether nothing is left unsent.
+  async function sendUnsentProgress(): Promise<boolean> {
+    await Promise.all([...unsentProgress].map(([id, value]) => updateProgress(id, value)));
+    return unsentProgress.size === 0;
   }
 
   return {
@@ -1129,6 +1150,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     addTag,
     removeTag,
     updateProgress,
+    sendUnsentProgress,
   };
 });
 

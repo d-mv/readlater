@@ -2215,6 +2215,84 @@ describe("useBookmarksStore", () => {
       expect(update).toHaveBeenCalledWith({ progress: 0.4258 });
       expect(eqUpdate).toHaveBeenCalledWith("id", "bm-1");
     });
+
+    test("a failed write is sent again", async () => {
+      const eqUpdate = vi
+        .fn()
+        .mockResolvedValueOnce({ error: { message: "Failed to fetch" } })
+        .mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq: eqUpdate }));
+      from.mockReturnValue({ update });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "bm-1", progress: 0 })];
+
+      expect((await store.updateProgress("bm-1", 0.3)).error).not.toBeNull();
+      expect(await store.sendUnsentProgress()).toBe(true);
+
+      expect(update).toHaveBeenLastCalledWith({ progress: 0.3 });
+      // Sent: nothing left to resend.
+      expect(await store.sendUnsentProgress()).toBe(true);
+      expect(update).toHaveBeenCalledTimes(2);
+    });
+
+    test("an older write failing after a newer one landed resends the newer value", async () => {
+      const older = deferred<{ error: unknown }>();
+      const eqUpdate = vi
+        .fn()
+        .mockReturnValueOnce(older.promise)
+        .mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq: eqUpdate }));
+      from.mockReturnValue({ update });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "bm-1", progress: 0 })];
+
+      const first = store.updateProgress("bm-1", 0.3);
+      await store.updateProgress("bm-1", 0.5);
+      older.resolve({ error: { message: "Failed to fetch" } });
+      await first;
+      await store.sendUnsentProgress();
+
+      expect(update).toHaveBeenLastCalledWith({ progress: 0.5 });
+    });
+
+    test("a write that keeps failing stays unsent", async () => {
+      const eqUpdate = vi.fn().mockResolvedValue({ error: { message: "Failed to fetch" } });
+      from.mockReturnValue({ update: vi.fn(() => ({ eq: eqUpdate })) });
+      const store = useBookmarksStore();
+
+      await store.updateProgress("gone", 0.5);
+
+      expect(await store.sendUnsentProgress()).toBe(false);
+      expect(eqUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    test("fetch sends unsent progress before the delta sync", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "bm-1", progress: 0 })];
+      const calls: string[] = [];
+      const failing = vi.fn().mockResolvedValue({ error: { message: "Failed to fetch" } });
+      from.mockReturnValue({ update: vi.fn(() => ({ eq: failing })) });
+      await store.updateProgress("bm-1", 0.6);
+
+      const update = vi.fn(() => ({
+        eq: vi.fn(async () => {
+          calls.push("update");
+          return { error: null };
+        }),
+      }));
+      const page = listQuery([]);
+      from.mockReturnValue({
+        update,
+        select: () => {
+          calls.push("select");
+          return page;
+        },
+      });
+      await store.fetch();
+
+      expect(update).toHaveBeenCalledWith({ progress: 0.6 });
+      expect(calls[0]).toBe("update");
+    });
   });
 
   /** A promise plus the functions that settle it, for holding a call in flight. */
