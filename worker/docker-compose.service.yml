@@ -1,0 +1,38 @@
+# The readlater-worker service as it runs on the VPS, in the shared
+# /opt/apps/docker-compose.yml (the deploy only rebuilds it; it never writes
+# this block). Kept here so the server can be rebuilt without guessing:
+# without the seccomp profile Chromium's sandbox can't start, and without
+# the secret the worker has no service key.
+#
+# Paste under `services:` of /opt/apps/docker-compose.yml, and the secret
+# under its top-level `secrets:`. The key file is root-only (chmod 600) and
+# holds only the Supabase secret key. The worker's other runtime settings
+# (SUPABASE_URL, …) live in /opt/apps/apps/readlater/worker/.env, which the
+# deploy's rsync never touches.
+services:
+  readlater-worker:
+    build:
+      context: ./apps/readlater/worker
+      dockerfile: Dockerfile
+    env_file:
+      - ./apps/readlater/worker/.env
+    restart: unless-stopped
+    # Chromium runs sandboxed (browserRender.ts: chromiumSandbox: true); the
+    # default Docker profile blocks the namespaces it needs.
+    security_opt:
+      - seccomp=/opt/apps/apps/readlater/worker/seccomp-chromium.json
+    # docker-entrypoint.sh opens this as root and hands it to the worker on
+    # fd 3; the key never enters any process environment.
+    secrets:
+      - readlater_supabase_secret_key
+    environment:
+      - SUPABASE_SECRET_KEY_FILE=/run/secrets/readlater_supabase_secret_key
+    # SIGTERM drain: the worker finishes or hands back the bookmark in flight.
+    stop_grace_period: 30s
+    mem_limit: 1g
+    networks:
+      - apps
+
+secrets:
+  readlater_supabase_secret_key:
+    file: /opt/apps/secrets/readlater_supabase_secret_key

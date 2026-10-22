@@ -1063,7 +1063,8 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
   build args.
 - `readlater-worker` — `worker/Dockerfile` (pinned `oven/bun:1.3.14-slim`,
   non-root `bun` user, `tini`, heartbeat HEALTHCHECK; §4). The server-side
-  compose (not in this repo) sets `stop_grace_period: 30s`, enough for the
+  compose block (copy: `worker/docker-compose.service.yml` — seccomp
+  profile, key secret, env file) sets `stop_grace_period: 30s`, enough for the
   20 s drain, `mem_limit: 1g` and `restart: unless-stopped`, which is what
   turns the worker's stall watchdog (exit 1 after 5 minutes without a
   heartbeat; §4) into an automatic restart. No public port; it needs outbound access
