@@ -110,3 +110,18 @@ Deno.test("createTurndownService: a plain link still gets Turndown's href escapi
 Deno.test("createTurndownService: an anchor without href is plain text", () => {
   assertEquals(md('<p>jump <a name="here">here</a></p>'), "jump here");
 });
+
+// Same escaping as Turndown's own link and image rules.
+Deno.test("createTurndownService: an unwrapped image escapes parentheses, spaces, quotes and alt markdown", () => {
+  const md = createTurndownService().turndown(
+    '<a href="https://x.test/Foo_(bar) 1.png" title=\'Say "hi"\'><img src="https://x.test/Foo_(bar) 1.png" alt="a *star*"></a>',
+  );
+  assertEquals(md, '![a \\*star\\*](<https://x.test/Foo_\\(bar\\) 1.png> "Say \\"hi\\"")');
+});
+
+Deno.test("createTurndownService: a block link escapes its destination and title", () => {
+  const md = createTurndownService().turndown(
+    '<a href="https://x.test/wiki/Foo_(bar)" title=\'A "b"\'><div><p>Read</p></div></a>',
+  );
+  assertEquals(md, '[Read](https://x.test/wiki/Foo_\\(bar\\) "A \\"b\\"")');
+});

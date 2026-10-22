@@ -17,6 +17,23 @@ interface RuleNode {
   querySelectorAll(selector: string): ArrayLike<{ getAttribute(name: string): string | null }>;
 }
 
+// The escaping Turndown's own link and image rules apply (turndown 7.2.4,
+// not exported): `<>()` in a destination are escaped and one with spaces is
+// wrapped in <>; quotes in a title are escaped; line breaks in attributes
+// collapse.
+function cleanAttribute(value: string | null): string {
+  return value ? value.replace(/(\n+\s*)+/g, "\n") : "";
+}
+
+function linkDestination(url: string): string {
+  const escaped = url.replace(/([<>()])/g, "\\$1");
+  return escaped.includes(" ") ? `<${escaped}>` : escaped;
+}
+
+function linkTitle(title: string): string {
+  return title ? ` "${title.replace(/"/g, '\\"')}"` : "";
+}
+
 export function createTurndownService(): TurndownService {
   const turndown = new TurndownService();
 
@@ -36,8 +53,7 @@ export function createTurndownService(): TurndownService {
     replacement: (content: string, domNode: unknown) => {
       const node = domNode as RuleNode;
       const href = node.getAttribute("href") || "";
-      const title = node.getAttribute("title") || "";
-      const titleAttr = title ? ` "${title}"` : "";
+      const titleAttr = linkTitle(cleanAttribute(node.getAttribute("title")));
 
       const cleanContent = content.trim().replace(/\n{2,}/g, "\n");
 
@@ -51,13 +67,13 @@ export function createTurndownService(): TurndownService {
         // textContent, so any text is a caption or label) and the link points
         // at the image's own file.
         if (src && href.trim() === src.trim() && textContent === "") {
-          const imgAlt = img.getAttribute("alt") || "";
-          return `\n\n![${imgAlt}](${src}${titleAttr})\n\n`;
+          const imgAlt = turndown.escape(cleanAttribute(img.getAttribute("alt")));
+          return `\n\n![${imgAlt}](${linkDestination(src)}${titleAttr})\n\n`;
         }
       }
 
       if (!cleanContent) return "";
-      return `[${cleanContent}](${href}${titleAttr})`;
+      return `[${cleanContent}](${linkDestination(href)}${titleAttr})`;
     },
   });
 
