@@ -196,7 +196,10 @@ async function runSubmit(save: () => Promise<{ error: string | null } | AddBookm
   }
 }
 
+// Cancel is disabled while "Add anyway" is in flight: the re-queue can't be
+// called back.
 function cancelDuplicate() {
+  epoch += 1;
   showError(null);
 }
 
@@ -224,7 +227,14 @@ async function confirmDuplicate() {
     <div v-if="phase.kind === 'confirmDuplicate'">
       <p class="m-0 text-base text-ink">This URL is already saved. Add it again?</p>
       <div class="mt-16 flex justify-end gap-8">
-        <Button variant="secondary" test-id="cancel-btn" @click="cancelDuplicate">Cancel</Button>
+        <Button
+          variant="secondary"
+          test-id="cancel-btn"
+          :disabled="submitting"
+          @click="cancelDuplicate"
+        >
+          Cancel
+        </Button>
         <Button test-id="confirm-btn" :disabled="submitting" @click="confirmDuplicate">
           Add anyway
         </Button>

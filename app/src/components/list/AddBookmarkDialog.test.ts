@@ -701,6 +701,23 @@ describe("AddBookmarkDialog", () => {
       expect(store.refresh).toHaveBeenCalledTimes(1);
     });
 
+    test("Cancel is unavailable while 'Add anyway' is being sent — it can't be called back", async () => {
+      const { store, wrapper } = await reachDuplicatePrompt();
+      const pending = deferred<{ error: string | null }>();
+      store.refresh = vi.fn().mockReturnValue(pending.promise);
+
+      await wrapper.get('button[data-testid="confirm-btn"]').trigger("click");
+
+      const cancel = wrapper.get('button[data-testid="cancel-btn"]');
+      expect(cancel.attributes("disabled")).toBeDefined();
+      await cancel.trigger("click");
+      pending.resolve({ error: null });
+      await flushPromises();
+
+      // The re-queue went through, so the dialog closes as for a plain add.
+      expect(wrapper.find("dialog").exists()).toBe(false);
+    });
+
     test("a re-fetch finishing after the dialog was dismissed doesn't touch the new form", async () => {
       const { store, wrapper } = await reachDuplicatePrompt();
       const pending = deferred<{ error: string | null }>();
