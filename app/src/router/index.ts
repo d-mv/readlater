@@ -1,6 +1,7 @@
 import { watch } from "vue";
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "../stores/auth";
+import { safeRedirect } from "../utils/redirect";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -58,8 +59,14 @@ router.beforeEach(async (to) => {
   // as "logged out" and redirecting away before it ever loads.
   await auth.init();
   leaveWhenSignedOut(auth);
-  if (!PUBLIC_ROUTE_NAMES.has(to.name as string) && !auth.isAuthenticated) return { name: "login" };
-  if (to.name === "login" && auth.isAuthenticated) return { name: "list" };
+  if (!PUBLIC_ROUTE_NAMES.has(to.name as string) && !auth.isAuthenticated) {
+    // The way back after signing in — a bookmarklet capture or a shared
+    // link would otherwise lose its URL and text.
+    return { name: "login", query: to.fullPath === "/" ? {} : { redirect: to.fullPath } };
+  }
+  if (to.name === "login" && auth.isAuthenticated) {
+    return safeRedirect(to.query.redirect) ?? { name: "list" };
+  }
   return true;
 });
 

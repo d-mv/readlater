@@ -1,4 +1,4 @@
-import { expect, rows, test } from "./fixtures";
+import { expect, rows, test, USER } from "./fixtures";
 
 function captureUrl(params: Record<string, string>) {
   return `/capture?${new URLSearchParams(params)}`;
@@ -67,10 +67,22 @@ test.describe("bookmarklet popup (/capture)", () => {
   test.describe("signed out", () => {
     test.use({ auth: "signed-out" });
 
-    test("redirects to login instead of saving", async ({ page, backend }) => {
+    test("goes to login instead of saving, then back to the same capture", async ({
+      page,
+      backend,
+    }) => {
       await page.goto(captureUrl({ url: "https://example.com/x" }));
-      await expect(page).toHaveURL(/\/login$/);
+      await expect(page).toHaveURL(/\/login\?redirect=/);
       expect(backend.callsTo("rest")).toHaveLength(0);
+
+      await page.getByLabel("Email").fill(USER.email);
+      await page.getByLabel("Password").fill(USER.password);
+      await page.getByRole("button", { name: "Sign in" }).click();
+
+      await expect(page).toHaveURL(/\/capture\?/);
+      await expect(page.getByTestId("save-btn")).toBeVisible();
+      // Still nothing saved until the click.
+      expect(backend.bookmarks).toHaveLength(0);
     });
   });
 });

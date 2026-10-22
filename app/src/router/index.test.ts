@@ -25,6 +25,28 @@ describe("router auth guard", () => {
     expect(router.currentRoute.value.name).toBe("login");
   });
 
+  test("sends a signed-out capture to login with the way back, query included", async () => {
+    await router.push("/capture?url=https://example.com&title=Example");
+
+    expect(router.currentRoute.value.name).toBe("login");
+    expect(router.currentRoute.value.query.redirect).toBe(
+      "/capture?url=https://example.com&title=Example",
+    );
+  });
+
+  test("the plain list needs no way back", async () => {
+    await router.push("/");
+    expect(router.currentRoute.value.query.redirect).toBeUndefined();
+  });
+
+  test("a signed-in visitor on login with a way back goes there", async () => {
+    getSession.mockResolvedValue({ data: { session: { user: { id: "u1" } } } });
+
+    await router.push("/login?redirect=/settings");
+
+    expect(router.currentRoute.value.name).toBe("settings");
+  });
+
   test("lets an unauthenticated visitor reach a public share route", async () => {
     await router.push("/s/abc-123");
     expect(router.currentRoute.value.name).toBe("public");

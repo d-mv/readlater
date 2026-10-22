@@ -6,9 +6,9 @@ test.describe("signed out", () => {
 
   test("protected pages redirect to the login screen", async ({ page }) => {
     await page.goto("/settings");
-    await expect(page).toHaveURL(/\/login$/);
+    await expect(page).toHaveURL(/\/login\?redirect=\/settings$/);
     await page.goto("/b/some-id");
-    await expect(page).toHaveURL(/\/login$/);
+    await expect(page).toHaveURL(/\/login\?redirect=\/b\/some-id$/);
   });
 
   test("signing in with the right password opens the reading list", async ({ page, backend }) => {
