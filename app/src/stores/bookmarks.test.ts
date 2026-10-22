@@ -3062,16 +3062,47 @@ describe("useBookmarksStore", () => {
       expect(store.bookmarks[0]?.tags).toEqual([tag]);
     });
 
-    test("trashOriginalPdf reports a Storage error and keeps the original", async () => {
+    test("trashOriginalPdf clears the row before deleting the file, and stops if that fails", async () => {
+      const order: string[] = [];
+      from.mockReturnValue({
+        update: () => ({
+          eq: vi.fn(async () => {
+            order.push("update");
+            return { error: { message: "network down" } };
+          }),
+        }),
+      });
+      storageRemove.mockImplementation(async () => {
+        order.push("remove");
+        return { error: null };
+      });
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "1", pdf_path: "user-1/a.pdf", view_mode: "original" }),
+      ];
+
+      const result = await store.trashOriginalPdf("1");
+
+      expect(result.error).toBeTruthy();
+      expect(order).toEqual(["update"]);
+      // The row still points at a file that still exists.
+      expect(store.bookmarks[0]?.pdf_path).toBe("user-1/a.pdf");
+      expect(store.bookmarks[0]?.view_mode).toBe("original");
+    });
+
+    test("trashOriginalPdf leaves a file it couldn't delete to the storage sweep", async () => {
+      from.mockReturnValue({
+        update: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }),
+      });
       storageRemove.mockResolvedValue({ error: { message: "storage down" } });
       const store = useBookmarksStore();
       store.bookmarks = [makeBookmark({ id: "1", pdf_path: "user-1/a.pdf" })];
 
       const result = await store.trashOriginalPdf("1");
 
-      expect(result).toEqual({ error: "storage down" });
-      expect(store.bookmarks[0]?.pdf_path).toBe("user-1/a.pdf");
-      expect(from).not.toHaveBeenCalled();
+      // Nothing points at the file any more; the sweep removes orphans.
+      expect(result).toEqual({ error: null });
+      expect(store.bookmarks[0]?.pdf_path).toBeNull();
     });
   });
 

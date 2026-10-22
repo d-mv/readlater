@@ -423,7 +423,7 @@ async function onOpenOriginalPdf() {
 }
 
 async function onTrashOriginalPdf() {
-  await store.trashOriginalPdf(props.id);
+  await run(store.trashOriginalPdf(props.id));
 }
 
 watch(

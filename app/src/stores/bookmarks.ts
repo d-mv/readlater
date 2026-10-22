@@ -745,19 +745,21 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
 
   // Only offered once parsing succeeded — content_md then stands on its own,
   // so the original can go without losing the ability to read the bookmark.
-  async function trashOriginalPdf(id: string): Promise<{ error: string | null }> {
+  // The row lets go of the file first: if that fails nothing changed, and a
+  // file whose delete then fails is an orphan the storage sweep removes —
+  // never a row pointing at a file that is gone.
+  async function trashOriginalPdf(id: string): Promise<WriteResult> {
     const bookmark = bookmarks.value.find((b) => b.id === id);
-    if (!bookmark?.pdf_path) return { error: null };
-
-    const { error: removeError } = await supabase.storage
-      .from(PDF_BUCKET)
-      .remove([bookmark.pdf_path]);
-    if (removeError) return { error: removeError.message };
+    if (!bookmark?.pdf_path) return writeResult(null);
+    const path = bookmark.pdf_path;
 
     const update = { pdf_path: null, view_mode: "markdown" as const };
-    await supabase.from("bookmarks").update(update).eq("id", id);
+    const { error } = await supabase.from("bookmarks").update(update).eq("id", id);
+    if (error) return writeResult(error);
     Object.assign(bookmark, update);
-    return { error: null };
+
+    await supabase.storage.from(PDF_BUCKET).remove([path]);
+    return writeResult(null);
   }
 
   // `text` is the body the reader is showing. It is not sent: the translate
