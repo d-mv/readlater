@@ -13,6 +13,12 @@ Deno.test("hasAllowedScheme: rejects javascript:", () => {
   assertEquals(hasAllowedScheme("javascript:alert(1)"), false);
 });
 
+Deno.test("hasAllowedScheme: rejects what URL() accepts but the database's ^https?:// check refuses", () => {
+  for (const url of ["http:example.com", "https:/example.com", "ht\ttp://example.com"]) {
+    assertEquals(hasAllowedScheme(url), false, url);
+  }
+});
+
 Deno.test("hasAllowedScheme: rejects an unparseable string", () => {
   assertEquals(hasAllowedScheme("not a url"), false);
 });

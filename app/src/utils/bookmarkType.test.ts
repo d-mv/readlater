@@ -33,7 +33,12 @@ describe("isHttpUrl", () => {
     "file:///etc/passwd",
     "not a url",
     "",
-  ])("rejects %s", (url) => expect(isHttpUrl(url)).toBe(false));
+    // URL() accepts these, but the database's ^https?:// check doesn't.
+    "http:example.com",
+    "https:/example.com",
+    " https://example.com",
+    "ht\ttp://example.com",
+  ])("rejects %j", (url) => expect(isHttpUrl(url)).toBe(false));
 });
 
 describe("detectBookmarkType scheme check", () => {

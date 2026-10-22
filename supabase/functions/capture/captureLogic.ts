@@ -5,12 +5,14 @@ const ALLOWED_SCHEMES = new Set(["http:", "https:"]);
 // path can't be bypassed via the other. A matched URL flows straight to the
 // worker's fetch, so accepting javascript:/data:/file:/etc. here isn't just
 // a data-quality issue — it hands the worker something it shouldn't fetch.
+//
+// The raw string must also start with http(s):// — the database's
+// bookmarks_url_http_only check — since URL() accepts "http:example.com" and
+// strips tabs; those would otherwise pass here and fail the insert with a 500.
+const HTTP_PREFIX = /^https?:\/\//i;
+
 export function hasAllowedScheme(url: string): boolean {
-  try {
-    return ALLOWED_SCHEMES.has(new URL(url).protocol);
-  } catch {
-    return false;
-  }
+  return HTTP_PREFIX.test(url) && URL.canParse(url);
 }
 
 export function isBareUrl(s: string): boolean {
