@@ -2,7 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { createFetchHtml, parseArticle } from "../src/parseArticle";
 import { BlockedUrlError } from "../src/urlGuard";
 import { CircuitBreakerOpenError } from "../src/circuitBreaker";
-import { HttpStatusError, ResponseTooLargeError, UnsupportedContentTypeError } from "../src/errors";
+import {
+  ExtractionTimeoutError,
+  HttpStatusError,
+  ResponseTooLargeError,
+  UnsupportedContentTypeError,
+} from "../src/errors";
 import { MAX_HTML_BYTES } from "../src/http";
 
 const FIXTURE_HTML = `
@@ -272,6 +277,25 @@ describe("parseArticle", () => {
         },
       ),
     ).rejects.toBe(error);
+    expect(rendered).toBe(0);
+  });
+
+  test("does not render a page whose extraction timed out — the browser would hit the same wall", async () => {
+    let rendered = 0;
+    const timeout = new ExtractionTimeoutError(20_000);
+    await expect(
+      parseArticle(
+        "https://example.com/huge",
+        async () => FIXTURE_HTML,
+        async () => {
+          rendered += 1;
+          return FIXTURE_HTML;
+        },
+        async () => {
+          throw timeout;
+        },
+      ),
+    ).rejects.toBe(timeout);
     expect(rendered).toBe(0);
   });
 

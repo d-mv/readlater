@@ -1,7 +1,6 @@
-import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
 import {
+  ExtractionTimeoutError,
   HttpStatusError,
   isTransientError,
   ResponseTooLargeError,
@@ -15,6 +14,7 @@ import {
   readBodyCapped,
   USER_AGENT,
 } from "./http";
+import { type ExtractedArticle, extractInWorker } from "./extract";
 import { readingTimeFromWordCount, wordCount } from "./reading";
 import { assertPublicUrl, BlockedUrlError, type LookupAll } from "./urlGuard";
 
@@ -96,14 +96,7 @@ export interface ParsedArticle {
   reading_time: number;
 }
 
-const MIN_EXTRACTED_LENGTH = 200;
-
-function extractArticle(html: string, url: string) {
-  const dom = new JSDOM(html, { url });
-  const article = new Readability(dom.window.document).parse();
-  const isSubstantial = (article?.textContent ?? "").trim().length >= MIN_EXTRACTED_LENGTH;
-  return isSubstantial ? article : null;
-}
+export type ExtractFn = (html: string, url: string) => Promise<ExtractedArticle | null>;
 
 export function createTurndownService(): TurndownService {
   const turndown = new TurndownService();
@@ -154,22 +147,25 @@ export async function parseArticle(
   url: string,
   fetchHtml: FetchHtml = defaultFetchHtml,
   renderHtml?: FetchHtml,
+  extract: ExtractFn = extractInWorker,
 ): Promise<ParsedArticle> {
-  let article = null;
+  let article: ExtractedArticle | null = null;
   let fetchError: unknown = null;
   let renderError: unknown = null;
 
   try {
-    article = extractArticle(await fetchHtml(url), url);
+    article = await extract(await fetchHtml(url), url);
   } catch (err) {
-    // A URL refused by the SSRF guard, a non-HTML resource or an oversized
-    // page gets no second chance through the browser — rendering would hit
-    // the same wall at a much higher cost. Anything else (e.g. 403 Forbidden
+    // A URL refused by the SSRF guard, a non-HTML resource, an oversized
+    // page or one Readability couldn't finish in time gets no second chance
+    // through the browser — rendering would hit the same wall at a much
+    // higher cost. Anything else (e.g. 403 Forbidden
     // or a network error) falls through to the renderHtml fallback below.
     if (
       err instanceof BlockedUrlError ||
       err instanceof UnsupportedContentTypeError ||
-      err instanceof ResponseTooLargeError
+      err instanceof ResponseTooLargeError ||
+      err instanceof ExtractionTimeoutError
     ) {
       throw err;
     }
@@ -178,7 +174,7 @@ export async function parseArticle(
 
   if (!article && renderHtml) {
     try {
-      article = extractArticle(await renderHtml(url), url);
+      article = await extract(await renderHtml(url), url);
     } catch (err) {
       renderError = err;
     }

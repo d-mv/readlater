@@ -519,18 +519,27 @@ avoids holding a websocket open just for this.
 **Article pipeline** (`worker/src/parseArticle.ts`) — fetch → Readability →
 Turndown, with a headless-browser fallback for JS-rendered pages:
 ```ts
-article = extractArticle(await fetchHtml(url), url); // Readability, requires >= 200 chars of textContent
-// BlockedUrlError / UnsupportedContentTypeError / ResponseTooLargeError → thrown, no fallback
+article = await extractInWorker(await fetchHtml(url), url); // Readability, requires >= 200 chars of textContent
+// BlockedUrlError / UnsupportedContentTypeError / ResponseTooLargeError /
+// ExtractionTimeoutError → thrown, no fallback
 
 if (!article && renderHtml) {
-  article = extractArticle(await renderHtml(url), url); // worker/src/browserRender.ts, Playwright chromium
+  article = await extractInWorker(await renderHtml(url), url); // worker/src/browserRender.ts, Playwright chromium
 }
 ```
+**Extraction runs on its own thread** (`worker/src/extract.ts`,
+`extractWorker.ts`): JSDOM + Readability are synchronous and, on some markup
+(thousands of tiny nested blocks), superlinear — minutes at 2 MB, during
+which the poll loop, its timeouts, the heartbeat and the SIGTERM drain could
+not run. Each extraction spawns a Bun `Worker` (~0.3 s) that is terminated
+after `EXTRACT_TIMEOUT_MS` (20 s; real pages take ~1–2 s, a 3 MB Wikipedia
+article 1.3 s) with `ExtractionTimeoutError` — permanent, since a retry would
+stall the same way.
 Plain `fetch()` only ever sees server-rendered HTML, so SPA pages whose
 content is assembled client-side (e.g. Perplexity search results) came back
 empty and failed extraction outright. `browserRender.ts` retries with a
 headless Chromium page only when the plain fetch failed (other than the
-three errors above) or wasn't substantial enough. `page.goto` waits for
+four errors above) or wasn't substantial enough. `page.goto` waits for
 `domcontentloaded` rather than `networkidle`, because pages with persistent
 background polling/streaming never reach network-idle; a navigation timeout
 is caught and whatever DOM loaded is used (unless it's under 50 chars). One

@@ -19,6 +19,15 @@ export class UnsupportedContentTypeError extends Error {
   }
 }
 
+/** Readability ran past its time limit on this page and was stopped. Not
+ * transient: the same page would stall the same way on every retry. */
+export class ExtractionTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Article extraction took longer than ${Math.round(timeoutMs / 1000)} s`);
+    this.name = "ExtractionTimeoutError";
+  }
+}
+
 /** The server compressed the body with something readBodyCapped can't decode. */
 export class UnsupportedContentEncodingError extends Error {
   constructor(encoding: string) {
