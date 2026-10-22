@@ -387,9 +387,24 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const since = new Date(Date.parse(watermark) - DELTA_OVERLAP_MS).toISOString();
     const { changed, deleted } = await queryDelta(since);
     if (!isCurrent()) return true;
+
+    // A downloaded copy would otherwise put a deleted row back into the
+    // persisted list (replaceBookmarksList keeps cached articles' metadata).
+    // Done before the size check: a fresh first page moves the watermark past
+    // these tombstones, so this is their only chance.
+    const gone = new Set(deleted.map((d) => d.bookmark_id));
+    const offlineCache = useOfflineCacheStore();
+    await Promise.all(
+      [...gone].map((id) =>
+        Promise.all([
+          offlineDb.deleteBookmarkMeta(id),
+          offlineCache.removeCachedBookmark(id),
+        ]).catch(() => {}),
+      ),
+    );
+    if (!isCurrent()) return true;
     if (changed.length > DELTA_LIMIT) return false;
 
-    const gone = new Set(deleted.map((d) => d.bookmark_id));
     const byId = new Map(
       bookmarks.value.filter((b) => !gone.has(b.id)).map((b) => [b.id, b] as const),
     );
@@ -403,19 +418,6 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     }
     for (const row of changed) watermark = latest(watermark, row.updated_at);
     for (const d of deleted) watermark = latest(watermark, d.deleted_at);
-
-    // A downloaded copy would otherwise put a deleted row back into the
-    // persisted list (replaceBookmarksList keeps cached articles' metadata).
-    const offlineCache = useOfflineCacheStore();
-    await Promise.all(
-      [...gone].map((id) =>
-        Promise.all([
-          offlineDb.deleteBookmarkMeta(id),
-          offlineCache.removeCachedBookmark(id),
-        ]).catch(() => {}),
-      ),
-    );
-    if (!isCurrent()) return true;
 
     bookmarks.value = [...byId.values()].sort(byCreatedAtDesc);
     listSession = { kind: "recent", cursor, watermark };

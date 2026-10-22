@@ -761,7 +761,8 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   once, trimmed to the paged window — older downloaded-article metadata is
   left to `loadMore()`). A changed row is applied only if loaded or inside the
   window; a row re-sent with the same `updated_at` keeps its loaded body;
-  tombstoned ids are evicted from the offline cache too. Over 200 changed rows,
+  tombstoned ids are evicted from the offline cache too — even when the delta
+  then turns out too large to apply. Over 200 changed rows,
   no sync state, or an empty list → a fresh first page. DB side:
   `bookmarks.updated_at` (before-update trigger; tag attach/detach on
   `bookmark_tags` bumps it too), `bookmark_deletions` (after-delete trigger,

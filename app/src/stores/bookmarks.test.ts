@@ -1842,6 +1842,24 @@ describe("useBookmarksStore", () => {
       expect(deleteBookmarkMeta).toHaveBeenCalledWith("a");
     });
 
+    test("a delta too large to apply still evicts the deleted rows it fetched", async () => {
+      tables(listQuery(firstPage()));
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      const many = Array.from({ length: 201 }, (_, i) => row(`n${i}`, "10", "10"));
+      tables(
+        listQuery(many),
+        listQuery([{ bookmark_id: "a", deleted_at: "2026-10-11T00:00:00Z" }]),
+      );
+      await store.fetch();
+
+      // The fresh first page moves the watermark past this tombstone, so this
+      // is the only chance to drop the deleted row's downloaded copy.
+      expect(removeCachedBookmark).toHaveBeenCalledWith("a");
+      expect(deleteBookmarkMeta).toHaveBeenCalledWith("a");
+    });
+
     test("a row re-sent unchanged by the overlap keeps the body the reader loaded", async () => {
       tables(listQuery(firstPage()));
       const store = useBookmarksStore();
