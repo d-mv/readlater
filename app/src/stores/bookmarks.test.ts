@@ -104,6 +104,7 @@ const {
   deleteBookmarkMeta,
   putBookmarkMeta,
   hydrateArticleContent,
+  dehydrateContent,
   getSyncState,
 } = vi.hoisted(() => ({
   getSyncState: vi.fn(),
@@ -114,6 +115,7 @@ const {
   deleteBookmarkMeta: vi.fn(),
   putBookmarkMeta: vi.fn(),
   hydrateArticleContent: vi.fn((article: { content_md: string }) => article.content_md),
+  dehydrateContent: vi.fn((content: string) => content),
 }));
 vi.mock("../lib/offlineDb", () => ({
   getSyncState,
@@ -124,6 +126,7 @@ vi.mock("../lib/offlineDb", () => ({
   deleteBookmarkMeta,
   putBookmarkMeta,
   hydrateArticleContent,
+  dehydrateContent,
   stripContentMd: (b: any) => {
     const { content_md: _content_md, ...meta } = b;
     return meta;
@@ -1517,6 +1520,30 @@ describe("useBookmarksStore", () => {
     expect(store.bookmarks[0]?.title).toBe("New title");
     expect(store.bookmarks[0]?.content_md).toBe("new content here");
     expect(store.bookmarks[0]?.content_edited).toBe(true);
+  });
+
+  test("updateContent saves the images' original URLs, never the offline copy's blob: URLs", async () => {
+    const rows = [makeBookmark({ id: "1", content_md: "![a](blob:https://app/1)" })];
+    const eq = vi.fn().mockResolvedValue({ error: null });
+    const update = vi.fn((_fields: Record<string, unknown>) => ({ eq }));
+    from.mockReturnValue({ select: () => listQuery(rows), update });
+    dehydrateContent.mockImplementationOnce((content: string) =>
+      content.replace("blob:https://app/1", "https://cdn/a.png"),
+    );
+
+    const store = useBookmarksStore();
+    await store.fetch();
+    await store.updateContent("1", {
+      title: "T",
+      content_md: "![a](blob:https://app/1) edited",
+      word_count: 1,
+      reading_time: 1,
+    });
+
+    expect(update.mock.calls[0]?.[0]).toMatchObject({
+      content_md: "![a](https://cdn/a.png) edited",
+    });
+    expect(store.bookmarks[0]?.content_md).toBe("![a](https://cdn/a.png) edited");
   });
 
   test("updateContent clears a previously cached translation, since it no longer matches the edited text", async () => {

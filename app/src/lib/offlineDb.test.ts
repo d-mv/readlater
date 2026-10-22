@@ -345,6 +345,28 @@ describe("offlineDb", () => {
     );
   });
 
+  test("dehydrateContent turns object URLs back into the images' original URLs", () => {
+    const blobA = new Blob(["a"]);
+    const article = {
+      id: "1",
+      content_md: "![a](https://cdn/a.png) twice ![a](https://cdn/a.png)",
+      images: [{ url: "https://cdn/a.png", blob: blobA }],
+      cachedAt: "2026-01-01T00:00:00Z",
+    };
+    const hydrated = offlineDb.hydrateArticleContent(article, () => "blob:https://app/a-1");
+    const edited = `${hydrated}\n\nNew paragraph, and ![x](https://other/x.png)`;
+
+    expect(offlineDb.dehydrateContent(edited)).toBe(
+      "![a](https://cdn/a.png) twice ![a](https://cdn/a.png)\n\nNew paragraph, and ![x](https://other/x.png)",
+    );
+  });
+
+  test("dehydrateContent leaves content without object URLs alone", () => {
+    expect(offlineDb.dehydrateContent("plain ![x](https://cdn/x.png)")).toBe(
+      "plain ![x](https://cdn/x.png)",
+    );
+  });
+
   describe("object URLs for cached images", () => {
     const article = (id = "1") => ({
       id,

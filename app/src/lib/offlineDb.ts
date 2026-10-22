@@ -278,6 +278,19 @@ export function hydrateArticleContent(
   return content;
 }
 
+// The reverse of hydrateArticleContent: an object URL only means something
+// on this device, so content headed for the server (an edit made while the
+// offline copy was shown) gets the images' original URLs back.
+export function dehydrateContent(content: string): string {
+  let result = content;
+  for (const urls of objectUrls.values()) {
+    for (const [original, objectUrl] of urls) {
+      result = result.split(objectUrl).join(original);
+    }
+  }
+  return result;
+}
+
 export async function _resetForTests(): Promise<void> {
   objectUrls.clear();
   if (dbPromise) {

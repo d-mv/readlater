@@ -942,6 +942,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     // stale translation on next open.
     const update = {
       ...fields,
+      // The draft may come from the offline copy, whose images point at
+      // this device's blob: URLs.
+      content_md: offlineDb.dehydrateContent(fields.content_md),
       content_edited: true,
       translated_content_md: null,
       translated_lang: null,
