@@ -231,6 +231,160 @@ function logicTree(kind: "and" | "or", body: string): Predicate {
 
 const RESERVED_PARAMS = new Set(["select", "order", "limit", "offset", "on_conflict", "columns"]);
 
+// The tables' columns as the migrations define them. Real PostgREST refuses a
+// request naming any other column, so a typo in the app's select, filter,
+// order or write body must fail here too instead of reading back null.
+const TABLE_COLUMNS: Record<string, ReadonlySet<string>> = {
+  bookmarks: new Set([
+    "id",
+    "user_id",
+    "url",
+    "url_normalized",
+    "type",
+    "status",
+    "title",
+    "author",
+    "excerpt",
+    "content_md",
+    "translated_content_md",
+    "translated_lang",
+    "thumbnail_url",
+    "youtube_video_id",
+    "content_edited",
+    "word_count",
+    "reading_time",
+    "is_public",
+    "pdf_path",
+    "pdf_parsed",
+    "view_mode",
+    "progress",
+    "search_vector",
+    "archived",
+    "read_at",
+    "error_message",
+    "created_at",
+    "processed_at",
+    "updated_at",
+    "attempts",
+    "next_attempt_at",
+  ]),
+  tags: new Set(["id", "user_id", "name", "color"]),
+  bookmark_tags: new Set(["bookmark_id", "tag_id"]),
+  bookmark_deletions: new Set(["bookmark_id", "user_id", "deleted_at"]),
+};
+// Generated columns: Postgres refuses a value for them.
+const GENERATED_COLUMNS = new Set(["url_normalized", "search_vector"]);
+// Embeddable relations, by table.
+const EMBEDS: Record<string, Record<string, string>> = { bookmarks: { tags: "tags" } };
+
+type RestError = { status: number; body: unknown };
+
+function restError(status: number, code: string, message: string): RestError {
+  return { status, body: { code, message, details: null, hint: null } };
+}
+
+function filterColumns(params: URLSearchParams): string[] {
+  const columns: string[] = [];
+  const fromTree = (body: string) => {
+    for (const item of splitTopLevel(body.replace(/^\(/, "").replace(/\)$/, ""))) {
+      const nested = /^(and|or)\((.*)\)$/s.exec(item);
+      if (nested) fromTree(`(${nested[2]})`);
+      else columns.push(item.slice(0, item.indexOf(".")));
+    }
+  };
+  for (const [key, value] of params) {
+    if (RESERVED_PARAMS.has(key)) continue;
+    if (key === "or" || key === "and") fromTree(value);
+    else columns.push(key);
+  }
+  return columns;
+}
+
+function unknownColumn(table: string, columns: Iterable<string>): string | null {
+  const known = TABLE_COLUMNS[table]!;
+  for (const column of columns) if (!known.has(column)) return column;
+  return null;
+}
+
+/** The 400 PostgREST answers for a column the table doesn't have. */
+function schemaError(table: string, params: URLSearchParams, body: unknown): RestError | null {
+  const select = parseSelect(params.get("select"));
+  const check = (t: string, selection: Selection): RestError | null => {
+    const bad = unknownColumn(t, selection.columns);
+    if (bad) return restError(400, "42703", `column ${t}.${bad} does not exist`);
+    for (const [name, inner] of selection.embeds) {
+      const target = EMBEDS[t]?.[name];
+      if (!target) {
+        return restError(
+          400,
+          "PGRST200",
+          `Could not find a relationship between '${t}' and '${name}'`,
+        );
+      }
+      const nested = check(target, inner);
+      if (nested) return nested;
+    }
+    return null;
+  };
+  const selectError = check(table, select);
+  if (selectError) return selectError;
+
+  const order = (params.get("order") ?? "")
+    .split(",")
+    .filter(Boolean)
+    .map((p) => p.split(".")[0]!);
+  const badRead = unknownColumn(table, [...filterColumns(params), ...order]);
+  if (badRead) return restError(400, "42703", `column ${table}.${badRead} does not exist`);
+
+  for (const item of (Array.isArray(body) ? body : body ? [body] : []) as Row[]) {
+    const badWrite = unknownColumn(table, Object.keys(item));
+    if (badWrite) {
+      return restError(
+        400,
+        "PGRST204",
+        `Could not find the '${badWrite}' column of '${table}' in the schema cache`,
+      );
+    }
+    const generated = Object.keys(item).find((key) => GENERATED_COLUMNS.has(key));
+    if (generated) {
+      return restError(
+        400,
+        "428C9",
+        `cannot insert a non-DEFAULT value into column "${generated}"`,
+      );
+    }
+  }
+  return null;
+}
+
+/** The NOT NULL and CHECK constraints a new bookmark row must meet. */
+function bookmarkConstraintError(item: Row, row: ServerBookmark): RestError | null {
+  if (item.type === undefined || item.type === null) {
+    return restError(400, "23502", 'null value in column "type" violates not-null constraint');
+  }
+  if (item.user_id === undefined || item.user_id === null) {
+    return restError(400, "23502", 'null value in column "user_id" violates not-null constraint');
+  }
+  const violated = (name: string) =>
+    restError(400, "23514", `new row for relation "bookmarks" violates check constraint "${name}"`);
+  if (!["article", "youtube", "note", "pdf"].includes(row.type))
+    return violated("bookmarks_type_check");
+  if (!["pending", "processing", "ready", "failed"].includes(row.status)) {
+    return violated("bookmarks_status_check");
+  }
+  if (row.view_mode !== null && !["markdown", "original"].includes(row.view_mode)) {
+    return violated("bookmarks_view_mode_check");
+  }
+  if (row.url !== null && !/^https?:\/\//i.test(row.url))
+    return violated("bookmarks_url_http_only");
+  if (row.url === null && row.type !== "note" && row.type !== "pdf") {
+    return violated("bookmarks_url_required_unless_note");
+  }
+  if (row.pdf_path !== null && row.type !== "pdf")
+    return violated("bookmarks_pdf_path_requires_type");
+  return null;
+}
+
 function filtersFrom(params: URLSearchParams): Predicate[] {
   const predicates: Predicate[] = [];
   for (const [key, value] of params) {
@@ -609,6 +763,9 @@ export class FakeBackend {
       };
     }
 
+    const invalid = schemaError(table, url.searchParams, body);
+    if (invalid) return invalid;
+
     const headers = request.headers();
     const wantsObject = (headers["accept"] ?? "").includes("application/vnd.pgrst.object+json");
     const prefer = headers["prefer"] ?? "";
@@ -766,7 +923,9 @@ export class FakeBackend {
       case "bookmarks": {
         const taken = new Set(this.bookmarks.map((b) => b.url_normalized).filter(Boolean));
         const rows = items.map((item) => this.newBookmarkRow(item as Partial<ServerBookmark>));
-        for (const row of rows) {
+        for (const [index, row] of rows.entries()) {
+          const violation = bookmarkConstraintError(items[index]!, row);
+          if (violation) return { error: violation };
           if (row.url_normalized && taken.has(row.url_normalized)) {
             return {
               error: {
