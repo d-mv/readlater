@@ -81,13 +81,42 @@ async function flushProgress(): Promise<boolean> {
 
 const flushProgressDebounced = useDebouncedFn(flushProgress, 2000);
 
+// Images load lazily and without a known size, so the article keeps growing
+// after the first jump and a fixed scrollTop drifts off the saved place
+// (and the drift then gets saved as progress). Until the reader scrolls
+// themselves — or for ANCHOR_MS — the position is re-applied as the content
+// grows.
+const ANCHOR_MS = 10_000;
+const USER_SCROLL_EVENTS = ["wheel", "touchstart", "pointerdown", "keydown"] as const;
+let stopAnchoring: (() => void) | null = null;
+
 function restoreScroll(target: number) {
+  stopAnchoring?.();
   nextTick(() => {
     requestAnimationFrame(() => {
       const el = scrollContainer.value;
       if (!el) return;
-      const scrollable = el.scrollHeight - el.clientHeight;
-      if (scrollable > 0) el.scrollTop = Math.round(target * scrollable);
+      let stopped = false;
+      const apply = () => {
+        // A resize notification already queued when anchoring stopped.
+        if (stopped) return;
+        const scrollable = el.scrollHeight - el.clientHeight;
+        if (scrollable > 0) el.scrollTop = Math.round(target * scrollable);
+      };
+      apply();
+      if (typeof ResizeObserver === "undefined") return;
+      const observer = new ResizeObserver(apply);
+      for (const child of el.children) observer.observe(child);
+      const stop = () => {
+        stopped = true;
+        observer.disconnect();
+        clearTimeout(timer);
+        for (const type of USER_SCROLL_EVENTS) el.removeEventListener(type, stop);
+        stopAnchoring = null;
+      };
+      const timer = setTimeout(stop, ANCHOR_MS);
+      for (const type of USER_SCROLL_EVENTS) el.addEventListener(type, stop, { passive: true });
+      stopAnchoring = stop;
     });
   });
 }
@@ -185,6 +214,7 @@ onMounted(() => {
   window.addEventListener("offline", onConnectivityChange);
 });
 onUnmounted(() => {
+  stopAnchoring?.();
   window.removeEventListener("pagehide", onPageHide);
   document.removeEventListener("visibilitychange", onVisibilityChange);
   window.removeEventListener("online", onConnectivityChange);

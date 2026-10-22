@@ -710,6 +710,88 @@ describe("ReaderView", () => {
       expect(scrollEl.scrollTop).toBe(400);
     });
 
+    test("keeps the restored position anchored while images load, until the reader scrolls", async () => {
+      const observers: { callback: () => void; disconnected: boolean }[] = [];
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          entry = { callback: () => {}, disconnected: false };
+          constructor(callback: () => void) {
+            this.entry.callback = callback;
+            observers.push(this.entry);
+          }
+          observe() {}
+          disconnect() {
+            this.entry.disconnected = true;
+          }
+        },
+      );
+      const ready = makeBookmark({ id: "1", status: "ready", progress: 0.5, content_md: "Text" });
+      from.mockReturnValue({
+        select: () => ({
+          eq: () => ({ single: vi.fn().mockResolvedValue({ data: ready, error: null }) }),
+        }),
+      });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      const scrollEl = wrapper.find('[data-testid="scroll-area"]').element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+      expect(scrollEl.scrollTop).toBe(400);
+
+      // A lazy image loads above: the article grows, the same fraction moves.
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 2000, configurable: true });
+      observers.at(-1)!.callback();
+      expect(scrollEl.scrollTop).toBe(900);
+
+      // The reader takes over: no more re-anchoring.
+      scrollEl.dispatchEvent(new Event("wheel"));
+      expect(observers.at(-1)!.disconnected).toBe(true);
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 3000, configurable: true });
+      observers.at(-1)!.callback();
+      expect(scrollEl.scrollTop).toBe(900);
+      vi.unstubAllGlobals();
+    });
+
+    test("stops anchoring the restored position after a while", async () => {
+      const observers: { disconnected: boolean }[] = [];
+      vi.stubGlobal(
+        "ResizeObserver",
+        class {
+          entry = { disconnected: false };
+          constructor() {
+            observers.push(this.entry);
+          }
+          observe() {}
+          disconnect() {
+            this.entry.disconnected = true;
+          }
+        },
+      );
+      const ready = makeBookmark({ id: "1", status: "ready", progress: 0.5, content_md: "Text" });
+      from.mockReturnValue({
+        select: () => ({
+          eq: () => ({ single: vi.fn().mockResolvedValue({ data: ready, error: null }) }),
+        }),
+      });
+
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+      const scrollEl = wrapper.find('[data-testid="scroll-area"]').element as HTMLDivElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { value: 1000, configurable: true });
+      Object.defineProperty(scrollEl, "clientHeight", { value: 200, configurable: true });
+      vi.advanceTimersByTime(100);
+      await flushPromises();
+      expect(observers.at(-1)!.disconnected).toBe(false);
+
+      vi.advanceTimersByTime(10_000);
+      expect(observers.at(-1)!.disconnected).toBe(true);
+      vi.unstubAllGlobals();
+    });
+
     test("restores the saved position once the body arrives for a list row opened without one", async () => {
       const store = useBookmarksStore();
       const listRow = makeBookmark({ id: "1", status: "ready", progress: 0.5 });
