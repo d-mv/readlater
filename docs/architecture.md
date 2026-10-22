@@ -1239,6 +1239,9 @@ run one each.
 - **CSP nonce reuse offline** — `style-src-elem` carries a per-response
   nonce, but the service worker precaches index.html with its headers, so
   an installed device reuses one nonce/header pair until the next deploy.
+  A deploy that only changes `nginx.conf` still reaches it: index.html
+  carries a hash of `nginx.conf` (`<meta name="server-config">`, a plugin in
+  `vite.config.ts`), so its precache revision changes too.
   Still far tighter than the former `'unsafe-inline'`; article HTML can't
   add `<style>` anyway (DOMPurify forbids it). Chrome's own contenteditable
   editing can add a `style` attribute when typing over a selection in the

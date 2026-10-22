@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import tailwindcss from "@tailwindcss/vite";
 import vue from "@vitejs/plugin-vue";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 // md-editor-v3 (and the CodeMirror it brings, with ~100 lazily loaded language
@@ -12,6 +14,23 @@ const EDITOR_PACKAGE =
 
 function isEditorChunk(moduleIds: readonly string[]): boolean {
   return moduleIds.length > 0 && moduleIds.every((id) => EDITOR_PACKAGE.test(id));
+}
+
+// The service worker precaches index.html together with the headers it was
+// served with — the CSP among them — and refetches it only when its content
+// changes. A deploy that changes only nginx.conf would leave installed PWAs
+// on the old headers indefinitely, so index.html carries a hash of it.
+function serverConfigRevision(): Plugin {
+  const revision = createHash("sha256")
+    .update(readFileSync(new URL("./nginx.conf", import.meta.url)))
+    .digest("hex")
+    .slice(0, 12);
+  return {
+    name: "server-config-revision",
+    transformIndexHtml: () => [
+      { tag: "meta", attrs: { name: "server-config", content: revision }, injectTo: "head" },
+    ],
+  };
 }
 
 export default defineConfig({
@@ -39,6 +58,7 @@ export default defineConfig({
     },
   },
   plugins: [
+    serverConfigRevision(),
     tailwindcss(),
     vue(),
     VitePWA({
