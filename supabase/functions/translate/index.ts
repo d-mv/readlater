@@ -118,6 +118,21 @@ export async function handleTranslate(
   }
   const translated = joinChunks(translatedChunks);
 
+  // DeepL can take a while (several chunks, up to 30 s each). If the article
+  // was edited or re-parsed meanwhile — both clear the old translation — this
+  // translation is of text that no longer exists; saving it would show it in
+  // place of the new body. A re-read right before the write narrows that
+  // window from the whole DeepL round trip to milliseconds.
+  const { data: current, error: recheckError } = await supabase
+    .from("bookmarks")
+    .select("content_md")
+    .eq("id", bookmarkId)
+    .maybeSingle();
+  if (recheckError) return serverError(corsHeaders, "translate:recheck", recheckError);
+  if (!current) return json("bookmark not found", 404);
+  const currentText = typeof current.content_md === "string" ? current.content_md.trim() : "";
+  if (currentText !== text) return json("the article changed while translating; try again", 409);
+
   // Persisted under RLS as the caller's own session, so this can only ever
   // touch a bookmark the requesting user owns — caching the result here (not
   // just returning it) is what lets a re-open skip DeepL entirely.

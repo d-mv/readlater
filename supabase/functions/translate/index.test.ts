@@ -12,7 +12,10 @@ function fakeSupabase(opts: {
   loadError?: { message: string };
   rateLimit?: { data: unknown; error?: { message: string } | null };
   updateResult?: { data?: unknown; error?: { message: string } | null };
+  // What the re-read just before saving finds (default: the same row).
+  recheck?: { data: { content_md: string | null } | null; error: { message: string } | null };
 }) {
+  let selects = 0;
   let lastUpdatePayload: Record<string, unknown> | undefined;
   let lastUpdateId: string | undefined;
   let loadedId: string | undefined;
@@ -36,6 +39,8 @@ function fakeSupabase(opts: {
   const select = (_cols: string) => ({
     eq: (_col: string, id: string) => {
       loadedId = id;
+      selects += 1;
+      if (selects > 1 && opts.recheck) return { maybeSingle: () => Promise.resolve(opts.recheck) };
       return {
         maybeSingle: () =>
           Promise.resolve(
@@ -480,6 +485,8 @@ Deno.test(
           "GET /rest/v1/bookmarks",
           "POST /rest/v1/rpc/bump_rate_limit",
           "POST /v2/translate",
+          // Re-read right before saving: still the text that was translated.
+          "GET /rest/v1/bookmarks",
           "PATCH /rest/v1/bookmarks",
         ]);
         // Supabase calls run under the caller's JWT (so RLS applies) …
@@ -517,3 +524,49 @@ Deno.test("handleTranslate: a DeepL network failure (not a timeout) is a 502 and
   assertEquals(await res.json(), "translation service unavailable");
   assertEquals(supabase.lastUpdatePayload, undefined);
 });
+
+Deno.test("handleTranslate: an article edited while DeepL worked keeps its new text — the stale translation isn't saved", async () => {
+  const supabase = fakeSupabase({
+    contentMd: "Hello",
+    recheck: { data: { content_md: "Hello, edited meanwhile" }, error: null },
+  });
+  const fetchMock = fakeFetch({ ok: true, body: { translations: [{ text: "Hallo" }] } });
+
+  const res = await handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1 }, fetchMock.impl);
+
+  assertEquals(res.status, 409);
+  assertEquals(supabase.lastUpdatePayload, undefined);
+});
+
+Deno.test("handleTranslate: an article deleted while DeepL worked is a 404, nothing saved", async () => {
+  const supabase = fakeSupabase({ recheck: { data: null, error: null } });
+  const fetchMock = fakeFetch({ ok: true, body: { translations: [{ text: "Hallo" }] } });
+
+  const res = await handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1 }, fetchMock.impl);
+
+  assertEquals(res.status, 404);
+  assertEquals(supabase.lastUpdatePayload, undefined);
+});
+
+Deno.test("handleTranslate: a failed re-read before saving is a generic 500, nothing saved", async () => {
+  const supabase = fakeSupabase({ recheck: { data: null, error: { message: "timeout" } } });
+  const fetchMock = fakeFetch({ ok: true, body: { translations: [{ text: "Hallo" }] } });
+
+  const res = await quietly(() =>
+    handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1 }, fetchMock.impl)
+  );
+
+  assertEquals(res.status, 500);
+  assertEquals(supabase.lastUpdatePayload, undefined);
+});
+
+Deno.test("handleTranslate: an article emptied while DeepL worked isn't given the old translation", async () => {
+  const supabase = fakeSupabase({ recheck: { data: { content_md: null }, error: null } });
+  const fetchMock = fakeFetch({ ok: true, body: { translations: [{ text: "Hallo" }] } });
+
+  const res = await handleTranslate(asClient(supabase), "key:fx", { bookmark_id: B1 }, fetchMock.impl);
+
+  assertEquals(res.status, 409);
+  assertEquals(supabase.lastUpdatePayload, undefined);
+});
+
