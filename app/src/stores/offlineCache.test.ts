@@ -241,8 +241,12 @@ describe("useOfflineCacheStore", () => {
     const store = useOfflineCacheStore();
     await store.cacheBookmark(makeBookmark());
 
-    expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/a.png");
-    expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/thumb.png");
+    expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/a.png", {
+      signal: expect.any(AbortSignal),
+    });
+    expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/thumb.png", {
+      signal: expect.any(AbortSignal),
+    });
     expect(putArticle).toHaveBeenCalledWith(
       expect.objectContaining({
         id: "1",
@@ -388,6 +392,88 @@ describe("useOfflineCacheStore", () => {
       expect(store.missingImageCount("1")).toBe(0);
     });
 
+    test("a reset that lands while the article is being written writes no metadata after it", async () => {
+      let finishPut!: () => void;
+      putArticle.mockReturnValue(new Promise<void>((r) => (finishPut = r)));
+      const store = useOfflineCacheStore();
+
+      const saving = store.cacheBookmark(makeBookmark());
+      await vi.waitFor(() => expect(putArticle).toHaveBeenCalled());
+      store.reset();
+      finishPut();
+      await saving;
+
+      expect(putBookmarkMeta).not.toHaveBeenCalled();
+      expect(deleteArticle).toHaveBeenCalledWith("1");
+    });
+
+    test("a reset while an earlier copy is being looked up writes nothing", async () => {
+      let found!: (value: unknown) => void;
+      getArticle.mockReturnValue(new Promise((r) => (found = r)));
+      const store = useOfflineCacheStore();
+
+      const saving = store.cacheBookmark(makeBookmark());
+      await vi.waitFor(() => expect(getArticle).toHaveBeenCalled());
+      store.reset();
+      found({ id: "1", content_md: "x", images: [], cachedAt: "2026-01-01T00:00:00Z" });
+      await saving;
+
+      expect(putArticle).not.toHaveBeenCalled();
+      expect(putBookmarkMeta).not.toHaveBeenCalled();
+      expect(store.isCached("1")).toBe(false);
+    });
+
+    describe("an earlier copy without metadata", () => {
+      const earlier = { id: "1", content_md: "x", images: [], cachedAt: "2026-01-01T00:00:00Z" };
+
+      test("a reset while the copy is being updated writes no metadata", async () => {
+        getArticle.mockResolvedValue(earlier);
+        let finishPut!: () => void;
+        putArticle.mockReturnValue(new Promise<void>((r) => (finishPut = r)));
+        const store = useOfflineCacheStore();
+
+        const saving = store.cacheBookmark(makeBookmark());
+        await vi.waitFor(() => expect(putArticle).toHaveBeenCalled());
+        store.reset();
+        finishPut();
+        await saving;
+
+        expect(putBookmarkMeta).not.toHaveBeenCalled();
+        expect(store.isCached("1")).toBe(false);
+      });
+
+      test("a reset while its metadata is being written leaves it unsaved", async () => {
+        getArticle.mockResolvedValue(earlier);
+        let finishMeta!: () => void;
+        putBookmarkMeta.mockReturnValue(new Promise<void>((r) => (finishMeta = r)));
+        const store = useOfflineCacheStore();
+
+        const saving = store.cacheBookmark(makeBookmark());
+        await vi.waitFor(() => expect(putBookmarkMeta).toHaveBeenCalled());
+        store.reset();
+        finishMeta();
+        await saving;
+
+        expect(store.isCached("1")).toBe(false);
+      });
+    });
+
+    test("an image download that hangs is given up on, not waited for forever", async () => {
+      const signals: AbortSignal[] = [];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((_url: string, init?: RequestInit) => {
+          signals.push(init!.signal!);
+          return Promise.resolve({ ok: true, blob: () => Promise.resolve(new Blob(["x"])) });
+        }),
+      );
+
+      await useOfflineCacheStore().cacheBookmark(makeBookmark());
+
+      expect(signals.length).toBeGreaterThan(0);
+      expect(signals.every((s) => s instanceof AbortSignal)).toBe(true);
+    });
+
     test("a second save of the same article reuses the one in flight", async () => {
       const { fetchMock, release } = heldFetch();
       const store = useOfflineCacheStore();
@@ -494,7 +580,9 @@ describe("useOfflineCacheStore", () => {
       await store.cacheBookmark(makeBookmark({ thumbnail_url: null }));
 
       expect(fetch).toHaveBeenCalledTimes(1);
-      expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/a.png");
+      expect(fetch).toHaveBeenCalledWith("https://cdn.example.com/a.png", {
+        signal: expect.any(AbortSignal),
+      });
     });
 
     test("cachedIds lists saved articles only, not ones still being saved", async () => {

@@ -24,6 +24,10 @@ function extractImageUrls(contentMd: string, thumbnailUrl: string | null): strin
   return [...urls];
 }
 
+// One image may not hold the save up for longer than this: a save still
+// running at sign-out must not be able to commit minutes later.
+const IMAGE_TIMEOUT_MS = 30_000;
+
 // Hot-linked source images often refuse cross-origin reads (CORS), and an
 // error response is not the image either; both are reported as missing so the
 // UI can say the offline copy is incomplete.
@@ -33,7 +37,7 @@ async function downloadImages(
   const results = await Promise.all(
     urls.map(async (url) => {
       try {
-        const response = await fetch(url);
+        const response = await fetch(url, { signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS) });
         if (!response.ok) return { url, blob: null };
         return { url, blob: await response.blob() };
       } catch {
@@ -157,9 +161,12 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
         const meta = offlineDb.stripContentMd(bookmark);
         if (reuseExisting) {
           const existing = await offlineDb.getArticle(id);
+          // Removed, or signed out, while looking: write nothing.
+          if (!isCurrent()) return;
           if (existing) {
             if (!existing.bookmark) {
               await offlineDb.putArticle({ ...existing, bookmark: meta });
+              if (!isCurrent()) return;
               await offlineDb.putBookmarkMeta(meta);
             }
             if (isCurrent()) setEntry(id, "saved");
@@ -181,12 +188,14 @@ export const useOfflineCacheStore = defineStore("offlineCache", () => {
           cachedAt: new Date().toISOString(),
           bookmark: meta,
         });
-        await offlineDb.putBookmarkMeta(meta);
-        // Removed while the write was in progress: undo it.
+        // Removed (or signed out) while the write was in progress: undo it,
+        // and leave the list metadata alone — after a sign-out it would be
+        // the previous account's.
         if (!isCurrent()) {
           if (!inFlight.has(id)) await offlineDb.deleteArticle(id);
           return;
         }
+        await offlineDb.putBookmarkMeta(meta);
         setEntry(id, "saved");
         setMissing(id, missingImages.length);
       } catch (err) {
