@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import type { Bookmark } from "../lib/supabase";
+import { DETAIL_SELECT } from "../lib/bookmarkColumns";
 
 const { from, invoke, storageCreateSignedUrl, storageRemove, pushMock, realtimeChannel } =
   vi.hoisted(() => {
@@ -103,7 +104,7 @@ describe("ReaderView", () => {
     const wrapper = mount(ReaderView, { props: { id: "1" } });
     await flushPromises();
 
-    expect(select).toHaveBeenCalledWith("*, tags(id, name, color)");
+    expect(select).toHaveBeenCalledWith(DETAIL_SELECT);
     expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
       "the full body",
     );
@@ -126,7 +127,7 @@ describe("ReaderView", () => {
     store.bookmarks[0]!.status = "ready";
     await flushPromises();
 
-    expect(select).toHaveBeenCalledWith("*, tags(id, name, color)");
+    expect(select).toHaveBeenCalledWith(DETAIL_SELECT);
     expect(wrapper.findComponent({ name: "ArticleContent" }).props("contentMd")).toBe(
       "freshly parsed",
     );

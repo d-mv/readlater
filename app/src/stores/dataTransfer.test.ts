@@ -72,7 +72,11 @@ describe("useDataTransferStore", () => {
       const result = await store.exportBookmarks();
 
       expect(from).toHaveBeenCalledWith("bookmarks");
-      expect(select).toHaveBeenCalledWith(expect.stringContaining("tags"));
+      const columns = (select.mock.calls[0] as unknown as [string])[0];
+      expect(columns).toContain("tags(");
+      expect(columns).toContain("content_md");
+      expect(columns).not.toContain("*");
+      expect(columns).not.toContain("search_vector");
       expect(query.order).toHaveBeenCalledWith("created_at", { ascending: false });
       expect(query.order).toHaveBeenCalledWith("id");
       expect(query.range).toHaveBeenCalledTimes(1);

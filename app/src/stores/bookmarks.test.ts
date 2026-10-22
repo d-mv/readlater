@@ -539,7 +539,15 @@ describe("useBookmarksStore", () => {
     const store = useBookmarksStore();
     await store.fetchOne("solo");
 
-    expect(select).toHaveBeenCalledWith("*, tags(id, name, color)");
+    const columns = (select.mock.calls[0] as unknown as [string])[0].split(/,\s*/);
+    expect(columns).toEqual(
+      expect.arrayContaining(["content_md", "translated_content_md", "tags(id"]),
+    );
+    // Named columns, not *: the generated tsvector (as large as the body)
+    // would otherwise land in memory and in the offline copy.
+    expect(columns).not.toContain("*");
+    expect(columns).not.toContain("search_vector");
+    expect(columns).not.toContain("user_id");
   });
 
   test("a realtime UPDATE merges over the existing row, keeping an already-loaded body", async () => {

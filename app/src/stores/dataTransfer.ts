@@ -1,4 +1,5 @@
 import { defineStore } from "pinia";
+import { DETAIL_SELECT } from "../lib/bookmarkColumns";
 import { supabase, type Bookmark } from "../lib/supabase";
 import { useAuthStore } from "./auth";
 import {
@@ -10,8 +11,6 @@ import {
   type ParsedImport,
   type SkippedRow,
 } from "../utils/dataTransfer";
-
-const BOOKMARK_SELECT = "*, tags(id, name, color)";
 
 // PostgREST caps every response at `max_rows` (1000, see supabase/config.toml),
 // so whole-library reads must be paged or they silently truncate.
@@ -56,13 +55,16 @@ const TAGS_NOT_SAVED = "The bookmarks were imported, but their tags couldn't be 
 
 export const useDataTransferStore = defineStore("dataTransfer", () => {
   async function exportBookmarks(): Promise<ExportResult> {
-    const { data, error } = await fetchAllPages<Bookmark>((from, to) =>
-      supabase
-        .from("bookmarks")
-        .select(BOOKMARK_SELECT)
-        .order("created_at", { ascending: false })
-        .order("id")
-        .range(from, to),
+    // The untyped client can't infer a row type from a named column list;
+    // the list queries cast the same way.
+    const { data, error } = await fetchAllPages<Bookmark>(
+      (from, to) =>
+        supabase
+          .from("bookmarks")
+          .select(DETAIL_SELECT)
+          .order("created_at", { ascending: false })
+          .order("id")
+          .range(from, to) as unknown as PromiseLike<PageResult<Bookmark>>,
     );
     if (error) return { payload: null, error: error.message };
     return { payload: buildExportPayload(data), error: null };

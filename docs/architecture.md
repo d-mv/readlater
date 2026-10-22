@@ -740,7 +740,10 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   download/cached icon for offline pre-caching. The list query
   (`LIST_SELECT` in `stores/bookmarks.ts`) is a named-column projection with
   no `content_md` / `translated_content_md` / `search_vector` — the reader
-  pulls the body via `fetchOne()` (`DETAIL_SELECT = "*, tags(id, name, color)"`)
+  pulls the body via `fetchOne()` (`DETAIL_SELECT` in `lib/bookmarkColumns.ts`:
+  the list columns plus `content_md`/`translated_content_md` and tags — named,
+  not `*`, so the generated `search_vector` never reaches memory or the
+  offline copy; the export uses it too)
   on open, and again on the Realtime pending→ready transition. Tag
   filtering and the tag bar are derived client-side from the loaded rows
   (match-all); no query on toggle. Paging: an IntersectionObserver sentinel
