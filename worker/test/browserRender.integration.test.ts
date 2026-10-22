@@ -124,6 +124,12 @@ beforeAll(() => {
         case "/big-chunked":
           // Streamed without a Content-Length, so only the loaded DOM shows the size.
           return streaming(`<!doctype html><p>big</p><!--${"x".repeat(20_000)}-->`, 0);
+        case "/script-built":
+          // A small response whose script builds a large DOM: no Content-Length
+          // or streamed size can catch it, only the loaded DOM.
+          return html(
+            `<p>${ARTICLE_TEXT}</p><script>document.body.append("x".repeat(50000))</script>`,
+          );
         case "/huge":
           // In a comment: cheap to parse, nothing to lay out.
           return html(`<p>big</p><!--${"x".repeat(MAX_HTML_BYTES)}-->`);
@@ -269,6 +275,16 @@ describe("renderWithBrowser (real Chromium)", () => {
     async () => {
       await expect(
         renderWithBrowser(`${base}/big-chunked`, undefined, 10_000),
+      ).rejects.toBeInstanceOf(ResponseTooLargeError);
+    },
+    SLOW,
+  );
+
+  test(
+    "refuses a DOM built past the cap by the page's own script",
+    async () => {
+      await expect(
+        renderWithBrowser(`${base}/script-built`, undefined, 10_000),
       ).rejects.toBeInstanceOf(ResponseTooLargeError);
     },
     SLOW,

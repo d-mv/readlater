@@ -240,6 +240,16 @@ async function renderPage(
       gotoTimedOut = true;
     }
 
+    // Measure inside Chromium first: page.content() copies the whole
+    // serialized DOM into this process, so a page whose script built a huge
+    // DOM is refused before that copy.
+    // (An expression string: it runs in the page, not in this process.)
+    const size = await step(
+      page.evaluate<number>("document.documentElement?.outerHTML.length ?? 0"),
+      PAGE_CONTENT_TIMEOUT_MS,
+      "Measuring page content",
+    );
+    if (size > maxHtmlBytes) throw new ResponseTooLargeError(maxHtmlBytes);
     const content = await step(page.content(), PAGE_CONTENT_TIMEOUT_MS, "Extracting page content");
     // No (or a lying) Content-Length: the size is only known once loaded.
     if (content.length > maxHtmlBytes) throw new ResponseTooLargeError(maxHtmlBytes);
