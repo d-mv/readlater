@@ -776,9 +776,11 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   tombstoned ids are evicted from the offline cache too — even when the delta
   then turns out too large to apply. Over 200 changed rows,
   no sync state, or an empty list → a fresh first page. DB side:
-  `bookmarks.updated_at` (before-update trigger; tag attach/detach on
-  `bookmark_tags` bumps it too), `bookmark_deletions` (after-delete trigger,
-  owner-read RLS, kept indefinitely).
+  `bookmarks.updated_at` (before-update trigger; attaching, detaching or
+  re-pointing a `bookmark_tags` row and renaming or recolouring a tag bump it
+  too, `20261022110000`), `bookmark_deletions` (after-delete trigger,
+  owner-read RLS, kept indefinitely; none is written when the delete comes
+  from removing the auth user, whose bookmarks now cascade).
 - **Live updates** — `store.subscribeToChanges()` opens one Realtime
   `postgres_changes` channel (RLS-scoped, no body columns in the payload).
   INSERT prepends (unless already listed), UPDATE merges into a loaded row

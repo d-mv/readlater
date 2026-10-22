@@ -12,6 +12,7 @@ select functions_are('public', array[
   'get_public_bookmark',
   'bookmarks_touch_updated_at',
   'bookmark_tags_touch_bookmark',
+  'tags_touch_bookmarks',
   'bookmarks_record_deletion',
   'bookmarks_reset_retry',
   'bump_rate_limit_for_user',
@@ -23,7 +24,7 @@ select functions_are('public', array[
 select triggers_are('public', 'bookmarks',
   array['bookmarks_touch_updated_at', 'bookmarks_record_deletion', 'bookmarks_reset_retry']);
 select triggers_are('public', 'bookmark_tags', array['bookmark_tags_touch_bookmark']);
-select triggers_are('public', 'tags', array[]::name[]);
+select triggers_are('public', 'tags', array['tags_touch_bookmarks']);
 select triggers_are('public', 'bookmark_deletions', array[]::name[]);
 
 select is(

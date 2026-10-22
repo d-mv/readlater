@@ -44,6 +44,7 @@ afterwards only if it started it.
 | `tags` (per-user `tags_user_id_name_key`, `user_id default auth.uid()`, policy "owner access") | 04 |
 | `bookmark_tags` policy "owner access" (cross-user links refused), cascades | 04 |
 | `bookmark_tags_touch_bookmark` (attach/detach/tag delete bump; no cross-user bump) | 04 |
+| `bookmark_tags_touch_bookmark` on update, `tags_touch_bookmarks` (rename/recolour bump), user delete cascading to bookmarks | 09 |
 | `rate_limits` (no policies/grants), `rate_limit_for()`, `bump_rate_limit()`, `bump_rate_limit_for_user()` | 05 |
 | buckets `bookmark-pdfs` / `bookmark-assets` (privacy, size, MIME allow-lists — values only) | 06 |
 | storage.objects policies "owner read/write/delete own pdfs" | 06 |
