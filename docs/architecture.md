@@ -1060,9 +1060,12 @@ use a different mechanism, on purpose).
 
 Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
 `readlater.mlnkv.net`:
-- `readlater-app` — `app/Dockerfile` (Bun build stage, `nginx:1.27-alpine`
-  runtime), port 80, `/*`, Supabase URL and publishable key baked in as
-  build args.
+- `readlater-app` — `app/Dockerfile` (pinned `oven/bun:1.3.14-slim` build
+  stage, same Bun as the worker and local dev; pinned `nginx:1.30.6-alpine`
+  runtime, the stable branch), port 80, `/*`, Supabase URL and publishable
+  key baked in as build args. The build stage runs vue-tsc and Vite on
+  Debian's Node.js (20.19.2 in that image) — just inside Vite 8's
+  `^20.19.0 || >=22.12.0`; a Bun image on a newer Debian may need checking.
 - `readlater-worker` — `worker/Dockerfile` (pinned `oven/bun:1.3.14-slim`,
   non-root `bun` user, `tini`, heartbeat HEALTHCHECK; §4). The server-side
   compose block (copy: `worker/docker-compose.service.yml` — seccomp

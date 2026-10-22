@@ -1,4 +1,4 @@
-FROM oven/bun:1-slim AS build
+FROM oven/bun:1.3.14-slim AS build
 WORKDIR /app
 
 # vue-tsc's module resolution breaks under Bun's Node-compat shim (the
@@ -15,7 +15,7 @@ ARG VITE_SUPABASE_URL
 ARG VITE_SUPABASE_PUBLISHABLE_KEY
 RUN node node_modules/vue-tsc/bin/vue-tsc.js -b && node_modules/.bin/vite build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.30.6-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
