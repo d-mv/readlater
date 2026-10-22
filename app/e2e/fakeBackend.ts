@@ -161,8 +161,16 @@ function compareValues(column: string, actual: unknown, raw: string): number | n
   if (typeof actual === "number") return actual - Number(raw);
   if (typeof actual === "boolean") return actual === (raw === "true") ? 0 : 1;
   const text = String(actual);
-  if (column.endsWith("_at")) return Date.parse(text) - Date.parse(raw);
+  if (column.endsWith("_at")) return micros(text) - micros(raw);
   return text < raw ? -1 : text > raw ? 1 : 0;
+}
+
+// A timestamp in microseconds, like Postgres keeps it: Date.parse drops
+// everything past the millisecond, and PostgREST sends six fraction digits.
+function micros(text: string): number {
+  const fraction = /\.(\d+)/.exec(text)?.[1] ?? "";
+  const whole = Date.parse(text.replace(/\.\d+/, ""));
+  return whole * 1000 + Number(fraction.padEnd(6, "0").slice(0, 6));
 }
 
 function textMatches(row: Row, query: string): boolean {
@@ -406,7 +414,7 @@ function ordered(rows: Row[], order: string | null): Row[] {
       const av = a[column];
       const bv = b[column];
       let cmp = 0;
-      if (column.endsWith("_at")) cmp = Date.parse(String(av)) - Date.parse(String(bv));
+      if (column.endsWith("_at")) cmp = micros(String(av)) - micros(String(bv));
       else cmp = String(av) < String(bv) ? -1 : String(av) > String(bv) ? 1 : 0;
       if (cmp !== 0) return desc ? -cmp : cmp;
     }

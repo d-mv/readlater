@@ -160,6 +160,50 @@ test("infinite scroll pages in older bookmarks, and Load more retries a failed p
   expect(new Set(titles).size).toBe(120);
 });
 
+test("paging keeps every row when many share one created_at (a bulk import)", async ({
+  page,
+  backend,
+}) => {
+  // 70 rows stamped with one instant: only the id tie-break orders them, and
+  // a page boundary falls inside the group.
+  backend.addBookmarks(70, (i) => ({
+    title: `Imported ${String(i + 1).padStart(2, "0")}`,
+    created_at: "2026-05-01T12:00:00.000000Z",
+  }));
+  backend.addBookmarks(40, (i) => ({ title: `Older ${String(i + 1).padStart(2, "0")}` }));
+
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(50);
+  for (const expected of [100, 110]) {
+    await rows(page).last().scrollIntoViewIfNeeded();
+    await expect(rows(page)).toHaveCount(expected);
+  }
+
+  const titles = await rows(page).getByTestId("title").allTextContents();
+  expect(new Set(titles).size).toBe(110);
+});
+
+test("paging orders rows a few microseconds apart like Postgres does", async ({
+  page,
+  backend,
+}) => {
+  // 60 rows inside one millisecond, newest has the largest microseconds.
+  backend.addBookmarks(60, (i) => ({
+    title: `Micro ${String(i).padStart(2, "0")}`,
+    created_at: `2026-05-01T12:00:00.123${String(i).padStart(3, "0")}+00:00`,
+  }));
+
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(50);
+  await rows(page).last().scrollIntoViewIfNeeded();
+  await expect(rows(page)).toHaveCount(60);
+
+  const titles = await rows(page).getByTestId("title").allTextContents();
+  expect(titles).toEqual(
+    Array.from({ length: 60 }, (_, i) => `Micro ${String(59 - i).padStart(2, "0")}`),
+  );
+});
+
 test("a Realtime INSERT and DELETE update the open list without a reload", async ({
   page,
   backend,
