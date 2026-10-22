@@ -11,12 +11,14 @@ item-by-item text is at `dbc88e1`).
 
 ## Recommended order
 
-1. [8](#8-2026-10-11-audit-app-080-worker-010) — the two production-only
-   steps: disable signup in the dashboard, schedule `storage-sweep`.
-2. [5](#5-youtube-embed--inline-editing--leftovers) — the real-browser
-   checks and the `youtube_video_id` backfill.
-3. [2](#2-correctness--simplification-2026-09-25-audit) — the one minor
-   leftover (file-size labels).
+1. [9](#9-2026-10-22-audit) — deploy what the 2026-10-22 audit fixed
+   (one migration that must ship together with the edge functions), then
+   its open items, tracked in Kairos.
+2. [8](#8-2026-10-11-audit-app-080-worker-010) — the production-only steps:
+   disable signup in the dashboard, add the Vault key the scheduled
+   `storage-sweep` needs.
+3. [5](#5-youtube-embed--inline-editing--leftovers) — the click-to-play
+   real-browser pass and the `youtube_video_id` backfill.
 4. [6](#6-deferred-features--hardening) and the product gaps in §8, by
    appetite.
 
@@ -43,10 +45,8 @@ position per `ProgressSession`; 2.2 capture outcome (`toCaptureOutcome`);
 shared `readyNoteRow()`; 2.9 compare-and-set worker transitions; 2.10
 snippet HTML only while the textarea holds the pasted text.
 
-**Still open (minor):** file-size labels are hard-coded in three places
-(`AddBookmarkDialog.vue` `FILE_KIND_LIMIT_LABEL` and the hint text,
-`stores/bookmarks.ts` `addFile`/`addPdf`); `utils/fileKind.ts` already owns
-the byte limits and should own the labels too. Effort S.
+Also done since: file-size labels come from `utils/fileKind.ts`
+(`sizeLimitLabelForFileKind`, `510f0c1`).
 
 ---
 
@@ -74,21 +74,18 @@ edit/translate (app 0.1.1).
 ## 5. YouTube embed & inline editing — leftovers
 
 Both shipped (click-to-play `youtube-nocookie.com` embed; `md-editor-v3`
-editor with `content_edited` guard on both refresh paths). Remaining:
+editor with `content_edited` guard on both refresh paths). The preview
+fidelity and phone single-pane checks are real-browser e2e tests now
+(`app/e2e/editor.spec.ts`, `68b9eda`). Remaining:
 
 - **Backfill `youtube_video_id`** for rows captured before the column existed —
   the worker derives the id from the URL (`youtubeMeta.ts` `extractVideoId`),
   so a one-off script can reuse that. Until then those rows show thumbnail only.
-- **Preview fidelity spot-check** — compare `md-editor-v3` preview and the
-  reader's `markdown-it` render on real content (headings/links/lists, a
-  Turndown snippet).
-- **Real small-viewport check** of the editor's single-pane toggle (<640px) —
-  only unit-tested.
 - **Real-browser pass** of the click-to-play embed; re-confirm the
   `youtube-nocookie.com/embed/<id>` URL shape.
 - **Editor theming depth** — theme switching is wired; matching the Braun
-  tokens (`main.css`) is not. Revisit if it feels off-brand. Since the CSP,
-  CodeMirror's injected styles need `style-src-elem 'unsafe-inline'`, and
+  tokens (`main.css`) is not. Revisit if it feels off-brand. CodeMirror's
+  injected styles are allowed by a per-response CSP nonce (`d441c95`);
   browsers without `style-src-elem` (Safari < 15.4) show the editor unstyled.
 - **Offline editing** — out of scope; would need a write queue-and-replay that
   no write in the app has today.
@@ -109,9 +106,9 @@ editor with `content_edited` guard on both refresh paths). Remaining:
   so a note/pdf can never enter the worker queue (the worker fails such rows
   today); split `processed_at`, which is both the processing lease timestamp
   and the completion time.
-- **Single-user assumption** to revisit if that ever changes: the global
-  `bookmarks_url_normalized_uniq` (a second user couldn't save a URL the
-  first already has). Tags are per user since `20261011171000`.
+- **Single-user assumption**: URL uniqueness (`20261012101000`) and tags
+  (`20261011171000`) are per user now. What still assumes one person is the
+  capture key (`OWNER_USER_ID`).
 
 Done since this list was written: per-user rate limits on every edge
 function, request body caps and generic errors, CSP and security headers,
@@ -169,20 +166,45 @@ SQL editor):
   and set the minimum password length to 12 (Authentication → Sign In /
   Providers). `supabase/config.toml` documents this but only drives local
   dev.
-- **storage-sweep is unscheduled**: pg_cron is not enabled in production.
-  Enable pg_cron + pg_net, store the service-role key in Vault as
-  `service_role_key`, then run the `cron.schedule` snippet at the end of
-  migration `20261011171000_audit_hardening.sql`. Until then, orphaned PDFs
-  and every deleted bookmark's YouTube thumbnail stay in Storage (a manual
-  `POST …/storage-sweep?dry_run=1` shows the count).
+- **storage-sweep needs its Vault key**: the job is scheduled by migration
+  `20261012102000_schedule_storage_sweep.sql` (pg_cron + pg_net) and reads
+  `project_url` and `service_role_key` from Vault at run time. Production has
+  `project_url`; add `service_role_key` (SQL editor:
+  `select vault.create_secret('<service role key>', 'service_role_key');`).
+  Until then each run is a no-op and orphaned PDFs and deleted bookmarks'
+  YouTube thumbnails stay in Storage (`POST …/storage-sweep?dry_run=1` shows
+  the count).
 
-**Accepted trade-offs** (architecture §10): worker Chromium runs
-`--no-sandbox` and the worker process keeps the service key in its env; the
-plain fetch's DNS-rebinding window; CSP `connect-src https:` and
-`style-src-elem 'unsafe-inline'`; client thumbnail delete denied (sweep
-removes them); offline sign-out with an expired token may leave
-supabase-js's stored session behind; fixed-window rate limits.
+**Accepted trade-offs** (architecture §10): the plain fetch's DNS-rebinding
+window; CSP `connect-src https:`; client thumbnail delete denied (sweep
+removes them); fixed-window rate limits. No longer trade-offs: Chromium runs
+sandboxed (seccomp profile, `6c3b503`), the service key reaches the worker
+on fd 3 and never sits in its env (`6c3b503`), the editor's styles use a CSP
+nonce (`d441c95`), and sign-out removes supabase-js's stored session itself
+(`20e53e3`).
 
 **Product gaps not built:** undo for archive/delete, bulk actions, sort
 options, offline full-text search, keyboard shortcuts, audit log,
 capture-key rotation, share-link revoke UI.
+
+---
+
+## 9. 2026-10-22 audit
+
+Five-way review (stores/offline, UI, worker, edge functions/DB,
+tests/ops/docs); every finding is a Kairos task tagged `audit-2026-10-22`,
+closed with its fix notes. Fixed so far (app 0.9.2–0.9.11, worker
+0.2.2–0.2.6, `18fbbea..`): caller-supplied rate limits, backups shipped to the
+VPS, account data surviving a session that ended without Sign out, worker
+gzip bomb and Readability stalls, page charsets and post-redirect URLs,
+jsdom crash, delta-sync watermark and tombstones, offline-copy blob: URLs
+saved by edits, spurious logout on a refresh blip, share toggle state,
+progress catch-up race, import duplicates and tag errors, `*` selects in
+the offline copy, saves committing after sign-out.
+
+**Deploy order for these changes:** apply migration
+`20261022100000_rate_limits_server_side.sql` and redeploy **all** edge
+functions in the same step (the migration drops the old `bump_rate_limit`
+signatures; old functions fail with 500 until redeployed), then the app and
+the worker.
+

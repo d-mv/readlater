@@ -809,8 +809,19 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   import upserts the same way).
   `ReaderProgressBar.vue` tracks scroll position.
 - **Reading progress** — scroll position is persisted to `bookmarks.progress`
-  (0..1) and restored on open. Writes are coalesced: 2s debounce, only when
-  the position moved ≥2%, flushed on `pagehide`/unmount.
+  (0..1) and restored on open; it shows only in the reader (the list has no
+  progress UI). Writes are coalesced: 2s debounce, only when the position
+  moved ≥2%, flushed on `pagehide`, unmount and `visibilitychange`→hidden
+  (iOS often skips `pagehide`). On return (`visibilitychange`→visible or
+  `online`) `catchUpProgress()` flushes, resends what this device still owes
+  (`store.sendUnsentProgress()`, which first waits for writes in flight),
+  re-reads the row and scrolls if another device saved a position ≥2% away.
+  `updateProgress` is the second exception to "local state changes only
+  after the server accepted" (besides `remove()`): the local value moves
+  anyway, since it is where the user is on this device; a failed write goes
+  into an in-memory `unsentProgress` map (lost if the app is killed), resent
+  by `fetch()` before the delta sync. Only the newest write per bookmark
+  decides what is owed.
 - **Font size** (`FontSizeControl.vue`, `stores/fontSize.ts`) — 14–24px in
   2px steps, persisted in `localStorage`, applied via `--rl-article-font-size`.
 - **YouTube** — `ArticleContent.vue` shows the thumbnail with a play
@@ -1220,7 +1231,8 @@ run one each.
   editor; `style-src-attr` (via `style-src 'self'`) blocks it, harmlessly —
   CodeMirror redraws the line from its state.
 - **Thumbnail delete is denied from the client** — no client delete policy on
-  `bookmark-assets`; the orphan sweep removes them (once scheduled).
+  `bookmark-assets`; the scheduled orphan sweep removes them (it needs the `service_role_key`
+  Vault secret, see plan §8).
 - **Rate limits are fixed windows** (`rate_limits.window_start`), so up to
   twice the limit can pass around a window boundary.
 
