@@ -7,7 +7,14 @@ import {
   ResponseTooLargeError,
   UnsupportedContentTypeError,
 } from "./errors";
-import { MAX_HTML_BYTES, mediaType, readBodyCapped, USER_AGENT } from "./http";
+import {
+  ACCEPT_ENCODING,
+  MAX_HTML_BYTES,
+  mediaType,
+  RAW_BODY_INIT,
+  readBodyCapped,
+  USER_AGENT,
+} from "./http";
 import { readingTimeFromWordCount, wordCount } from "./reading";
 import { assertPublicUrl, BlockedUrlError, type LookupAll } from "./urlGuard";
 
@@ -33,11 +40,13 @@ export function createFetchHtml(
     for (let hop = 0; hop <= maxRedirects; hop++) {
       await assertPublicUrl(current, deps.lookup);
       const res = await fetchImpl(current, {
+        ...RAW_BODY_INIT,
         redirect: "manual",
         signal,
         headers: {
           "User-Agent": USER_AGENT,
           Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Encoding": ACCEPT_ENCODING,
         },
       });
       const location = res.headers.get("location");

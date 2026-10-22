@@ -57,6 +57,12 @@ describe("uploadThumbnail", () => {
     expect(paths[0]).toMatch(/^youtube\/[0-9a-f-]+\.jpg$/);
     // Redirects would bypass the SSRF check, so they're refused, not followed.
     expect(calls[0]?.redirect).toBe("error");
+    // The capped read decodes the body itself, so a compressed bomb can't
+    // inflate past the cap inside fetch.
+    expect(calls[0]).toMatchObject({
+      decompress: false,
+      headers: { "Accept-Encoding": "gzip, deflate" },
+    });
   });
 
   test("refuses a thumbnail URL that resolves to a private address without fetching it", async () => {

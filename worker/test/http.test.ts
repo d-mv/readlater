@@ -1,5 +1,6 @@
+import { deflateSync } from "node:zlib";
 import { describe, expect, test } from "bun:test";
-import { ResponseTooLargeError } from "../src/errors";
+import { ResponseTooLargeError, UnsupportedContentEncodingError } from "../src/errors";
 import { mediaType, readBodyCapped } from "../src/http";
 
 /** A body that yields `chunks`, then stays open; cancelling it fails. */
@@ -61,5 +62,52 @@ describe("readBodyCapped", () => {
     const res = new Response(stubbornBody([new Uint8Array(6), new Uint8Array(6)]));
 
     await expect(readBodyCapped(res, 10)).rejects.toBeInstanceOf(ResponseTooLargeError);
+  });
+});
+
+describe("readBodyCapped with a compressed body", () => {
+  const html = new TextEncoder().encode("<p>hello</p>".repeat(100));
+  const encoded = (body: Uint8Array | ReadableStream<Uint8Array>, encoding: string) =>
+    new Response(body as BodyInit, { headers: { "content-encoding": encoding } });
+
+  test("decodes gzip", async () => {
+    expect(await readBodyCapped(encoded(Bun.gzipSync(html), "gzip"), 1 << 20)).toEqual(html);
+  });
+
+  test("decodes x-gzip and a mixed-case encoding name", async () => {
+    expect(await readBodyCapped(encoded(Bun.gzipSync(html), "X-Gzip"), 1 << 20)).toEqual(html);
+  });
+
+  test("decodes deflate (zlib-wrapped, as HTTP defines it)", async () => {
+    expect(await readBodyCapped(encoded(deflateSync(html), "deflate"), 1 << 20)).toEqual(html);
+  });
+
+  test("passes an identity body through", async () => {
+    expect(await readBodyCapped(encoded(html, "identity"), 1 << 20)).toEqual(html);
+  });
+
+  test("caps the decoded size, not the compressed one (a gzip bomb is refused)", async () => {
+    const bomb = Bun.gzipSync(new Uint8Array(64 * 1024 * 1024), { level: 9 });
+    expect(bomb.byteLength).toBeLessThan(1 << 20);
+
+    await expect(readBodyCapped(encoded(bomb, "gzip"), 1 << 20)).rejects.toBeInstanceOf(
+      ResponseTooLargeError,
+    );
+  });
+
+  test("refuses an encoding it can't decode", async () => {
+    await expect(readBodyCapped(encoded(html, "br"), 1 << 20)).rejects.toBeInstanceOf(
+      UnsupportedContentEncodingError,
+    );
+  });
+
+  test("refuses an undecodable encoding even if cancelling the body fails", async () => {
+    await expect(
+      readBodyCapped(encoded(stubbornBody([html]), "br"), 1 << 20),
+    ).rejects.toBeInstanceOf(UnsupportedContentEncodingError);
+  });
+
+  test("refuses a corrupt gzip body", async () => {
+    await expect(readBodyCapped(encoded(html, "gzip"), 1 << 20)).rejects.toThrow();
   });
 });

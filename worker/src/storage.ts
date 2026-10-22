@@ -1,6 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { HttpStatusError, UnsupportedContentTypeError } from "./errors";
-import { MAX_IMAGE_BYTES, mediaType, readBodyCapped, USER_AGENT } from "./http";
+import {
+  ACCEPT_ENCODING,
+  MAX_IMAGE_BYTES,
+  mediaType,
+  RAW_BODY_INIT,
+  readBodyCapped,
+  USER_AGENT,
+} from "./http";
 import { assertPublicUrl, type LookupAll } from "./urlGuard";
 
 const BUCKET = "bookmark-assets";
@@ -27,9 +34,10 @@ export function makeThumbnailUploader(
     // than followed, since a redirect target would skip the check.
     await assertPublicUrl(thumbnailUrl, deps.lookup);
     const res = await fetchImpl(thumbnailUrl, {
+      ...RAW_BODY_INIT,
       redirect: "error",
       signal: AbortSignal.timeout(15_000),
-      headers: { "User-Agent": USER_AGENT },
+      headers: { "User-Agent": USER_AGENT, "Accept-Encoding": ACCEPT_ENCODING },
     });
     if (!res.ok) {
       await res.body?.cancel().catch(() => {});

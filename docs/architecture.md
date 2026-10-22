@@ -542,7 +542,11 @@ crashes or disconnects is dropped and relaunched on the next render.
 **Fetch limits** (`worker/src/http.ts`). The plain fetch has one 15 s budget
 for the whole redirect chain (≤ 5 hops) and body, sends a browser-like
 `USER_AGENT`, and reads bodies through `readBodyCapped()` — 5 MB for HTML and
-thumbnails, checked against `Content-Length` and while streaming. A declared
+thumbnails, checked against `Content-Length` and while streaming. Both
+fetches pass `RAW_BODY_INIT` (`decompress: false`) and offer only
+`gzip, deflate`: `readBodyCapped` decodes the body itself, so the cap counts
+decoded bytes — Bun's own decompression inflated a 2 MB gzip bomb to GBs
+before any cap could stop it. Any other `Content-Encoding` is refused. A declared
 non-HTML `Content-Type` is refused before the body is read (a missing one is
 let through), and the rendered DOM is refused past 5 MB too.
 

@@ -19,6 +19,14 @@ export class UnsupportedContentTypeError extends Error {
   }
 }
 
+/** The server compressed the body with something readBodyCapped can't decode. */
+export class UnsupportedContentEncodingError extends Error {
+  constructor(encoding: string) {
+    super(`Unsupported content encoding: ${encoding}`);
+    this.name = "UnsupportedContentEncodingError";
+  }
+}
+
 export class ResponseTooLargeError extends Error {
   constructor(maxBytes: number) {
     super(`Response is larger than ${Math.round(maxBytes / 1024 / 1024)} MB`);

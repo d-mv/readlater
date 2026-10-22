@@ -343,6 +343,24 @@ describe("createFetchHtml", () => {
     ).toBe("<html>b</html>");
   });
 
+  test("asks for the raw body (no automatic decompression) and offers only gzip/deflate", async () => {
+    const calls: RequestInit[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      calls.push(init);
+      return new Response(Bun.gzipSync(new TextEncoder().encode("<html>z</html>")), {
+        headers: { "content-type": "text/html", "content-encoding": "gzip" },
+      });
+    }) as unknown as typeof fetch;
+
+    expect(await createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/")).toBe(
+      "<html>z</html>",
+    );
+    expect(calls[0]).toMatchObject({
+      decompress: false,
+      headers: { "Accept-Encoding": "gzip, deflate" },
+    });
+  });
+
   test("rejects a body that streams past the size cap", async () => {
     let pulled = 0;
     const chunk = new Uint8Array(1024 * 1024);
