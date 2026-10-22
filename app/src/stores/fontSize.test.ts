@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { useFontSizeStore } from "./fontSize";
 
@@ -69,5 +69,22 @@ describe("useFontSizeStore", () => {
     const reloaded = useFontSizeStore();
     expect(reloaded.fontSize).toBe(20);
     expect(document.documentElement.style.getPropertyValue("--rl-article-font-size")).toBe("20px");
+  });
+
+  test("works when the browser blocks localStorage (site data disabled)", () => {
+    const denied = () => {
+      throw new DOMException("denied", "SecurityError");
+    };
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(denied);
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(denied);
+    try {
+      const store = useFontSizeStore();
+      expect(store.fontSize).toBe(16);
+      store.increase();
+      expect(store.fontSize).toBe(18);
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
   });
 });

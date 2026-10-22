@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, shallowRef } from "vue";
+import { readLocal, writeLocal } from "../lib/localStore";
 
 const STORAGE_KEY = "articleFontSize";
 const CSS_VAR = "--rl-article-font-size";
@@ -13,7 +14,7 @@ function clamp(size: number) {
 }
 
 function readStored(): number {
-  const stored = Number(localStorage.getItem(STORAGE_KEY));
+  const stored = Number(readLocal(STORAGE_KEY));
   return Number.isFinite(stored) && stored > 0 ? clamp(stored) : DEFAULT_FONT_SIZE;
 }
 
@@ -27,7 +28,7 @@ export const useFontSizeStore = defineStore("fontSize", () => {
   function apply(next: number) {
     fontSize.value = clamp(next);
     document.documentElement.style.setProperty(CSS_VAR, `${fontSize.value}px`);
-    localStorage.setItem(STORAGE_KEY, String(fontSize.value));
+    writeLocal(STORAGE_KEY, String(fontSize.value));
   }
 
   function increase() {

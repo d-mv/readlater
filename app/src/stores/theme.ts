@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, shallowRef, watch } from "vue";
+import { readLocal, writeLocal } from "../lib/localStore";
 
 export type Theme = "light" | "dark";
 export type ThemePreference = Theme | "system";
@@ -14,7 +15,7 @@ const CYCLE: Record<ThemePreference, ThemePreference> = {
 };
 
 function readPreference(): ThemePreference {
-  const stored = localStorage.getItem(STORAGE_KEY);
+  const stored = readLocal(STORAGE_KEY);
   return stored === "light" || stored === "dark" ? stored : "system";
 }
 
@@ -45,7 +46,7 @@ export const useThemeStore = defineStore("theme", () => {
 
   function setPreference(next: ThemePreference) {
     preference.value = next;
-    localStorage.setItem(STORAGE_KEY, next);
+    writeLocal(STORAGE_KEY, next);
   }
 
   function cycle() {

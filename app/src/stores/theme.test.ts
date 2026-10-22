@@ -110,4 +110,22 @@ describe("useThemeStore", () => {
     const store = useThemeStore();
     expect(store.theme).toBe("light");
   });
+
+  test("works when the browser blocks localStorage (site data disabled)", () => {
+    const denied = () => {
+      throw new DOMException("denied", "SecurityError");
+    };
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(denied);
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(denied);
+    try {
+      mockSystemTheme(false);
+      const store = useThemeStore();
+      expect(store.preference).toBe("system");
+      store.setPreference("dark");
+      expect(store.theme).toBe("dark");
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
+  });
 });
