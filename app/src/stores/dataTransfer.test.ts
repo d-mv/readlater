@@ -209,10 +209,11 @@ describe("useDataTransferStore", () => {
       const insertSelect = vi.fn().mockResolvedValue({ data: [{ id: "new-1" }], error: null });
       const insert = vi.fn((_rows: unknown[]) => ({ select: insertSelect }));
 
-      const tagSelect = vi
+      const tagUpsert = vi.fn().mockResolvedValue({ data: null, error: null });
+      const tagIn = vi
         .fn()
         .mockResolvedValue({ data: [{ id: "tag-1", name: "reading" }], error: null });
-      const tagUpsert = vi.fn(() => ({ select: tagSelect }));
+      const tagSelect = vi.fn(() => ({ in: tagIn }));
 
       const bookmarkTagsUpsert = vi.fn().mockResolvedValue({ data: null, error: null });
 
@@ -221,7 +222,7 @@ describe("useDataTransferStore", () => {
           return { select: () => existingQuery, insert };
         }
         if (table === "tags") {
-          return { upsert: tagUpsert };
+          return { upsert: tagUpsert, select: tagSelect };
         }
         if (table === "bookmark_tags") {
           return { upsert: bookmarkTagsUpsert };
@@ -245,10 +246,15 @@ describe("useDataTransferStore", () => {
       // One bulk tag upsert, one bulk join upsert.
       expect(tagUpsert).toHaveBeenCalledTimes(1);
       // Tags are per user: the owner is on every row and in the conflict target.
+      // An existing tag keeps its colour: only new names are inserted, then
+      // every name's id is read back.
       expect(tagUpsert).toHaveBeenCalledWith(
         [{ name: "reading", color: "#888888", user_id: "user-1" }],
-        { onConflict: "user_id,name", ignoreDuplicates: false },
+        { onConflict: "user_id,name", ignoreDuplicates: true },
       );
+      expect(tagSelect).toHaveBeenCalledWith("id, name");
+      expect(tagIn).toHaveBeenCalledWith("name", ["reading"]);
+      expect(result.warning).toBeNull();
       expect(bookmarkTagsUpsert).toHaveBeenCalledTimes(1);
       expect(bookmarkTagsUpsert).toHaveBeenCalledWith([{ bookmark_id: "new-1", tag_id: "tag-1" }], {
         onConflict: "bookmark_id,tag_id",
@@ -412,16 +418,17 @@ describe("useDataTransferStore", () => {
           error: null,
         }),
       }));
-      const tagUpsert = vi.fn(() => ({
-        select: vi.fn().mockResolvedValue({ data: [{ id: "tag-t", name: "t" }], error: null }),
-      }));
+      const tagUpsert = vi.fn().mockResolvedValue({ data: null, error: null });
+      const tagSelect = () => ({
+        in: vi.fn().mockResolvedValue({ data: [{ id: "tag-t", name: "t" }], error: null }),
+      });
       const bookmarkTagsUpsert = vi.fn().mockResolvedValue({ data: null, error: null });
 
       from.mockImplementation((table: string) => {
         if (table === "bookmarks") {
           return { select: () => pagedQuery([{ data: [], error: null }]), insert };
         }
-        if (table === "tags") return { upsert: tagUpsert };
+        if (table === "tags") return { upsert: tagUpsert, select: tagSelect };
         if (table === "bookmark_tags") return { upsert: bookmarkTagsUpsert };
         throw new Error(`unexpected table ${table}`);
       });
@@ -485,8 +492,12 @@ describe("useDataTransferStore", () => {
       ]);
     });
 
-    test("bookmarks still import when the tag upsert returns nothing; no tag links are written", async () => {
-      const bookmarkTagsUpsert = vi.fn();
+    function importWithTagTables(tags: {
+      upsert?: { error: { message: string } | null };
+      read?: { data: unknown[] | null; error: { message: string } | null };
+      links?: { error: { message: string } | null };
+    }) {
+      const bookmarkTagsUpsert = vi.fn().mockResolvedValue(tags.links ?? { error: null });
       from.mockImplementation((table: string) => {
         if (table === "bookmarks") {
           return {
@@ -498,21 +509,83 @@ describe("useDataTransferStore", () => {
         }
         if (table === "tags") {
           return {
-            upsert: () => ({
-              select: vi.fn().mockResolvedValue({ data: null, error: { message: "denied" } }),
+            upsert: vi.fn().mockResolvedValue(tags.upsert ?? { error: null }),
+            select: () => ({
+              in: vi
+                .fn()
+                .mockResolvedValue(
+                  tags.read ?? { data: [{ id: "t1", name: "news" }], error: null },
+                ),
             }),
           };
         }
         if (table === "bookmark_tags") return { upsert: bookmarkTagsUpsert };
         throw new Error(`unexpected table ${table}`);
       });
+      return bookmarkTagsUpsert;
+    }
+
+    test("a failed tag upsert still imports the bookmarks and says the tags are missing", async () => {
+      const links = importWithTagTables({ upsert: { error: { message: "denied" } } });
 
       const result = await useDataTransferStore().importBookmarks(
         payload([row({ tags: [{ name: "news", color: "#000000" }] })]),
       );
 
-      expect(result).toEqual({ imported: 1, skipped: [], error: null });
-      expect(bookmarkTagsUpsert).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ imported: 1, skipped: [], error: null });
+      expect(result.warning).toBe("The bookmarks were imported, but their tags couldn't be saved.");
+      expect(links).not.toHaveBeenCalled();
+    });
+
+    test("a failed tag id lookup says the tags are missing", async () => {
+      const links = importWithTagTables({ read: { data: null, error: { message: "denied" } } });
+
+      const result = await useDataTransferStore().importBookmarks(
+        payload([row({ tags: [{ name: "news", color: "#000000" }] })]),
+      );
+
+      expect(result.warning).toBe("The bookmarks were imported, but their tags couldn't be saved.");
+      expect(links).not.toHaveBeenCalled();
+    });
+
+    test("a tag whose id can't be read back says the tags are missing", async () => {
+      const links = importWithTagTables({ read: { data: null, error: null } });
+
+      const result = await useDataTransferStore().importBookmarks(
+        payload([row({ tags: [{ name: "news", color: "#000000" }] })]),
+      );
+
+      expect(result.warning).toBe("The bookmarks were imported, but their tags couldn't be saved.");
+      expect(links).not.toHaveBeenCalled();
+    });
+
+    test("a failed tag link write says the tags are missing", async () => {
+      importWithTagTables({ links: { error: { message: "denied" } } });
+
+      const result = await useDataTransferStore().importBookmarks(
+        payload([row({ tags: [{ name: "news", color: "#000000" }] })]),
+      );
+
+      expect(result.imported).toBe(1);
+      expect(result.warning).toBe("The bookmarks were imported, but their tags couldn't be saved.");
+    });
+
+    test("a failed duplicate check imports nothing instead of risking a failed bulk insert", async () => {
+      const insert = vi.fn();
+      from.mockImplementation(() => ({
+        select: () => pagedQuery([{ data: null, error: { message: "timeout" } }]),
+        insert,
+      }));
+
+      const result = await useDataTransferStore().importBookmarks(payload([row()]));
+
+      expect(result).toEqual({
+        imported: 0,
+        skipped: [],
+        error: "Couldn't check for bookmarks you already have. Nothing was imported.",
+        warning: null,
+      });
+      expect(insert).not.toHaveBeenCalled();
     });
   });
 });

@@ -19,6 +19,7 @@ const importing = shallowRef(false);
 const importError = shallowRef<string | null>(null);
 const importedCount = shallowRef<number | null>(null);
 const skippedRows = shallowRef<SkippedRow[]>([]);
+const importWarning = shallowRef<string | null>(null);
 
 const fileInput = useTemplateRef<HTMLInputElement>("fileInput");
 
@@ -72,6 +73,7 @@ async function onFileSelected(event: Event) {
   importError.value = null;
   importedCount.value = null;
   skippedRows.value = [];
+  importWarning.value = null;
 
   const text = await file.text();
   const result = await store.importBookmarks(text);
@@ -85,6 +87,7 @@ async function onFileSelected(event: Event) {
   }
   importedCount.value = result.imported;
   skippedRows.value = result.skipped;
+  importWarning.value = result.warning;
 }
 </script>
 
@@ -136,6 +139,9 @@ async function onFileSelected(event: Event) {
         Imported {{ importedCount }} bookmark{{ importedCount === 1 ? "" : "s" }}.
         <template v-if="skippedRows.length > 0"> Skipped {{ skippedRows.length }}: </template>
       </p>
+      <Message v-if="importWarning" tone="danger" test-id="import-warning" class="mt-8">
+        {{ importWarning }}
+      </Message>
       <ul
         v-if="skippedRows.length > 0"
         data-testid="skipped-list"

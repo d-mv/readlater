@@ -46,8 +46,13 @@ export interface ExportResult {
 export interface ImportResult {
   imported: number;
   skipped: SkippedRow[];
+  // Nothing was imported.
   error: string | null;
+  // The bookmarks were imported, but something about them wasn't.
+  warning: string | null;
 }
+
+const TAGS_NOT_SAVED = "The bookmarks were imported, but their tags couldn't be saved.";
 
 export const useDataTransferStore = defineStore("dataTransfer", () => {
   async function exportBookmarks(): Promise<ExportResult> {
@@ -70,17 +75,36 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
     } catch (err) {
       // parseExportPayload only throws ImportPayloadError (bad rows are
       // reported in payload.invalid, not thrown).
-      return { imported: 0, skipped: [], error: (err as ImportPayloadError).message };
+      return {
+        imported: 0,
+        skipped: [],
+        error: (err as ImportPayloadError).message,
+        warning: null,
+      };
     }
 
     const userId = useAuthStore().userId;
-    if (!userId) return { imported: 0, skipped: [], error: "You must be signed in." };
+    if (!userId) {
+      return { imported: 0, skipped: [], error: "You must be signed in.", warning: null };
+    }
 
     // Loaded once up front rather than per-row: this is a personal-library-scale,
     // one-shot operation, so an O(1)-query in-memory Set beats N duplicate queries.
-    const { data: existingRows } = await fetchAllPages<{ url_normalized: string | null }>(
-      (from, to) => supabase.from("bookmarks").select("url_normalized").order("id").range(from, to),
+    const { data: existingRows, error: existingError } = await fetchAllPages<{
+      url_normalized: string | null;
+    }>((from, to) =>
+      supabase.from("bookmarks").select("url_normalized").order("id").range(from, to),
     );
+    // A partial set would let a duplicate through, and one duplicate fails
+    // the whole bulk insert.
+    if (existingError) {
+      return {
+        imported: 0,
+        skipped: [],
+        error: "Couldn't check for bookmarks you already have. Nothing was imported.",
+        warning: null,
+      };
+    }
     const existingNormalizedUrls = new Set(
       existingRows
         .map((row) => row.url_normalized)
@@ -92,7 +116,7 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
       existingNormalizedUrls,
     );
     const skipped = [...payload.invalid, ...duplicates];
-    if (toImport.length === 0) return { imported: 0, skipped, error: null };
+    if (toImport.length === 0) return { imported: 0, skipped, error: null, warning: null };
 
     // 1. One bulk insert. `.select("id")` returns the new ids in insertion
     //    order, so inserted[i] lines up with toImport[i].
@@ -110,40 +134,46 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
           reason: insertError?.message ?? "insert failed",
         });
       }
-      return { imported: 0, skipped, error: null };
+      return { imported: 0, skipped, error: null, warning: null };
     }
+    const imported = toImport.length;
 
-    // 2. One bulk upsert of every distinct tag, then map name -> id. Tags are
-    //    per user (unique on user_id, name), so each row carries the owner.
+    // 2. Insert the tags this user doesn't have yet — an existing tag keeps
+    //    its colour — then read every name's id. Tags are per user (unique on
+    //    user_id, name), so each row carries the owner.
     const tagsByName = new Map<string, { name: string; color: string; user_id: string }>();
     for (const bookmark of toImport) {
       for (const tag of bookmark.tags) tagsByName.set(tag.name, { ...tag, user_id: userId });
     }
-    const tagIdByName = new Map<string, string>();
-    if (tagsByName.size > 0) {
-      const { data: tagRows } = await supabase
-        .from("tags")
-        .upsert([...tagsByName.values()], { onConflict: "user_id,name", ignoreDuplicates: false })
-        .select("id, name");
-      for (const row of (tagRows ?? []) as { id: string; name: string }[]) {
-        tagIdByName.set(row.name, row.id);
-      }
-    }
+    if (tagsByName.size === 0) return { imported, skipped, error: null, warning: null };
+    const tagsFailed = { imported, skipped, error: null, warning: TAGS_NOT_SAVED };
+    const { error: upsertError } = await supabase
+      .from("tags")
+      .upsert([...tagsByName.values()], { onConflict: "user_id,name", ignoreDuplicates: true });
+    if (upsertError) return tagsFailed;
+    const { data: tagRows, error: readError } = await supabase
+      .from("tags")
+      .select("id, name")
+      .in("name", [...tagsByName.keys()]);
+    if (readError) return tagsFailed;
+    const tagIdByName = new Map(
+      ((tagRows ?? []) as { id: string; name: string }[]).map((row) => [row.name, row.id]),
+    );
+    if (tagIdByName.size !== tagsByName.size) return tagsFailed;
 
     // 3. One bulk upsert of all bookmark_tags join rows.
-    const pairs: { bookmark_id: string; tag_id: string }[] = [];
-    toImport.forEach((bookmark, index) => {
-      const bookmarkId = (inserted[index] as { id: string }).id;
-      for (const tag of bookmark.tags) {
-        const tagId = tagIdByName.get(tag.name);
-        if (tagId) pairs.push({ bookmark_id: bookmarkId, tag_id: tagId });
-      }
-    });
-    if (pairs.length > 0) {
-      await supabase.from("bookmark_tags").upsert(pairs, { onConflict: "bookmark_id,tag_id" });
-    }
+    const pairs = toImport.flatMap((bookmark, index) =>
+      bookmark.tags.map((tag) => ({
+        bookmark_id: (inserted[index] as { id: string }).id,
+        tag_id: tagIdByName.get(tag.name)!,
+      })),
+    );
+    const { error: linkError } = await supabase
+      .from("bookmark_tags")
+      .upsert(pairs, { onConflict: "bookmark_id,tag_id" });
+    if (linkError) return tagsFailed;
 
-    return { imported: toImport.length, skipped, error: null };
+    return { imported, skipped, error: null, warning: null };
   }
 
   return { exportBookmarks, importBookmarks };

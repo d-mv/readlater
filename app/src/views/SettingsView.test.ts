@@ -90,6 +90,47 @@ describe("SettingsView", () => {
     expect(wrapper.get('[data-testid="error"]').text()).toBe("network down");
   });
 
+  test("an import whose tags couldn't be saved reports the count and says so", async () => {
+    from.mockImplementation((table: string) => {
+      if (table === "bookmarks") {
+        return {
+          select: () => singlePageQuery({ data: [], error: null }),
+          insert: () => ({
+            select: vi.fn().mockResolvedValue({ data: [{ id: "new-1" }], error: null }),
+          }),
+        };
+      }
+      if (table === "tags")
+        return { upsert: vi.fn().mockResolvedValue({ error: { message: "x" } }) };
+      throw new Error(`unexpected table ${table}`);
+    });
+    const payload = {
+      version: EXPORT_VERSION,
+      exported_at: "now",
+      bookmarks: [
+        {
+          url: "https://new.example/y",
+          type: "article",
+          status: "ready",
+          title: "New",
+          tags: [{ name: "news", color: "#000000" }],
+        },
+      ],
+    };
+    const file = new File([JSON.stringify(payload)], "export.json", { type: "application/json" });
+
+    const wrapper = mount(SettingsView);
+    const input = wrapper.get("input[type=file]");
+    Object.defineProperty(input.element, "files", { value: [file], configurable: true });
+    await input.trigger("change");
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="result"]').text()).toContain("Imported 1 bookmark");
+    expect(wrapper.get('[data-testid="import-warning"]').text()).toContain(
+      "tags couldn't be saved",
+    );
+  });
+
   test("importing a file reports the imported count and any skipped rows", async () => {
     const existingQuery = singlePageQuery({
       data: [{ url_normalized: "https://arc90.com/x" }],
@@ -173,6 +214,7 @@ describe("SettingsView", () => {
     expect(wrapper.get('[data-testid="result"]').text()).toContain("Skipped 1");
     expect(wrapper.get('[data-testid="skipped-list"]').text()).toContain("Existing");
     expect(wrapper.get('[data-testid="skipped-list"]').text()).toContain("already exists");
+    expect(wrapper.find('[data-testid="import-warning"]').exists()).toBe(false);
   });
 
   test("shows a generic error when export returns no payload", async () => {

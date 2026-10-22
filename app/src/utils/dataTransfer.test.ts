@@ -257,6 +257,29 @@ describe("partitionForImport", () => {
     expect(skipped).toHaveLength(1);
   });
 
+  test("keeps the first of two rows in the file with the same normalized URL", () => {
+    const rows = [
+      toExportBookmark(makeBookmark({ url: "https://ex.com/a", title: "First" })),
+      toExportBookmark(makeBookmark({ url: "https://EX.com/a/", title: "Second" })),
+    ];
+
+    const { toImport, skipped } = partitionForImport(rows, new Set());
+
+    expect(toImport.map((r) => r.title)).toEqual(["First"]);
+    expect(skipped).toEqual([
+      { url: "https://EX.com/a/", title: "Second", reason: "duplicate in this file" },
+    ]);
+  });
+
+  test("never treats two url-less rows in the file as duplicates of each other", () => {
+    const rows = [
+      toExportBookmark(makeBookmark({ url: null, type: "note", title: "One" })),
+      toExportBookmark(makeBookmark({ url: null, type: "note", title: "Two" })),
+    ];
+
+    expect(partitionForImport(rows, new Set()).toImport).toHaveLength(2);
+  });
+
   test("never treats url-less rows (notes, PDFs) as duplicates", () => {
     const rows = [toExportBookmark(makeBookmark({ url: null, type: "note", title: "A note" }))];
 

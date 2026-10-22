@@ -200,6 +200,11 @@ function condition(column: string, expression: string): Predicate {
       return (row) => (compareValues(column, row[column], raw) ?? 1) <= 0;
     case "is":
       return (row) => String(row[column]) === raw;
+    case "in": {
+      // `in.(a,"b,c")`: a parenthesised list; quoted items may hold commas.
+      const items = (raw.slice(1, -1).match(/"(?:[^"\\]|\\.)*"|[^,]+/g) ?? []).map(unquote);
+      return (row) => items.some((item) => compareValues(column, row[column], item) === 0);
+    }
     case "fts":
     case "plfts":
     case "phfts":

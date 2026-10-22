@@ -258,11 +258,20 @@ export function partitionForImport(
   const toImport: ExportBookmark[] = [];
   const skipped: SkippedRow[] = [];
 
+  // URLs are unique per user: a second row with the same normalized URL
+  // would fail the whole bulk insert, so only the first one is kept.
+  const inFile = new Set<string>();
   for (const bookmark of bookmarks) {
-    if (bookmark.url && existingNormalizedUrls.has(normalizeUrl(bookmark.url))) {
+    const normalized = bookmark.url ? normalizeUrl(bookmark.url) : null;
+    if (normalized && existingNormalizedUrls.has(normalized)) {
       skipped.push({ url: bookmark.url, title: bookmark.title, reason: "already exists" });
       continue;
     }
+    if (normalized && inFile.has(normalized)) {
+      skipped.push({ url: bookmark.url, title: bookmark.title, reason: "duplicate in this file" });
+      continue;
+    }
+    if (normalized) inFile.add(normalized);
     toImport.push(bookmark);
   }
 
