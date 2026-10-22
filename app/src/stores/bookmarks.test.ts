@@ -2135,6 +2135,64 @@ describe("useBookmarksStore", () => {
       expect(store.bookmarks.map((b) => b.id)).toEqual(["2", "1"]);
     });
 
+    test("an INSERT of an older row (an import) lands in date order, not on top", async () => {
+      seedStore([
+        makeBookmark({ id: "new", created_at: "2026-10-10T00:00:00Z" }),
+        makeBookmark({ id: "old", created_at: "2026-10-01T00:00:00Z" }),
+      ]);
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+
+      emitRealtime({
+        eventType: "INSERT",
+        new: makeBookmark({ id: "imported", created_at: "2026-10-05T00:00:00Z" }),
+      });
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["new", "imported", "old"]);
+    });
+
+    test("an INSERT older than the loaded pages is left for loadMore", async () => {
+      const page = Array.from({ length: 50 }, (_, i) =>
+        makeBookmark({
+          id: `p${i}`,
+          created_at: `2026-10-${String(30 - Math.floor(i / 5)).padStart(2, "0")}T00:00:00Z`,
+        }),
+      );
+      seedStore(page);
+      const store = useBookmarksStore();
+      await store.fetch();
+      expect(store.hasMore).toBe(true);
+      store.subscribeToChanges();
+
+      emitRealtime({
+        eventType: "INSERT",
+        new: makeBookmark({ id: "ancient", created_at: "2020-01-01T00:00:00Z" }),
+      });
+
+      expect(store.bookmarks.some((b) => b.id === "ancient")).toBe(false);
+    });
+
+    test("a burst of INSERTs (a bulk import) rewrites the offline list once, not per row", async () => {
+      seedStore([makeBookmark({ id: "1", created_at: "2026-10-10T00:00:00Z" })]);
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+      replaceBookmarksList.mockClear();
+
+      for (let i = 0; i < 30; i++) {
+        emitRealtime({
+          eventType: "INSERT",
+          new: makeBookmark({ id: `i${i}`, created_at: "2026-10-11T00:00:00Z" }),
+        });
+      }
+
+      // The first event's write, then one more with everything that came in
+      // while it ran.
+      await vi.waitFor(() => expect(replaceBookmarksList).toHaveBeenCalledTimes(2));
+      expect(replaceBookmarksList.mock.calls.at(-1)?.[0]).toHaveLength(31);
+    });
+
     test("an INSERT event is ignored while a search is active", async () => {
       from.mockReturnValue({ select: () => listQuery([makeBookmark({ id: "1" })]) });
       const store = useBookmarksStore();
@@ -2161,6 +2219,8 @@ describe("useBookmarksStore", () => {
     describe("an add whose Realtime INSERT arrives before its own response", () => {
       const created = makeBookmark({
         id: "new",
+        // Just created: newer than anything listed.
+        created_at: "2026-02-01T00:00:00Z",
         url: "https://arc90.com/new",
         title: "From the response",
         tags: [{ id: "t1", name: "tag", color: "#000000" }],

@@ -486,11 +486,23 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     }
   }
 
+  // Each persist rewrites the whole list, and Realtime changes come in
+  // bursts (a bulk import inserts hundreds of rows). While a write is
+  // running, later changes only mark the list dirty; one more write with the
+  // latest state follows — two writes per burst instead of one per row.
+  let persisting = false;
+  let persistAgain = false;
+
   function persistOfflineList() {
     // Only the unfiltered list is a true copy of "my recent bookmarks"; a
     // search result or an offline snapshot must never replace it.
     if (listSession.kind !== "recent") return;
     if (bookmarks.value.length === 0) return;
+    if (persisting) {
+      persistAgain = true;
+      return;
+    }
+    persisting = true;
     const { cursor, watermark } = listSession;
     const syncState = watermark ? { watermark, cursor, hasMore: hasMore.value } : undefined;
     // Best-effort: private browsing / storage quota must not blank the list.
@@ -499,7 +511,14 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         bookmarks.value.map((b) => offlineDb.stripContentMd(b)),
         syncState,
       )
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        persisting = false;
+        if (persistAgain) {
+          persistAgain = false;
+          persistOfflineList();
+        }
+      });
   }
 
   // A single postgres_changes subscription keeps `bookmarks` live without the
@@ -518,9 +537,14 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // leave it out until the user re-runs the search.
       if (listSession.kind !== "recent" && listSession.query !== "") return;
       const row = { ...(payload.new as Bookmark), tags: payload.new.tags ?? [] };
-      if (!bookmarks.value.some((b) => b.id === row.id)) {
-        bookmarks.value = [row, ...bookmarks.value];
+      if (bookmarks.value.some((b) => b.id === row.id)) return;
+      // An import inserts rows with their original dates: older than the
+      // loaded pages, loadMore brings them; otherwise they go where they
+      // sort, not on top.
+      if (listSession.kind === "recent" && !inWindow(row, listSession.cursor, hasMore.value)) {
+        return;
       }
+      bookmarks.value = [...bookmarks.value, row].sort(byCreatedAtDesc);
     } else if (payload.eventType === "UPDATE") {
       const row = payload.new as Bookmark;
       const existing = bookmarks.value.find((b) => b.id === row.id);
@@ -573,6 +597,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   // generation discards any fetch or page still in flight, so the previous
   // account's rows can't land after the reset.
   function reset() {
+    persistAgain = false;
     listGeneration += 1;
     listSession = { kind: "recent", cursor: null, watermark: null };
     bookmarks.value = [];
