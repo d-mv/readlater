@@ -91,6 +91,35 @@ describe("ShareDialog", () => {
     expect(wrapper.emitted("togglePublic")).toEqual([[false]]);
   });
 
+  describe("while a toggle is being saved", () => {
+    test("the checkbox is disabled", () => {
+      const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark(), saving: true } });
+      expect(wrapper.find('[data-testid="toggle-input"]').attributes("disabled")).toBeDefined();
+    });
+
+    test("a failed save puts the checkbox back to the bookmark's real state", async () => {
+      const bookmark = makeBookmark({ is_public: true });
+      const wrapper = mount(ShareDialog, { props: { bookmark } });
+      const box = wrapper.find('[data-testid="toggle-input"]');
+      (box.element as HTMLInputElement).checked = false;
+      await box.trigger("change");
+      expect(wrapper.emitted("togglePublic")?.[0]).toEqual([false]);
+
+      await wrapper.setProps({ saving: true });
+      await wrapper.setProps({ saving: false, error: "network down" });
+
+      expect((box.element as HTMLInputElement).checked).toBe(true);
+      expect(wrapper.find('[data-testid="share-error"]').text()).toBe("network down");
+      // Still public, so the link stays on offer.
+      expect(wrapper.find('[data-testid="link-field"]').exists()).toBe(true);
+    });
+
+    test("no error, no message", () => {
+      const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark(), error: null } });
+      expect(wrapper.find('[data-testid="share-error"]').exists()).toBe(false);
+    });
+  });
+
   test("emits close when clicking the close button", async () => {
     const wrapper = mount(ShareDialog, { props: { bookmark: makeBookmark() } });
     await wrapper.find('[data-testid="close-btn"]').trigger("click");

@@ -271,9 +271,15 @@ function onMarkUnread() {
 }
 
 const showShareDialog = ref(false);
+const sharing = ref(false);
 
-function onTogglePublic(isPublic: boolean) {
-  run(store.setPublic(props.id, isPublic));
+async function onTogglePublic(isPublic: boolean) {
+  sharing.value = true;
+  try {
+    await run(store.setPublic(props.id, isPublic));
+  } finally {
+    sharing.value = false;
+  }
 }
 
 function onAddTag(name: string) {
@@ -577,6 +583,8 @@ watch(
     <ShareDialog
       v-if="showShareDialog"
       :bookmark="bookmark"
+      :saving="sharing"
+      :error="actionError"
       @close="showShareDialog = false"
       @toggle-public="onTogglePublic"
     />

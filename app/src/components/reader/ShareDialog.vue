@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, useTemplateRef, watch } from "vue";
 import { IconCopy, IconCopyCheck, IconShare2, IconX } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
 import Button from "../../shared/ui/Button.vue";
 import Dialog from "../../shared/ui/Dialog.vue";
 import IconButton from "../../shared/ui/IconButton.vue";
+import Message from "../../shared/ui/Message.vue";
 
 const props = defineProps<{
   bookmark: Bookmark;
   origin?: string;
+  // A togglePublic write is in flight.
+  saving?: boolean;
+  // Why the last write failed, shown here rather than behind the sheet.
+  error?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -17,6 +22,17 @@ const emit = defineEmits<{
 }>();
 
 const copied = ref(false);
+const toggle = useTemplateRef<HTMLInputElement>("toggle");
+
+// `:checked` only patches the box when is_public changes. After a failed
+// write it doesn't, and the box would keep showing the click — so once the
+// write settles, the box is put back to what the bookmark really is.
+watch(
+  () => props.saving,
+  (saving) => {
+    if (!saving && toggle.value) toggle.value.checked = props.bookmark.is_public;
+  },
+);
 
 const shareUrl = computed(() => `${props.origin ?? window.location.origin}/s/${props.bookmark.id}`);
 const canNativeShare = computed(() => typeof navigator.share === "function");
@@ -75,13 +91,16 @@ function nativeShare() {
     <label class="flex items-center justify-between text-base text-ink">
       <span>Public link</span>
       <input
+        ref="toggle"
         data-testid="toggle-input"
         type="checkbox"
         class="mt-3 mr-3 mb-3 ml-4"
         :checked="bookmark.is_public"
+        :disabled="saving"
         @change="onToggle"
       />
     </label>
+    <Message v-if="error" tone="danger" test-id="share-error">{{ error }}</Message>
 
     <template v-if="bookmark.is_public">
       <div class="flex items-center gap-8">
