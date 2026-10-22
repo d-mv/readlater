@@ -1006,7 +1006,9 @@ directly in the Supabase dashboard, and signups must be disabled there
 in — correct for something installed to a homescreen. The last user is also
 cached in localStorage so the app opens offline; that cached login ends when,
 online, `getSession()` finds no session (or a refresh the server rejected,
-as opposed to one that couldn't reach it) or a list read gets a 401 — a
+as opposed to one that couldn't reach it) or a list read gets a 401 that
+`getUser()` confirms (no session, or the auth server rejects the token; a
+refresh that couldn't reach the auth server keeps the login) — a
 router watcher on `isAuthenticated` then sends any protected page to
 `/login`. Ending that way also unsubscribes Realtime and resets the list and
 offline-cache stores; IndexedDB is kept for the same user's next sign-in.

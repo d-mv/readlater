@@ -523,6 +523,13 @@ export class FakeBackend {
       case "logout":
         return { status: 204 };
       case "user":
+        // A revoked token is refused by the auth server too, as by GoTrue.
+        if (this.rejectJwt) {
+          return {
+            status: 401,
+            body: { code: 401, error_code: "bad_jwt", msg: "invalid JWT: token is expired" },
+          };
+        }
         return { status: 200, body: makeSession().user };
       default:
         return this.notImplemented(`auth ${request.method()} ${endpoint}`);

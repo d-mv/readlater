@@ -462,7 +462,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       }
     } catch (err) {
       if (!isCurrent()) return;
-      if (err instanceof SessionExpiredError) auth.sessionExpired();
+      if (err instanceof SessionExpiredError) await auth.sessionExpired();
+      if (!isCurrent()) return;
       // Signed out (just now, or the check above found the session over):
       // the router is leaving for /login — don't put the snapshot up.
       if (!auth.userId) return;

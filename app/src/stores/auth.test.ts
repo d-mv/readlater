@@ -1,17 +1,18 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 
-const { signInWithPassword, signOut, getSession, onAuthStateChange } = vi.hoisted(() => ({
+const { signInWithPassword, signOut, getSession, getUser, onAuthStateChange } = vi.hoisted(() => ({
   signInWithPassword: vi.fn(),
   signOut: vi.fn(),
   getSession: vi.fn(),
+  getUser: vi.fn(),
   onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
 }));
 
 vi.mock("../lib/supabase", () => ({
   AUTH_STORAGE_KEY: "sb-test-auth-token",
   supabase: {
-    auth: { signInWithPassword, signOut, getSession, onAuthStateChange },
+    auth: { signInWithPassword, signOut, getSession, getUser, onAuthStateChange },
   },
 }));
 
@@ -36,7 +37,8 @@ vi.mock("./offlineCache", () => ({
 }));
 vi.mock("../lib/offlineDb", () => ({ clearAll }));
 
-const { AuthRetryableFetchError, AuthApiError } = await import("@supabase/supabase-js");
+const { AuthRetryableFetchError, AuthApiError, AuthSessionMissingError } =
+  await import("@supabase/supabase-js");
 const { useAuthStore } = await import("./auth");
 
 function storeOfflineUser() {
@@ -155,14 +157,74 @@ describe("useAuthStore", () => {
     expect(store.isAuthenticated).toBe(false);
   });
 
-  test("sessionExpired ends the login", () => {
-    storeOfflineUser();
+  describe("sessionExpired (the API answered 401)", () => {
+    test("ends the login when the auth server rejects the token", async () => {
+      storeOfflineUser();
+      getUser.mockResolvedValue({
+        data: { user: null },
+        error: new AuthApiError("invalid JWT", 401, "bad_jwt"),
+      });
 
-    const store = useAuthStore();
-    store.sessionExpired();
+      const store = useAuthStore();
+      await store.sessionExpired();
 
-    expect(store.isAuthenticated).toBe(false);
-    expect(localStorage.getItem("rl-auth-user")).toBeNull();
+      expect(store.isAuthenticated).toBe(false);
+      expect(localStorage.getItem("rl-auth-user")).toBeNull();
+    });
+
+    test("ends the login when supabase-js has no session left", async () => {
+      storeOfflineUser();
+      getUser.mockResolvedValue({ data: { user: null }, error: new AuthSessionMissingError() });
+
+      const store = useAuthStore();
+      await store.sessionExpired();
+
+      expect(store.isAuthenticated).toBe(false);
+    });
+
+    test("keeps the login when the token refresh just couldn't reach the auth server", async () => {
+      storeOfflineUser();
+      getUser.mockResolvedValue({
+        data: { user: null },
+        error: new AuthRetryableFetchError("Failed to fetch", 0),
+      });
+
+      const store = useAuthStore();
+      await store.sessionExpired();
+
+      expect(store.isAuthenticated).toBe(true);
+      expect(calls).toEqual([]);
+    });
+
+    test("keeps the login when the session works again (refreshed meanwhile)", async () => {
+      storeOfflineUser();
+      getUser.mockResolvedValue({ data: { user: { id: "offline-user-1" } }, error: null });
+
+      const store = useAuthStore();
+      await store.sessionExpired();
+
+      expect(store.isAuthenticated).toBe(true);
+    });
+
+    test("ends the login when the auth server answers with neither a user nor an error", async () => {
+      storeOfflineUser();
+      getUser.mockResolvedValue({ data: { user: null }, error: null });
+
+      const store = useAuthStore();
+      await store.sessionExpired();
+
+      expect(store.isAuthenticated).toBe(false);
+    });
+
+    test("keeps the login when the check itself throws", async () => {
+      storeOfflineUser();
+      getUser.mockRejectedValue(new Error("boom"));
+
+      const store = useAuthStore();
+      await store.sessionExpired();
+
+      expect(store.isAuthenticated).toBe(true);
+    });
   });
 
   test("starts unauthenticated with no session", () => {
@@ -426,9 +488,10 @@ describe("useAuthStore", () => {
   });
 
   describe("a session that ends without Sign out", () => {
-    test("sessionExpired drops the live channel and the in-memory list", () => {
+    test("sessionExpired drops the live channel and the in-memory list", async () => {
+      getUser.mockResolvedValue({ data: { user: null }, error: new AuthSessionMissingError() });
       const store = useAuthStore();
-      store.sessionExpired();
+      await store.sessionExpired();
 
       expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache"]);
       expect(clearAll).not.toHaveBeenCalled();

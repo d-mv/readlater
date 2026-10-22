@@ -193,10 +193,19 @@ export const useAuthStore = defineStore("auth", () => {
     }
   }
 
-  // The API refused the session's token (401): it's over, whatever the
-  // client still holds.
-  function sessionExpired() {
-    forgetUser();
+  // The API refused the request's token (401). That happens when the session
+  // is over, but also when an expired access token's refresh couldn't reach
+  // the auth server — supabase-js then sends the anon key, which the API
+  // refuses too. getUser() refreshes and asks the auth server: only a
+  // definite answer (no session, token rejected) ends the login.
+  async function sessionExpired(): Promise<void> {
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (data?.user) return;
+      if (sessionIsGone(error ?? null)) forgetUser();
+    } catch {
+      // Unknown: keep the login; the next request asks again.
+    }
   }
 
   async function signIn(email: string, password: string): Promise<{ error: string | null }> {

@@ -93,3 +93,22 @@ test("an API 401 mid-session signs out instead of showing the offline copy", asy
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByLabel("Email")).toBeVisible();
 });
+
+test("an API 401 while the auth server is unreachable keeps the login and shows the offline copy", async ({
+  page,
+  backend,
+}) => {
+  backend.addBookmark({ title: "Visible while valid" });
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(1);
+
+  // The REST API refuses the request, but the session check can't reach the
+  // auth server (503): that's no proof the session is over.
+  backend.rejectJwt = true;
+  backend.fail((c) => c.service === "auth" && c.name === "user", { status: 503, times: 5 });
+  await page.getByTestId("search-input").fill("visible");
+  await page.getByTestId("search-input").press("Enter");
+
+  await expect(rows(page)).toHaveCount(1);
+  await expect(page).not.toHaveURL(/\/login$/);
+});

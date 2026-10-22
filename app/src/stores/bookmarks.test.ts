@@ -274,6 +274,49 @@ describe("useBookmarksStore", () => {
       expect(store.bookmarks).toEqual([]);
     });
 
+    test("a 401 waits for the session check: still signed in → the offline snapshot", async () => {
+      const query = listQuery(null);
+      query.result.mockResolvedValue({ data: null, error: { message: "JWT" }, status: 401 });
+      from.mockReturnValue({ select: () => query });
+      authState.sessionExpired.mockImplementation(async () => {});
+      getBookmarksList.mockResolvedValue([makeBookmark({ id: "cached" })]);
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["cached"]);
+    });
+
+    test("a 401 waits for the session check: signed out → no snapshot", async () => {
+      const query = listQuery(null);
+      query.result.mockResolvedValue({ data: null, error: { message: "JWT" }, status: 401 });
+      from.mockReturnValue({ select: () => query });
+      authState.sessionExpired.mockImplementation(async () => {
+        await Promise.resolve();
+        authState.userId = null;
+      });
+      getBookmarksList.mockResolvedValue([makeBookmark({ id: "cached" })]);
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("a 401 whose fetch was superseded during the session check leaves the list alone", async () => {
+      const query = listQuery(null);
+      query.result.mockResolvedValue({ data: null, error: { message: "JWT" }, status: 401 });
+      from.mockReturnValue({ select: () => query });
+      const store = useBookmarksStore();
+      authState.sessionExpired.mockImplementation(async () => store.reset());
+      getBookmarksList.mockResolvedValue([makeBookmark({ id: "cached" })]);
+
+      await store.fetch();
+
+      expect(getBookmarksList).not.toHaveBeenCalled();
+      expect(store.bookmarks).toEqual([]);
+    });
+
     test("an ordinary network error still falls back to the offline snapshot", async () => {
       from.mockReturnValue({ select: () => listQuery(null, { message: "Failed to fetch" }) });
       getBookmarksList.mockResolvedValue([makeBookmark({ id: "cached" })]);
