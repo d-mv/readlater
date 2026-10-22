@@ -164,11 +164,13 @@ create table rate_limits (
   count        int not null,
   primary key (user_id, action)
 );
--- bump_rate_limit_for_user(p_user_id, p_action, p_max, p_window) → boolean:
---   one atomic upsert; refused calls keep counting (capped at p_max + 1).
+-- rate_limit_for(p_action) → (max_calls, time_window): the per-action limits
+--   (20261022100000); an unknown action raises 22023. No client execute.
+-- bump_rate_limit_for_user(p_user_id, p_action) → boolean: one atomic
+--   upsert; refused calls keep counting (capped at max_calls + 1).
 --   security definer, execute: service_role only.
--- bump_rate_limit(p_action, p_max, p_window) → boolean: the same, keyed on
---   the caller's own auth.uid(); execute: authenticated.
+-- bump_rate_limit(p_action) → boolean: the same, keyed on the caller's own
+--   auth.uid(); execute: authenticated. Callers never supply the limit.
 
 -- Table privileges (20261012100000_minimal_table_grants): anon holds none;
 -- authenticated holds exactly what the app and RLS-scoped functions use.
@@ -477,8 +479,8 @@ streaming): oversize → 413, empty/malformed/non-object JSON → 400 (only
 `capture`'s `/refresh` treats a missing body as "not forced"). Failures
 go through `serverError()`, which logs the cause and answers a generic
 `"internal error"` 500 — Postgres, Storage and DeepL error text never reaches
-the caller. `rateLimit.ts`: per-user fixed windows enforced in Postgres —
-capture 120/h, translate 20/h, snippet, file-import and pdf-import 30/h each
+the caller. `rateLimit.ts`: per-user fixed windows, with the limits defined and
+enforced in Postgres (`rate_limit_for`) — capture 120/h, translate 20/h, snippet, file-import and pdf-import 30/h each
 (JWT functions call `bump_rate_limit` as the user; `capture` calls
 `bump_rate_limit_for_user` for `OWNER_USER_ID`); over the limit → 429, an
 RPC failure → 500 (never "allowed"). `turndown.ts` (Turndown with the

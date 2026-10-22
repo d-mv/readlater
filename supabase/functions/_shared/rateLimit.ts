@@ -1,17 +1,10 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
 
-// Per-user fixed-window limits, enforced in Postgres by bump_rate_limit()
-// (20261011171000_audit_hardening.sql): one atomic upsert per call, so
-// concurrent requests can't both slip under the limit.
-export const RATE_LIMITS = {
-  capture: { max: 120, window: "1 hour" },
-  translate: { max: 20, window: "1 hour" },
-  snippet: { max: 30, window: "1 hour" },
-  "file-import": { max: 30, window: "1 hour" },
-  "pdf-import": { max: 30, window: "1 hour" },
-} as const;
-
-export type RateLimitedAction = keyof typeof RATE_LIMITS;
+// Per-user fixed-window limits, enforced in Postgres: rate_limit_for() owns
+// the limit and window of each action, and bump_rate_limit() does one atomic
+// upsert per call, so concurrent requests can't both slip under the limit
+// (20261022100000_rate_limits_server_side.sql). Callers only name the action.
+export type RateLimitedAction = "capture" | "translate" | "snippet" | "file-import" | "pdf-import";
 
 // "error" covers both an RPC failure and an RPC that answered with nothing —
 // a bump that didn't record anything must not be treated as "allowed".
@@ -26,15 +19,9 @@ export async function bumpRateLimit(
   action: RateLimitedAction,
   userId?: string,
 ): Promise<RateLimitOutcome> {
-  const { max, window } = RATE_LIMITS[action];
   const { data, error } = userId
-    ? await supabase.rpc("bump_rate_limit_for_user", {
-      p_user_id: userId,
-      p_action: action,
-      p_max: max,
-      p_window: window,
-    })
-    : await supabase.rpc("bump_rate_limit", { p_action: action, p_max: max, p_window: window });
+    ? await supabase.rpc("bump_rate_limit_for_user", { p_user_id: userId, p_action: action })
+    : await supabase.rpc("bump_rate_limit", { p_action: action });
 
   if (error) {
     console.error(`[rate-limit:${action}]`, error);

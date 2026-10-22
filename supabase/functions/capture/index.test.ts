@@ -198,7 +198,7 @@ Deno.test("handleCapture: bumps the per-user capture limit as the owner via the 
   assertEquals(res.status, 200);
   assertEquals(supabase.rpcCalls, [{
     fn: "bump_rate_limit_for_user",
-    args: { p_user_id: OWNER, p_action: "capture", p_max: 120, p_window: "1 hour" },
+    args: { p_user_id: OWNER, p_action: "capture" },
   }]);
 });
 

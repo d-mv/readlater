@@ -207,7 +207,7 @@ Deno.test("handleTranslate: bumps the per-user translate limit and refuses with 
   assertEquals(fetchMock.calls, 0);
   assertEquals(supabase.rpcCalls, [{
     fn: "bump_rate_limit",
-    args: { p_action: "translate", p_max: 20, p_window: "1 hour" },
+    args: { p_action: "translate" },
   }]);
 });
 

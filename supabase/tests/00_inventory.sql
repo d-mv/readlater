@@ -16,7 +16,8 @@ select functions_are('public', array[
   'bookmarks_reset_retry',
   'bump_rate_limit_for_user',
   'bump_rate_limit',
-  'list_orphaned_storage_objects'
+  'list_orphaned_storage_objects',
+  'rate_limit_for'
 ]);
 
 select triggers_are('public', 'bookmarks',
