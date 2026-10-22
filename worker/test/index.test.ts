@@ -173,7 +173,7 @@ function fakeClient(
   opts: {
     pending?: Bookmark[];
     moves?: (u: Update) => boolean;
-    errorFor?: (u: Update) => string | null;
+    errorFor?: (u: Update) => string | { message: string; code: string } | null;
   } = {},
 ) {
   const updates: Update[] = [];
@@ -185,8 +185,12 @@ function fakeClient(
         const update: Update = { payload, filters: {} };
         updates.push(update);
         const result = () => {
-          const message = opts.errorFor?.(update) ?? null;
-          if (message) return { data: null, error: { message } };
+          const failure = opts.errorFor?.(update) ?? null;
+          if (failure) {
+            const error =
+              typeof failure === "string" ? { message: failure, code: "23514" } : failure;
+            return { data: null, error };
+          }
           const moved = opts.moves ? opts.moves(update) : true;
           return { data: moved ? [{ id: update.filters.id }] : [], error: null };
         };
@@ -295,6 +299,28 @@ describe("processBookmark", () => {
     expect(updates[2]?.payload).toMatchObject({
       status: "failed",
       error_message: "Database update failed: violates check constraint",
+    });
+  });
+
+  test.each([
+    [
+      "a statement timeout",
+      { message: "canceling statement due to statement timeout", code: "57014" },
+    ],
+    ["a dropped connection", { message: "TypeError: fetch failed", code: "" }],
+    ["a deadlock", { message: "deadlock detected", code: "40P01" }],
+  ])("re-queues instead of failing when saving the result hits %s", async (_label, failure) => {
+    const { client, updates } = fakeClient({
+      errorFor: (u) => (u.payload.status === "ready" ? failure : null),
+    });
+
+    await processBookmark(article, client, { parseArticleFn: parsed });
+
+    expect(updates).toHaveLength(3);
+    expect(updates[2]?.payload).toMatchObject({
+      status: "pending",
+      attempts: 1,
+      error_message: `Database update failed: ${failure.message}`,
     });
   });
 

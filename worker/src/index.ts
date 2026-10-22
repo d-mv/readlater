@@ -6,7 +6,7 @@ import { fetchMeta } from "./youtubeMeta";
 import { makeThumbnailUploader } from "./storage";
 import { closeBrowser, renderWithBrowser } from "./browserRender";
 import { closeSync, readFileSync, writeFileSync } from "node:fs";
-import { isTransientError } from "./errors";
+import { DatabaseWriteError, isTransientError } from "./errors";
 import { log } from "./logger";
 import { withTimeout } from "./timeout";
 import { startWatchdog, type Watchdog } from "./watchdog";
@@ -140,15 +140,15 @@ export async function transition(
   from: BookmarkStatus,
   to: BookmarkStatus,
   fields: Record<string, unknown> = {},
-): Promise<{ moved: boolean; error: string | null }> {
+): Promise<{ moved: boolean; error: string | null; code: string }> {
   const { data, error } = await client
     .from("bookmarks")
     .update({ ...fields, status: to })
     .eq("id", id)
     .eq("status", from)
     .select("id");
-  if (error) return { moved: false, error: error.message };
-  return { moved: (data?.length ?? 0) > 0, error: null };
+  if (error) return { moved: false, error: error.message, code: error.code ?? "" };
+  return { moved: (data?.length ?? 0) > 0, error: null, code: "" };
 }
 
 let pollCycleCount = 0;
@@ -307,7 +307,7 @@ export async function processBookmark(
       translated_content_md: null,
       translated_lang: null,
     });
-    if (done.error) throw new Error(`Database update failed: ${done.error}`);
+    if (done.error) throw new DatabaseWriteError(done.error, done.code);
     if (!done.moved) {
       log.warn("bookmark changed while processing; dropping the result", {
         bookmarkId: bookmark.id,

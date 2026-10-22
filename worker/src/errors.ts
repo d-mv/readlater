@@ -28,6 +28,27 @@ export class ExtractionTimeoutError extends Error {
   }
 }
 
+/** A database write the worker needed failed. `code` is the Postgres
+ * SQLSTATE (or PostgREST code); empty when the request never got an answer. */
+export class DatabaseWriteError extends Error {
+  constructor(
+    message: string,
+    public readonly code: string,
+  ) {
+    super(`Database update failed: ${message}`);
+    this.name = "DatabaseWriteError";
+  }
+}
+
+// SQLSTATE classes that say "try again": connection exceptions (08),
+// transaction rollbacks such as deadlocks (40), insufficient resources (53)
+// and operator intervention such as statement timeouts (57).
+const TRANSIENT_SQLSTATE_CLASSES = new Set(["08", "40", "53", "57"]);
+
+function isTransientDatabaseError(err: DatabaseWriteError): boolean {
+  return err.code === "" || TRANSIENT_SQLSTATE_CLASSES.has(err.code.slice(0, 2));
+}
+
 /** The server compressed the body with something readBodyCapped can't decode. */
 export class UnsupportedContentEncodingError extends Error {
   constructor(encoding: string) {
@@ -88,6 +109,7 @@ export function isBreakerFailure(err: unknown): boolean {
  * breaker failure, plus an open breaker and 429 rate limiting. */
 export function isTransientError(err: unknown): boolean {
   if (err instanceof CircuitBreakerOpenError) return true;
+  if (err instanceof DatabaseWriteError) return isTransientDatabaseError(err);
   if (err instanceof HttpStatusError && err.status === 429) return true;
   return isBreakerFailure(err);
 }
