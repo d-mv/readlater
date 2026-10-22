@@ -3,7 +3,7 @@
   "module": "src/index.ts",
   "type": "module",
   "private": true,
-  "version": "0.2.9",
+  "version": "0.2.10",
   "scripts": {
     "start": "bun run src/index.ts",
     "test": "bun test",

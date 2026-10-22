@@ -255,7 +255,24 @@ describe("processBookmark", () => {
       title: "Test Title",
       content_md: "# Test",
     });
-    expect(updates[1]?.filters).toEqual({ id: "bm-1", status: "processing" });
+    // Only this claim may finish it: the lease is the claim's processed_at.
+    expect(updates[1]?.filters).toEqual({
+      id: "bm-1",
+      status: "processing",
+      processed_at: updates[0]?.payload.processed_at,
+    });
+  });
+
+  test("a claim that was taken over meanwhile (refresh + another worker) can't finish it", async () => {
+    // The row is processing again, but under a newer claim: no lease match.
+    const { client, updates } = fakeClient({
+      moves: (u) => u.payload.status === "processing" || u.filters.processed_at === "newer-claim",
+    });
+
+    await processBookmark(article, client, { parseArticleFn: parsed });
+
+    expect(updates[1]?.filters.processed_at).toBe(updates[0]?.payload.processed_at);
+    expect(updates).toHaveLength(2);
   });
 
   test("clears a translation of the previous body when a refresh finishes", async () => {
@@ -284,7 +301,11 @@ describe("processBookmark", () => {
       status: "failed",
       error_message: "HTTP 404 Not Found",
     });
-    expect(updates[1]?.filters).toEqual({ id: "bm-1", status: "processing" });
+    expect(updates[1]?.filters).toEqual({
+      id: "bm-1",
+      status: "processing",
+      processed_at: updates[0]?.payload.processed_at,
+    });
   });
 
   test("marks bookmark as failed when ready database update returns an error", async () => {
@@ -547,7 +568,11 @@ describe("processBookmark retries", () => {
 
       expect(updates).toHaveLength(2);
       const requeue = updates[1]!;
-      expect(requeue.filters).toEqual({ id: "bm-r", status: "processing" });
+      expect(requeue.filters).toEqual({
+        id: "bm-r",
+        status: "processing",
+        processed_at: updates[0]?.payload.processed_at,
+      });
       expect(requeue.payload).toMatchObject({
         status: "pending",
         attempts: attempts + 1,

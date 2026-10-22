@@ -129,24 +129,31 @@ export interface Bookmark {
 
 type BookmarkStatus = "pending" | "processing" | "ready" | "failed";
 
-// Compare-and-set on the row's status: the write only applies while the row
-// is still in `from`, so the status itself is the ownership token. A refresh
-// that re-queues a row mid-parse, a second worker during a deploy, or the
-// stale-processing sweep all make a later write here match nothing instead
-// of clobbering the newer state.
+// Compare-and-set on the row's status — plus, for moves out of
+// "processing", the claim's lease (its processed_at). The status alone
+// isn't enough: a refresh can re-queue the row mid-parse and another worker
+// (during a deploy) claim it again, so it is "processing" once more under a
+// newer claim. With the lease, a stale owner's write matches nothing instead
+// of clobbering the newer state; so does one after the stale-processing
+// sweep took the row back.
 export async function transition(
   client: SupabaseClient,
   id: string,
   from: BookmarkStatus,
   to: BookmarkStatus,
   fields: Record<string, unknown> = {},
+  // The claim's processed_at: a move out of "processing" only succeeds for
+  // the claim that made it, not for a newer one (a refresh re-queued the row
+  // and another worker claimed it meanwhile).
+  lease?: string,
 ): Promise<{ moved: boolean; error: string | null; code: string }> {
-  const { data, error } = await client
+  let query = client
     .from("bookmarks")
     .update({ ...fields, status: to })
     .eq("id", id)
-    .eq("status", from)
-    .select("id");
+    .eq("status", from);
+  if (lease !== undefined) query = query.eq("processed_at", lease);
+  const { data, error } = await query.select("id");
   if (error) return { moved: false, error: error.message, code: error.code ?? "" };
   return { moved: (data?.length ?? 0) > 0, error: null, code: "" };
 }
@@ -273,8 +280,9 @@ export async function processBookmark(
     return;
   }
 
+  const lease = new Date().toISOString();
   const claim = await transition(client, bookmark.id, "pending", "processing", {
-    processed_at: new Date().toISOString(),
+    processed_at: lease,
   });
   if (claim.error) {
     // Still pending — the next cycle retries it.
@@ -298,15 +306,22 @@ export async function processBookmark(
       `Processing timed out after ${BOOKMARK_TIMEOUT_MS / 1000}s`,
     );
 
-    const done = await transition(client, bookmark.id, "processing", "ready", {
-      ...sanitizeFields(result as unknown as Record<string, unknown>),
-      error_message: null,
-      processed_at: new Date().toISOString(),
-      // A refresh re-parses the page; a translation of the previous body would
-      // otherwise keep showing (the reader prefers the translation).
-      translated_content_md: null,
-      translated_lang: null,
-    });
+    const done = await transition(
+      client,
+      bookmark.id,
+      "processing",
+      "ready",
+      {
+        ...sanitizeFields(result as unknown as Record<string, unknown>),
+        error_message: null,
+        processed_at: new Date().toISOString(),
+        // A refresh re-parses the page; a translation of the previous body would
+        // otherwise keep showing (the reader prefers the translation).
+        translated_content_md: null,
+        translated_lang: null,
+      },
+      lease,
+    );
     if (done.error) throw new DatabaseWriteError(done.error, done.code);
     if (!done.moved) {
       log.warn("bookmark changed while processing; dropping the result", {
@@ -331,10 +346,14 @@ export async function processBookmark(
         nextAttemptAt: next_attempt_at,
         err,
       });
-      const requeued = await transition(client, bookmark.id, "processing", "pending", {
-        ...fields,
-        next_attempt_at,
-      });
+      const requeued = await transition(
+        client,
+        bookmark.id,
+        "processing",
+        "pending",
+        { ...fields, next_attempt_at },
+        lease,
+      );
       if (requeued.error) {
         log.error("failed to re-queue bookmark", { bookmarkId: bookmark.id, err: requeued.error });
       }
@@ -347,7 +366,7 @@ export async function processBookmark(
       attempts,
       err,
     });
-    const failed = await transition(client, bookmark.id, "processing", "failed", fields);
+    const failed = await transition(client, bookmark.id, "processing", "failed", fields, lease);
     if (failed.error) {
       log.error("failed to mark bookmark as failed", {
         bookmarkId: bookmark.id,
