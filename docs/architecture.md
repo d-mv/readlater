@@ -751,7 +751,9 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
 - **Delta sync** — the unfiltered list is persisted to IndexedDB with a sync
   state (`watermark` = newest `updated_at`/`deleted_at` it reflects, plus the
   `(created_at, id)` keyset `cursor`/`hasMore`), written in one transaction
-  with the list.
+  with the list. Only a first page or a delta moves the watermark —
+  `loadMore()` never does, since an older page's newer rows say nothing about
+  the rows already loaded (raising it could skip a change Realtime missed).
   `fetch()` without a search then asks only for rows with `updated_at >=
   watermark − 5 min` (overlap for late-committing transactions) and for
   `bookmark_deletions` tombstones since then, instead of re-reading the first

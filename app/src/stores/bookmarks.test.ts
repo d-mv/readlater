@@ -2387,6 +2387,37 @@ describe("useBookmarksStore", () => {
     });
   });
 
+  describe("watermark", () => {
+    test("loadMore never moves it: a newer row on an older page can't hide a missed page-1 change", async () => {
+      // Page 1 synced at 10-09; the next page holds a row edited on 10-20.
+      const firstPage = Array.from({ length: 50 }, (_, i) =>
+        dated(
+          `p${String(i).padStart(2, "0")}`,
+          String(30 - Math.floor(i / 5)).padStart(2, "0"),
+          "09",
+        ),
+      );
+      from.mockReturnValueOnce({ select: () => listQuery(firstPage) });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      from.mockReturnValueOnce({ select: () => listQuery([dated("old", "02", "20")]) });
+      await store.loadMore();
+
+      expect(replaceBookmarksList).toHaveBeenLastCalledWith(
+        expect.any(Array),
+        expect.objectContaining({ watermark: "2026-10-09T00:00:00Z" }),
+      );
+
+      // The next delta still asks from 10-09 (minus the overlap), so a page-1
+      // change missed over Realtime on 10-15 is fetched.
+      const delta = listQuery([]);
+      routeTables(delta);
+      await store.fetch();
+      expect(delta.gte).toHaveBeenCalledWith("updated_at", "2026-10-08T23:55:00.000Z");
+    });
+  });
+
   describe("offline snapshot", () => {
     test("both offline stores failing leaves an empty list rather than an error", async () => {
       vi.stubGlobal("navigator", { onLine: false });

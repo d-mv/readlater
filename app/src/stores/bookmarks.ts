@@ -500,12 +500,15 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       if (generation !== listGeneration || listSession !== session) return;
       const seen = new Set(bookmarks.value.map((b) => b.id));
       bookmarks.value = [...bookmarks.value, ...page.filter((b) => !seen.has(b.id))];
-      let watermark = session.watermark;
-      for (const row of page) watermark = latest(watermark, row.updated_at);
+      // The watermark stays put: it vouches for what the last delta (and
+      // Realtime) saw of the rows already loaded, and an older page's newer
+      // updated_at says nothing about them. Raising it here could skip a
+      // page-1 change Realtime missed; the next delta just re-reads this
+      // page's recently changed rows instead.
       listSession = {
         kind: "recent",
         cursor: cursorOf(page.at(-1)) ?? session.cursor,
-        watermark,
+        watermark: session.watermark,
       };
       hasMore.value = page.length === PAGE_SIZE;
       persistOfflineList();
