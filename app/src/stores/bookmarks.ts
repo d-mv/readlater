@@ -505,9 +505,11 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   // A single postgres_changes subscription keeps `bookmarks` live without the
   // client polling the REST API: a capture from another tab (bookmarklet
   // popup, share target), or the worker marking an article ready, lands here
-  // directly. The stream is RLS-scoped to the signed-in user and — by the
-  // publication's column list — carries no article bodies; the reader pulls
-  // those via fetchOne() on open.
+  // directly. INSERT/UPDATE are RLS-scoped to the signed-in user; DELETE
+  // events are not (Realtime skips RLS for them — architecture §10), so a
+  // delete of an id this list doesn't hold is ignored. By the publication's
+  // column list the stream carries no article bodies; the reader pulls those
+  // via fetchOne() on open.
   let channel: RealtimeChannel | undefined;
 
   function applyChange(payload: RealtimePostgresChangesPayload<Bookmark>) {

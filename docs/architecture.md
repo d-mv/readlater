@@ -1207,6 +1207,17 @@ run one each.
 - **Import bulk-insert failure** reports every row as skipped rather than
   falling back to per-row inserts (client-side dedup already removes the
   common unique-URL collisions).
+- **Realtime DELETE events aren't RLS-filtered.** Supabase Realtime skips
+  the RLS check for deletes (`realtime.apply_rls`: `action = 'DELETE'` is
+  always visible) and trims the old record to the replica-identity columns,
+  so every signed-in subscriber of `bookmarks` receives the `id` and
+  `user_id` of every user's deletes. The initial migration's comment that
+  the `(id, user_id)` replica identity "lets Realtime evaluate the owner
+  access RLS policy" for deletes is wrong (left as-is in the applied
+  migration). Delete events can't be filtered server-side either, and a
+  client filter wouldn't stop someone subscribing without it. Accepted:
+  ids are random UUIDs, nothing else leaks, and the app ignores ids it
+  doesn't hold.
 - **Worker plain fetch: DNS rebinding.** The SSRF check and `fetch()` resolve
   the host separately; only the browser fallback is pinned to the vetted IP
   (§4). Accepted: the plain fetch runs no page code.
