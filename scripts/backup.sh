@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Full backup of the production Supabase project: schema, data (public, auth,
 # storage metadata) and every Storage object (PDFs, thumbnails). Read-only
-# against production; writes to backups/<UTC timestamp>/ (gitignored).
+# against production; writes to ~/backups/read-later/<UTC timestamp>/ —
+# outside the repo, because the deploy rsyncs the working tree to the server
+# and a dump holds auth.users password hashes.
 #
-#   bash scripts/backup.sh            # → backups/20261012T120000Z/
+#   bash scripts/backup.sh            # → ~/backups/read-later/20261012T120000Z/
 #   BACKUP_DIR=/path bash scripts/backup.sh
 #
 # Needs the `sb` wrapper (per-project Supabase CLI profile, see
@@ -15,7 +17,7 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-out="${BACKUP_DIR:-$repo_root/backups/$stamp}"
+out="${BACKUP_DIR:-$HOME/backups/read-later/$stamp}"
 mkdir -p "$out/storage"
 
 echo "▸ schema → $out/schema.sql"

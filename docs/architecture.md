@@ -1072,7 +1072,9 @@ the per-project Supabase CLI wrapper; `supabase.id` names the profile.)
 - **Backup** — `bash scripts/backup.sh` (read-only against production, via
   `sb`): `schema.sql`, `data.sql` (public, auth, storage metadata) and every
   object of `bookmark-pdfs` and `bookmark-assets`, into
-  `backups/<UTC timestamp>/` (gitignored). Override with `BACKUP_DIR`.
+  `~/backups/read-later/<UTC timestamp>/`, outside the repo so a deploy's
+  rsync can never ship a dump (it holds auth.users password hashes) to the
+  server. Override with `BACKUP_DIR`.
 - **Restore** — bring the target to the same migrations (`sb db push` to a
   new project, or a local `db reset`), then
   `bash scripts/restore.sh <backup dir> <postgres URL>`: one transaction,
