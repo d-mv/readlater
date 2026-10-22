@@ -463,7 +463,7 @@ watch(
         v-if="actionError"
         tone="danger"
         test-id="action-error"
-        class="mb-16 rounded-sm border border-line bg-canvas px-10 py-8"
+        class="sticky top-0 z-10 mb-16 rounded-sm border border-line bg-canvas px-10 py-8"
       >
         {{ actionError }}
       </Message>

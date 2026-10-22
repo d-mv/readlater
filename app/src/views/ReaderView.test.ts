@@ -965,6 +965,10 @@ describe("ReaderView", () => {
       await openMenuItem(wrapper, "mark-read");
 
       expect(wrapper.get('[data-testid="action-error"]').text()).toBe("Couldn't save the change.");
+      // Pinned to the top of the reading area, so it shows mid-article too.
+      expect(wrapper.get('[data-testid="action-error"]').classes()).toEqual(
+        expect.arrayContaining(["sticky", "top-0"]),
+      );
     });
 
     test("Share opens the dialog, which can make the bookmark public and be closed", async () => {
