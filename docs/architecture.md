@@ -992,9 +992,15 @@ cached in localStorage so the app opens offline; that cached login ends when,
 online, `getSession()` finds no session (or a refresh the server rejected,
 as opposed to one that couldn't reach it) or a list read gets a 401 — a
 router watcher on `isAuthenticated` then sends any protected page to
-`/login`. **Sign out** (Settings) unsubscribes Realtime, resets the list
+`/login`. Ending that way also unsubscribes Realtime and resets the list and
+offline-cache stores; IndexedDB is kept for the same user's next sign-in.
+`rl-data-owner` (localStorage) records whose data IndexedDB holds: when a
+different user signs in (or a different user's stored session loads), the
+whole device is cleared first and the owner changes only once that clear
+succeeded (`claimDevice`, `stores/auth.ts`). **Sign out** (Settings) unsubscribes Realtime, resets the list
 and offline-cache stores, clears every IndexedDB store
-(`offlineDb.clearAll()`, revoking image blob URLs) and only then calls
+(`offlineDb.clearAll()`, revoking image blob URLs), releases the owner and
+only then calls
 `supabase.auth.signOut()`. supabase-js refreshes an expired token before
 signing out and, when that refresh can't reach the server, returns without
 removing its stored session — so the store removes it itself

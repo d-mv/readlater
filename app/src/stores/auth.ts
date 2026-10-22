@@ -7,6 +7,10 @@ import { useBookmarksStore } from "./bookmarks";
 import { useOfflineCacheStore } from "./offlineCache";
 
 const OFFLINE_AUTH_KEY = "rl-auth-user";
+// The user whose list, sync state and downloads IndexedDB holds. Unlike
+// rl-auth-user it survives a session that ends without Sign out, so the
+// next sign-in can tell whether that data is its own.
+const DATA_OWNER_KEY = "rl-data-owner";
 
 export const SIGN_IN_UNCONFIRMED = "Check your email to confirm your account, then sign in.";
 
@@ -31,6 +35,21 @@ function saveOfflineUser(user: StoredUser | null) {
     } else {
       localStorage.removeItem(OFFLINE_AUTH_KEY);
     }
+  } catch {}
+}
+
+function loadDataOwner(): string | null {
+  try {
+    return localStorage.getItem(DATA_OWNER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveDataOwner(id: string | null) {
+  try {
+    if (id) localStorage.setItem(DATA_OWNER_KEY, id);
+    else localStorage.removeItem(DATA_OWNER_KEY);
   } catch {}
 }
 
@@ -61,7 +80,46 @@ export const useAuthStore = defineStore("auth", () => {
   // In-memory user id for insert paths — avoids a getUser() network call.
   const userId = computed(() => session.value?.user.id ?? offlineUser.value?.id ?? null);
 
+  // The live channel and the in-memory list belong to the session that loaded
+  // them; they go whenever it ends.
+  function dropLocalState() {
+    const bookmarks = useBookmarksStore();
+    bookmarks.unsubscribeFromChanges();
+    bookmarks.reset();
+    useOfflineCacheStore().reset();
+  }
+
+  // Everything of the current account on the device, IndexedDB included.
+  // Best-effort: false when IndexedDB couldn't be cleared.
+  async function clearDevice(): Promise<boolean> {
+    dropLocalState();
+    try {
+      await offlineDb.clearAll();
+      saveDataOwner(null);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // A different user signing in on this device must never see the previous
+  // user's IndexedDB data. The owner changes only once that data is gone, so
+  // a failed clear is retried at the next sign-in.
+  let ownerSwitch: Promise<void> = Promise.resolve();
+  function claimDevice(userId: string) {
+    const owner = loadDataOwner();
+    if (owner === userId) return;
+    if (owner === null) {
+      saveDataOwner(userId);
+      return;
+    }
+    ownerSwitch = clearDevice().then((cleared) => {
+      if (cleared) saveDataOwner(userId);
+    });
+  }
+
   function syncUser(sess: Session) {
+    claimDevice(sess.user.id);
     session.value = sess;
     const u = { id: sess.user.id, email: sess.user.email ?? "" };
     offlineUser.value = u;
@@ -70,16 +128,25 @@ export const useAuthStore = defineStore("auth", () => {
 
   // Drops the session and the cached offline login, which flips
   // isAuthenticated — the router sends a protected page to login on that.
-  function forgetUser() {
+  function endSession() {
     session.value = null;
     offlineUser.value = null;
     saveOfflineUser(null);
+  }
+
+  // The session ended without Sign out (expired, signed out in another tab):
+  // the in-memory state goes too. IndexedDB stays for the same user's next
+  // sign-in; claimDevice clears it if someone else signs in.
+  function forgetUser() {
+    dropLocalState();
+    endSession();
   }
 
   async function loadSession(): Promise<boolean> {
     const { data, error } = await supabase.auth.getSession();
     if (data?.session) {
       syncUser(data.session);
+      await ownerSwitch;
       return true;
     }
     if (sessionIsGone(error ?? null)) forgetUser();
@@ -142,6 +209,7 @@ export const useAuthStore = defineStore("auth", () => {
     if (error) return { error: error.message };
     if (!data.session) return { error: SIGN_IN_UNCONFIRMED };
     syncUser(data.session);
+    await ownerSwitch;
     return { error: null };
   }
 
@@ -150,12 +218,8 @@ export const useAuthStore = defineStore("auth", () => {
   // articles) go before the session itself. Local cleanup is best-effort and
   // never blocks the sign-out.
   async function signOut() {
-    const bookmarks = useBookmarksStore();
-    bookmarks.unsubscribeFromChanges();
-    bookmarks.reset();
-    useOfflineCacheStore().reset();
-    await offlineDb.clearAll().catch(() => {});
-    forgetUser();
+    await clearDevice();
+    endSession();
     // supabase-js refreshes an expired token before signing out and, if that
     // refresh can't reach the server, returns without removing the stored
     // session — the next online load would then restore it. So the stored

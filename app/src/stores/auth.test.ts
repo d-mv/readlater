@@ -424,4 +424,110 @@ describe("useAuthStore", () => {
     await expect(store.signOut()).resolves.toBeUndefined();
     expect(store.isAuthenticated).toBe(false);
   });
+
+  describe("a session that ends without Sign out", () => {
+    test("sessionExpired drops the live channel and the in-memory list", () => {
+      const store = useAuthStore();
+      store.sessionExpired();
+
+      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache"]);
+      expect(clearAll).not.toHaveBeenCalled();
+    });
+
+    test("SIGNED_OUT from another tab drops the live channel and the in-memory list", async () => {
+      const store = useAuthStore();
+      await store.init();
+      calls.length = 0;
+      const [onChange] = onAuthStateChange.mock.calls.at(-1) as unknown as [
+        (event: string, session: unknown) => void,
+      ];
+
+      onChange("SIGNED_OUT", null);
+
+      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache"]);
+    });
+
+    test("init finding the session over drops the in-memory list", async () => {
+      storeOfflineUser();
+
+      await useAuthStore().init();
+
+      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache"]);
+    });
+  });
+
+  describe("device data owner", () => {
+    const signInAs = (id: string) =>
+      signInWithPassword.mockResolvedValue({ data: { session: { user: { id } } }, error: null });
+
+    test("the first sign-in claims the device's data without clearing it", async () => {
+      signInAs("u1");
+
+      await useAuthStore().signIn("a@b.c", "pw");
+
+      expect(clearAll).not.toHaveBeenCalled();
+      expect(localStorage.getItem("rl-data-owner")).toBe("u1");
+    });
+
+    test("the same user signing in again keeps the device's data", async () => {
+      localStorage.setItem("rl-data-owner", "u1");
+      signInAs("u1");
+
+      await useAuthStore().signIn("a@b.c", "pw");
+
+      expect(clearAll).not.toHaveBeenCalled();
+    });
+
+    test("a different user signing in clears the previous user's data first", async () => {
+      localStorage.setItem("rl-data-owner", "u1");
+      signInAs("u2");
+
+      const result = await useAuthStore().signIn("b@b.c", "pw");
+
+      expect(result.error).toBeNull();
+      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache", "clearAll"]);
+      expect(localStorage.getItem("rl-data-owner")).toBe("u2");
+    });
+
+    test("a different user's stored session found at init clears the previous user's data", async () => {
+      localStorage.setItem("rl-data-owner", "u1");
+      getSession.mockResolvedValue({ data: { session: { user: { id: "u2" } } } });
+
+      await useAuthStore().init();
+
+      expect(clearAll).toHaveBeenCalledOnce();
+      expect(localStorage.getItem("rl-data-owner")).toBe("u2");
+    });
+
+    test("the owner is only handed over once the old data is gone", async () => {
+      localStorage.setItem("rl-data-owner", "u1");
+      clearAll.mockRejectedValueOnce(new Error("blocked"));
+      signInAs("u2");
+
+      await useAuthStore().signIn("b@b.c", "pw");
+
+      expect(localStorage.getItem("rl-data-owner")).toBe("u1");
+    });
+
+    test("unreadable localStorage counts as no owner rather than failing the sign-in", async () => {
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new DOMException("denied", "SecurityError");
+      });
+      signInAs("u2");
+
+      const result = await useAuthStore().signIn("b@b.c", "pw");
+
+      expect(result.error).toBeNull();
+      expect(clearAll).not.toHaveBeenCalled();
+    });
+
+    test("signOut releases the device", async () => {
+      localStorage.setItem("rl-data-owner", "u1");
+      signOut.mockResolvedValue({ error: null });
+
+      await useAuthStore().signOut();
+
+      expect(localStorage.getItem("rl-data-owner")).toBeNull();
+    });
+  });
 });
