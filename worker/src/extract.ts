@@ -1,6 +1,7 @@
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
 import { ExtractionTimeoutError } from "./errors";
+import type { FetchedPage } from "./parseArticle";
 
 /** The parts of a Readability result the worker uses; plain data, so it can
  * cross the thread boundary. */
@@ -22,8 +23,10 @@ export const EXTRACT_TIMEOUT_MS = 20_000;
 
 /** Readability on the current thread. Synchronous: it blocks the caller for
  * as long as it runs, so the worker only calls it through extractInWorker. */
-export function extractArticle(html: string, url: string): ExtractedArticle | null {
-  const dom = new JSDOM(html, { url });
+export function extractArticle(page: FetchedPage): ExtractedArticle | null {
+  // JSDOM decodes bytes by the Content-Type charset, a BOM or a <meta>
+  // declaration, and resolves relative URLs against `url`.
+  const dom = new JSDOM(page.body, { url: page.url, contentType: page.contentType });
   const article = new Readability(dom.window.document).parse();
   if (!article || (article.textContent ?? "").trim().length < MIN_EXTRACTED_LENGTH) return null;
   return {
@@ -43,8 +46,7 @@ export type ExtractReply =
  * `timeoutMs`, so a pathological page can't freeze the poll loop, its
  * timeouts, the heartbeat or the SIGTERM drain. */
 export function extractInWorker(
-  html: string,
-  url: string,
+  page: FetchedPage,
   {
     timeoutMs = EXTRACT_TIMEOUT_MS,
     entry = new URL("./extractWorker.ts", import.meta.url).href,
@@ -60,7 +62,7 @@ export function extractInWorker(
       else reject(new Error(reply.message));
     };
     worker.onerror = (event) => reject(new Error(event.message));
-    worker.postMessage({ html, url });
+    worker.postMessage(page);
   }).finally(() => {
     clearTimeout(timer);
     worker.terminate();

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { createFetchHtml, parseArticle } from "../src/parseArticle";
+import {
+  createFetchHtml,
+  type FetchedPage,
+  htmlContentType,
+  parseArticle,
+} from "../src/parseArticle";
 import { BlockedUrlError } from "../src/urlGuard";
 import { CircuitBreakerOpenError } from "../src/circuitBreaker";
 import {
@@ -37,9 +42,22 @@ const FIXTURE_HTML = `
 </html>
 `;
 
+/** A page as a fetcher hands it over: already-decoded text by default. */
+const page = (html: string, url = "https://example.com/"): FetchedPage => ({
+  body: html,
+  contentType: "text/html",
+  url,
+});
+
+/** A fetched body as text (createFetchHtml hands over raw bytes). */
+const text = (fetched: FetchedPage) =>
+  typeof fetched.body === "string" ? fetched.body : new TextDecoder().decode(fetched.body);
+
 describe("parseArticle", () => {
   test("extracts title, byline, markdown content, and computed reading stats via injected fetch", async () => {
-    const result = await parseArticle("https://arc90.com/readability", async () => FIXTURE_HTML);
+    const result = await parseArticle("https://arc90.com/readability", async () =>
+      page(FIXTURE_HTML),
+    );
 
     expect(result.title).toBe("A short history of the readability algorithm");
     expect(result.author).toContain("Arc90");
@@ -55,7 +73,7 @@ describe("parseArticle", () => {
   test("throws when the page has no extractable article content", async () => {
     const emptyHtml = "<html><body><nav>Home</nav></body></html>";
     await expect(
-      parseArticle("https://example.com/empty", async () => emptyHtml),
+      parseArticle("https://example.com/empty", async () => page(emptyHtml)),
     ).rejects.toThrow();
   });
 
@@ -64,8 +82,8 @@ describe("parseArticle", () => {
 
     const result = await parseArticle(
       "https://www.perplexity.ai/search/example",
-      async () => shellHtml,
-      async () => FIXTURE_HTML,
+      async () => page(shellHtml),
+      async () => page(FIXTURE_HTML),
     );
 
     expect(result.title).toBe("A short history of the readability algorithm");
@@ -78,8 +96,8 @@ describe("parseArticle", () => {
     await expect(
       parseArticle(
         "https://example.com/empty",
-        async () => emptyHtml,
-        async () => emptyHtml,
+        async () => page(emptyHtml),
+        async () => page(emptyHtml),
       ),
     ).rejects.toThrow();
   });
@@ -89,10 +107,10 @@ describe("parseArticle", () => {
 
     await parseArticle(
       "https://arc90.com/readability",
-      async () => FIXTURE_HTML,
+      async () => page(FIXTURE_HTML),
       async () => {
         renderCalled = true;
-        return FIXTURE_HTML;
+        return page(FIXTURE_HTML);
       },
     );
 
@@ -114,9 +132,8 @@ describe("parseArticle", () => {
 </body>
 </html>
 `;
-    const result = await parseArticle(
-      "https://example.com/linked-img",
-      async () => htmlWithLinkedImage,
+    const result = await parseArticle("https://example.com/linked-img", async () =>
+      page(htmlWithLinkedImage),
     );
     expect(result.content_md).toContain("![Diagram](https://example.com/image.png)");
     expect(result.content_md).not.toContain("[![");
@@ -139,7 +156,7 @@ describe("parseArticle", () => {
 </body>
 </html>
 `;
-    const result = await parseArticle("https://example.com/card", async () => html);
+    const result = await parseArticle("https://example.com/card", async () => page(html));
 
     expect(result.content_md).toContain(
       '[Read the next part\nof the series](https://example.com/next "Next part")',
@@ -151,7 +168,7 @@ describe("parseArticle", () => {
       '<p class="byline">',
       '<p>See <a name="ref">the reference</a> below.</p><p class="byline">',
     );
-    const result = await parseArticle("https://example.com/anchor", async () => html);
+    const result = await parseArticle("https://example.com/anchor", async () => page(html));
 
     expect(result.content_md).toContain("See the reference below.");
     expect(result.content_md).not.toContain("]()");
@@ -172,7 +189,7 @@ describe("parseArticle", () => {
 </body>
 </html>
 `;
-    const result = await parseArticle("https://example.com/self-linked", async () => html);
+    const result = await parseArticle("https://example.com/self-linked", async () => page(html));
 
     expect(result.content_md).toContain('![](https://example.com/photo.jpg "Full size")');
     expect(result.content_md).not.toContain("[![");
@@ -183,7 +200,7 @@ describe("parseArticle", () => {
       '<p class="byline">',
       '<p><a href="https://example.com/chart.png"><img src="https://example.com/chart.png" alt="Chart"></a></p><p class="byline">',
     );
-    const result = await parseArticle("https://example.com/alt-linked", async () => html);
+    const result = await parseArticle("https://example.com/alt-linked", async () => page(html));
 
     expect(result.content_md).toContain("![Chart](https://example.com/chart.png)");
     expect(result.content_md).not.toContain("[![");
@@ -194,7 +211,7 @@ describe("parseArticle", () => {
       '<p class="byline">',
       '<p><a href="https://example.com/chart.png"><img src="https://example.com/chart.png" alt="Chart"> full size</a></p><p class="byline">',
     );
-    const result = await parseArticle("https://example.com/captioned", async () => html);
+    const result = await parseArticle("https://example.com/captioned", async () => page(html));
 
     expect(result.content_md).toContain(
       "[![Chart](https://example.com/chart.png) full size](https://example.com/chart.png)",
@@ -215,7 +232,7 @@ describe("parseArticle", () => {
 </body>
 </html>
 `;
-    const result = await parseArticle("https://example.com/tricky", async () => html);
+    const result = await parseArticle("https://example.com/tricky", async () => page(html));
 
     expect(result.content_md).toContain(
       '[a tricky link](https://example.com/a\\)b "Say \\"hi\\"")',
@@ -228,7 +245,7 @@ describe("parseArticle", () => {
       async () => {
         throw new Error("HTTP 403 Forbidden");
       },
-      async () => FIXTURE_HTML,
+      async () => page(FIXTURE_HTML),
     );
 
     expect(result.title).toBe("A short history of the readability algorithm");
@@ -237,7 +254,7 @@ describe("parseArticle", () => {
 
   test("strips null bytes from article output", async () => {
     const htmlWithNulls = FIXTURE_HTML.replace("Arc90", "Arc\u000090");
-    const result = await parseArticle("https://example.com/nulls", async () => htmlWithNulls);
+    const result = await parseArticle("https://example.com/nulls", async () => page(htmlWithNulls));
 
     expect(result.author).not.toContain("\u0000");
     expect(result.content_md).not.toContain("\u0000");
@@ -253,7 +270,7 @@ describe("parseArticle", () => {
         },
         async () => {
           rendered += 1;
-          return FIXTURE_HTML;
+          return page(FIXTURE_HTML);
         },
       ),
     ).rejects.toBeInstanceOf(BlockedUrlError);
@@ -273,7 +290,7 @@ describe("parseArticle", () => {
         },
         async () => {
           rendered += 1;
-          return FIXTURE_HTML;
+          return page(FIXTURE_HTML);
         },
       ),
     ).rejects.toBe(error);
@@ -286,10 +303,10 @@ describe("parseArticle", () => {
     await expect(
       parseArticle(
         "https://example.com/huge",
-        async () => FIXTURE_HTML,
+        async () => page(FIXTURE_HTML),
         async () => {
           rendered += 1;
-          return FIXTURE_HTML;
+          return page(FIXTURE_HTML);
         },
         async () => {
           throw timeout;
@@ -304,7 +321,7 @@ describe("parseArticle", () => {
     await expect(
       parseArticle(
         "https://example.com/spa",
-        async () => '<html><body><div id="app"></div></body></html>',
+        async () => page('<html><body><div id="app"></div></body></html>'),
         async () => {
           throw open;
         },
@@ -319,7 +336,7 @@ describe("parseArticle", () => {
         async () => {
           throw new HttpStatusError(503, "Service Unavailable");
         },
-        async () => "<html><body><nav>Home</nav></body></html>",
+        async () => page("<html><body><nav>Home</nav></body></html>"),
       ),
     ).rejects.toBeInstanceOf(HttpStatusError);
   });
@@ -331,14 +348,95 @@ describe("parseArticle", () => {
         async () => {
           throw new HttpStatusError(404, "Not Found");
         },
-        async () => "<html><body><nav>Home</nav></body></html>",
+        async () => page("<html><body><nav>Home</nav></body></html>"),
       ),
     ).rejects.toThrow(/could not extract.*HTTP 404 Not Found/);
   });
 });
 
+describe("parseArticle: decoding and URLs", () => {
+  const body = (title: string, paragraph: string, extraHead = "") =>
+    `<!doctype html><html><head>${extraHead}<title>${title}</title></head><body><article><h1>${title}</h1><p>${paragraph.repeat(6)}</p><p><img src="/media/pic.jpg" alt="Pic"> <a href="next.html">next</a></p></article></body></html>`;
+
+  test("decodes a windows-1251 page by its Content-Type charset", async () => {
+    // "Привет, мир. " in windows-1251, which Bun's TextDecoder can't decode.
+    const cp1251 = [0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x2c, 0x20, 0xec, 0xe8, 0xf0, 0x2e, 0x20];
+    const [before, after] = body("T", "@@").split("@@".repeat(6));
+    const enc = new TextEncoder();
+    const bytes = new Uint8Array([
+      ...enc.encode(before),
+      ...Array.from({ length: 30 }, () => cp1251).flat(),
+      ...enc.encode(after),
+    ]);
+
+    const result = await parseArticle("https://example.ru/", async () => ({
+      body: bytes,
+      contentType: "text/html; charset=windows-1251",
+      url: "https://example.ru/",
+    }));
+
+    expect(result.content_md).toContain("Привет, мир.");
+    expect(result.content_md).not.toContain("\uFFFD");
+  });
+
+  test("resolves relative links and images against the final URL, not the saved one", async () => {
+    const html = body("Redirected", "Long enough paragraph text for Readability to keep it. ");
+
+    const result = await parseArticle("https://t.co/abc", async () =>
+      page(html, "https://blog.example/posts/one/"),
+    );
+
+    expect(result.content_md).toContain("https://blog.example/media/pic.jpg");
+    expect(result.content_md).toContain("https://blog.example/posts/one/next.html");
+    expect(result.content_md).not.toContain("t.co");
+  });
+});
+
+describe("htmlContentType", () => {
+  const bytes = (html: string) => new TextEncoder().encode(html);
+
+  test("keeps a declared charset", () => {
+    expect(htmlContentType("text/html; charset=Shift_JIS", bytes("<p>x</p>"))).toBe(
+      "text/html; charset=Shift_JIS",
+    );
+  });
+
+  test("leaves a <meta charset> for JSDOM to find", () => {
+    expect(htmlContentType("text/html", bytes('<meta charset="koi8-r"><p>x</p>'))).toBe(
+      "text/html",
+    );
+    expect(
+      htmlContentType(
+        null,
+        bytes('<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-2">'),
+      ),
+    ).toBe("text/html");
+  });
+
+  test("defaults an undeclared page to UTF-8", () => {
+    expect(htmlContentType("text/html", bytes("<p>x</p>"))).toBe("text/html; charset=utf-8");
+    expect(htmlContentType(null, bytes("<p>x</p>"))).toBe("text/html; charset=utf-8");
+  });
+});
+
 describe("createFetchHtml", () => {
   const publicDns = async () => ["93.184.216.34"];
+
+  test("hands over the raw bytes, the Content-Type to decode them by and the final URL", async () => {
+    const fetchImpl = (async (url: string) =>
+      url === "https://t.co/x"
+        ? new Response(null, { status: 301, headers: { location: "https://blog.example/post" } })
+        : new Response("<html>é</html>", {
+            headers: { "content-type": "text/html; charset=utf-8" },
+          })) as unknown as typeof fetch;
+
+    const fetched = await createFetchHtml({ fetchImpl, lookup: publicDns })("https://t.co/x");
+
+    expect(fetched.body).toBeInstanceOf(Uint8Array);
+    expect(text(fetched)).toBe("<html>é</html>");
+    expect(fetched.contentType).toBe("text/html; charset=utf-8");
+    expect(fetched.url).toBe("https://blog.example/post");
+  });
 
   test("rejects a non-HTML content type without reading the body", async () => {
     const fetchImpl = (async () =>
@@ -360,10 +458,16 @@ describe("createFetchHtml", () => {
       new Response(new Blob(["<html>b</html>"]).stream())) as unknown as typeof fetch;
 
     expect(
-      await createFetchHtml({ fetchImpl: withCharset, lookup: publicDns })("https://example.com/"),
+      text(
+        await createFetchHtml({ fetchImpl: withCharset, lookup: publicDns })(
+          "https://example.com/",
+        ),
+      ),
     ).toBe("<html>a</html>");
     expect(
-      await createFetchHtml({ fetchImpl: untyped, lookup: publicDns })("https://example.com/"),
+      text(
+        await createFetchHtml({ fetchImpl: untyped, lookup: publicDns })("https://example.com/"),
+      ),
     ).toBe("<html>b</html>");
   });
 
@@ -376,9 +480,9 @@ describe("createFetchHtml", () => {
       });
     }) as unknown as typeof fetch;
 
-    expect(await createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/")).toBe(
-      "<html>z</html>",
-    );
+    expect(
+      text(await createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/")),
+    ).toBe("<html>z</html>");
     expect(calls[0]).toMatchObject({
       decompress: false,
       headers: { "Accept-Encoding": "gzip, deflate" },
@@ -441,7 +545,9 @@ describe("createFetchHtml", () => {
       return new Response("<html>ok</html>", { status: 200 });
     }) as unknown as typeof fetch;
 
-    const html = await createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/a");
+    const html = text(
+      await createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/a"),
+    );
 
     expect(html).toBe("<html>ok</html>");
     expect(requested).toEqual(["https://example.com/a", "https://example.com/b"]);
@@ -503,9 +609,9 @@ describe("createFetchHtml", () => {
           ? new Response(body(), { status: 302, headers: { location: "/b" } })
           : new Response("<html>ok</html>")) as unknown as typeof fetch;
 
-      expect(await createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/a")).toBe(
-        "<html>ok</html>",
-      );
+      expect(
+        text(await createFetchHtml({ fetchImpl, lookup: publicDns })("https://example.com/a")),
+      ).toBe("<html>ok</html>");
     });
 
     test("on a non-2xx response", async () => {

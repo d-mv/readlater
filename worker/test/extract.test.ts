@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { ExtractionTimeoutError, isTransientError } from "../src/errors";
 import { extractArticle, extractInWorker } from "../src/extract";
+import type { FetchedPage } from "../src/parseArticle";
+
+const page = (html: string, url = "https://example.com/post"): FetchedPage => ({
+  body: html,
+  contentType: "text/html",
+  url,
+});
 
 const ARTICLE_HTML = `<!doctype html><html><head><title>Worker extraction</title></head><body>
 <article><h1>Worker extraction</h1>
@@ -14,7 +21,7 @@ const PATHOLOGICAL_HTML = `<html><body>${"<div><span>a, b</span></div>".repeat(1
 
 describe("extractArticle", () => {
   test("returns the article's title, content and text for a substantial page", () => {
-    const article = extractArticle(ARTICLE_HTML, "https://example.com/post");
+    const article = extractArticle(page(ARTICLE_HTML, "https://example.com/post"));
     expect(article?.title).toBe("Worker extraction");
     expect(article?.textContent).toContain("own thread");
     expect(article?.content).toContain("<p>");
@@ -22,21 +29,21 @@ describe("extractArticle", () => {
 
   test("returns null when the page has too little text", () => {
     expect(
-      extractArticle("<html><body><p>short</p></body></html>", "https://example.com/"),
+      extractArticle(page("<html><body><p>short</p></body></html>", "https://example.com/")),
     ).toBeNull();
   });
 });
 
 describe("extractInWorker", () => {
   test("returns what extractArticle returns, from a separate thread", async () => {
-    expect(await extractInWorker(ARTICLE_HTML, "https://example.com/post")).toEqual(
-      extractArticle(ARTICLE_HTML, "https://example.com/post"),
+    expect(await extractInWorker(page(ARTICLE_HTML, "https://example.com/post"))).toEqual(
+      extractArticle(page(ARTICLE_HTML, "https://example.com/post")),
     );
   });
 
   test("returns null for a page with too little text", async () => {
     expect(
-      await extractInWorker("<html><body><p>short</p></body></html>", "https://example.com/"),
+      await extractInWorker(page("<html><body><p>short</p></body></html>", "https://example.com/")),
     ).toBeNull();
   });
 
@@ -46,7 +53,7 @@ describe("extractInWorker", () => {
     const ticker = setInterval(() => ticks++, 20);
     try {
       await expect(
-        extractInWorker(PATHOLOGICAL_HTML, "https://example.com/", { timeoutMs: 500 }),
+        extractInWorker(page(PATHOLOGICAL_HTML, "https://example.com/"), { timeoutMs: 500 }),
       ).rejects.toBeInstanceOf(ExtractionTimeoutError);
     } finally {
       clearInterval(ticker);
@@ -62,12 +69,12 @@ describe("extractInWorker", () => {
 
   test("a thread that crashes outside the message handler rejects too", async () => {
     const entry = new URL("./fixtures/crashingWorker.ts", import.meta.url).href;
-    await expect(extractInWorker(ARTICLE_HTML, "https://example.com/", { entry })).rejects.toThrow(
-      /boom/,
-    );
+    await expect(
+      extractInWorker(page(ARTICLE_HTML, "https://example.com/"), { entry }),
+    ).rejects.toThrow(/boom/);
   });
 
   test("an error thrown inside the worker rejects with its message", async () => {
-    await expect(extractInWorker(ARTICLE_HTML, "not a url")).rejects.toThrow(/Invalid URL/i);
+    await expect(extractInWorker(page(ARTICLE_HTML, "not a url"))).rejects.toThrow(/Invalid URL/i);
   });
 });

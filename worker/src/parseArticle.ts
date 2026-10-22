@@ -18,7 +18,33 @@ import { type ExtractedArticle, extractInWorker } from "./extract";
 import { readingTimeFromWordCount, wordCount } from "./reading";
 import { assertPublicUrl, BlockedUrlError, type LookupAll } from "./urlGuard";
 
-export type FetchHtml = (url: string) => Promise<string>;
+/** A fetched page, as JSDOM needs it to decode and resolve it like a browser:
+ * the body (raw bytes, or text a browser already decoded), the Content-Type
+ * to decode the bytes by, and the final URL after redirects — relative links
+ * and images resolve against it, not against the URL that was saved. */
+export interface FetchedPage {
+  body: Uint8Array | string;
+  contentType: string;
+  url: string;
+}
+
+export type FetchHtml = (url: string) => Promise<FetchedPage>;
+
+// The HTML standard's prescan window for a <meta> charset declaration.
+const META_PRESCAN_BYTES = 1024;
+const META_CHARSET = /<meta[^>]+charset\s*=\s*["']?\s*[a-z0-9_.:-]+/i;
+
+/** The Content-Type JSDOM should decode a plain-fetched body by. A declared
+ * charset (header, BOM or <meta>, which JSDOM finds itself) wins; with none,
+ * UTF-8 — what an undeclared modern page almost always is — rather than the
+ * HTML standard's windows-1252 fallback. */
+export function htmlContentType(header: string | null, bytes: Uint8Array): string {
+  const type = header?.trim() || "text/html";
+  if (/;\s*charset\s*=/i.test(type)) return type;
+  const head = new TextDecoder("latin1").decode(bytes.subarray(0, META_PRESCAN_BYTES));
+  if (META_CHARSET.test(head)) return type;
+  return `${type}; charset=utf-8`;
+}
 
 const MAX_REDIRECTS = 5;
 const FETCH_TIMEOUT_MS = 15_000;
@@ -67,7 +93,12 @@ export function createFetchHtml(
         await res.body?.cancel().catch(() => {});
         throw new UnsupportedContentTypeError(type);
       }
-      return new TextDecoder().decode(await readBodyCapped(res, MAX_HTML_BYTES));
+      const bytes = await readBodyCapped(res, MAX_HTML_BYTES);
+      return {
+        body: bytes,
+        contentType: htmlContentType(res.headers.get("content-type"), bytes),
+        url: current,
+      };
     }
     throw new Error(`Too many redirects fetching ${url}`);
   };
@@ -96,7 +127,7 @@ export interface ParsedArticle {
   reading_time: number;
 }
 
-export type ExtractFn = (html: string, url: string) => Promise<ExtractedArticle | null>;
+export type ExtractFn = (page: FetchedPage) => Promise<ExtractedArticle | null>;
 
 export function createTurndownService(): TurndownService {
   const turndown = new TurndownService();
@@ -154,7 +185,7 @@ export async function parseArticle(
   let renderError: unknown = null;
 
   try {
-    article = await extract(await fetchHtml(url), url);
+    article = await extract(await fetchHtml(url));
   } catch (err) {
     // A URL refused by the SSRF guard, a non-HTML resource, an oversized
     // page or one Readability couldn't finish in time gets no second chance
@@ -174,7 +205,7 @@ export async function parseArticle(
 
   if (!article && renderHtml) {
     try {
-      article = await extract(await renderHtml(url), url);
+      article = await extract(await renderHtml(url));
     } catch (err) {
       renderError = err;
     }

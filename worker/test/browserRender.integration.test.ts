@@ -178,9 +178,13 @@ describe("renderWithBrowser (real Chromium)", () => {
   test(
     "renders a page through the egress proxy, with its scripts run",
     async () => {
-      const content = await renderWithBrowser(`${base}/article`);
+      const rendered = await renderWithBrowser(`${base}/article`);
+      const content = rendered.body as string;
 
       expect(content).toContain(ARTICLE_TEXT);
+      // Already decoded by Chromium; relative links resolve against its URL.
+      expect(rendered.contentType).toBe("text/html");
+      expect(rendered.url).toBe(`${base}/article`);
       expect(content).toContain('<p id="spa">rendered by script</p>');
       // The proxy resolved the page host — Chromium never did.
       expect(proxyLookups).toContain("site.test");
@@ -204,7 +208,7 @@ describe("renderWithBrowser (real Chromium)", () => {
   test(
     "the proxy refuses a host that resolves to a private address, even past the page guard",
     async () => {
-      const content = await renderWithBrowser(`${base}/rebind`);
+      const content = (await renderWithBrowser(`${base}/rebind`)).body as string;
 
       expect(proxyLookups).toContain("evil.test");
       expect(hits.get("/payload.js") ?? 0).toBe(0);
@@ -234,7 +238,7 @@ describe("renderWithBrowser (real Chromium)", () => {
   test(
     "page WebSockets are closed before they reach the network",
     async () => {
-      const content = await renderWithBrowser(`${base}/ws-page`);
+      const content = (await renderWithBrowser(`${base}/ws-page`)).body as string;
 
       expect(wsUpgrades).toBe(0);
       expect(content).toContain('data-ws="closed"');
@@ -274,7 +278,7 @@ describe("renderWithBrowser (real Chromium)", () => {
     "keeps the DOM of a page that never finishes loading",
     async () => {
       // 9 s total leaves ~1 s for navigation after the step reserves.
-      const content = await renderWithBrowser(`${base}/never-ends`, 9_000);
+      const content = (await renderWithBrowser(`${base}/never-ends`, 9_000)).body;
 
       expect(content).toContain(ARTICLE_TEXT);
     },
@@ -337,7 +341,7 @@ describe("renderWithBrowser (real Chromium)", () => {
       // The render fails with the deadline, and the late failure surfaces
       // nowhere (an unhandled rejection would fail this test).
       expect(err).toBeInstanceOf(TimeoutError);
-      expect(await renderWithBrowser(`${base}/article`)).toContain(ARTICLE_TEXT);
+      expect((await renderWithBrowser(`${base}/article`)).body).toContain(ARTICLE_TEXT);
     },
     SLOW,
   );
@@ -360,7 +364,7 @@ describe("renderWithBrowser (real Chromium)", () => {
         return context;
       });
 
-      expect(await renderWithBrowser(`${base}/article`)).toContain(ARTICLE_TEXT);
+      expect((await renderWithBrowser(`${base}/article`)).body).toContain(ARTICLE_TEXT);
       expect(closeAttempted).toBe(true);
     },
     SLOW,
@@ -380,7 +384,7 @@ describe("renderWithBrowser (real Chromium)", () => {
       expect(err).toBeInstanceOf(BrowserUnavailableError);
       expect((err as Error).message).toContain("Browser disconnected during render");
 
-      expect(await renderWithBrowser(`${base}/article`)).toContain(ARTICLE_TEXT);
+      expect((await renderWithBrowser(`${base}/article`)).body).toContain(ARTICLE_TEXT);
       expect(launched.length).toBe(launches + 1);
       expect(lastBrowser()).not.toBe(dying);
     },
@@ -398,11 +402,11 @@ describe("renderWithBrowser (real Chromium)", () => {
 
       expect(err).toBeInstanceOf(BrowserUnavailableError);
       expect((err as Error).message).toBe("Browser is disconnected");
-      expect(await renderWithBrowser(`${base}/article`)).toContain(ARTICLE_TEXT);
+      expect((await renderWithBrowser(`${base}/article`)).body).toContain(ARTICLE_TEXT);
       expect(lastBrowser()).not.toBe(stale);
       // The replaced browser going away later isn't mistaken for the live one.
       await stale.close();
-      expect(await renderWithBrowser(`${base}/article`)).toContain(ARTICLE_TEXT);
+      expect((await renderWithBrowser(`${base}/article`)).body).toContain(ARTICLE_TEXT);
     },
     SLOW,
   );
@@ -417,7 +421,7 @@ describe("renderWithBrowser (real Chromium)", () => {
 
       expect(err).toBeInstanceOf(BrowserUnavailableError);
       expect((err as Error).message).toBe("Browser launch failed: executable missing");
-      expect(await renderWithBrowser(`${base}/article`)).toContain(ARTICLE_TEXT);
+      expect((await renderWithBrowser(`${base}/article`)).body).toContain(ARTICLE_TEXT);
     },
     SLOW,
   );

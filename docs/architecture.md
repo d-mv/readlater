@@ -519,14 +519,23 @@ avoids holding a websocket open just for this.
 **Article pipeline** (`worker/src/parseArticle.ts`) — fetch → Readability →
 Turndown, with a headless-browser fallback for JS-rendered pages:
 ```ts
-article = await extractInWorker(await fetchHtml(url), url); // Readability, requires >= 200 chars of textContent
+article = await extractInWorker(await fetchHtml(url)); // Readability, requires >= 200 chars of textContent
 // BlockedUrlError / UnsupportedContentTypeError / ResponseTooLargeError /
 // ExtractionTimeoutError → thrown, no fallback
 
 if (!article && renderHtml) {
-  article = await extractInWorker(await renderHtml(url), url); // worker/src/browserRender.ts, Playwright chromium
+  article = await extractInWorker(await renderHtml(url)); // worker/src/browserRender.ts, Playwright chromium
 }
 ```
+**Pages reach JSDOM as `FetchedPage`** (`{ body, contentType, url }`): the
+plain fetch hands over the raw bytes and JSDOM decodes them like a browser —
+Content-Type charset, BOM, or `<meta charset>` in the first 1024 bytes; an
+undeclared page is decoded as UTF-8 (`htmlContentType`), not the HTML
+standard's windows-1252. Bun's own `TextDecoder` can't decode single-byte
+charsets such as windows-1251 or koi8-r. `url` is the URL after redirects
+(the render's `page.url()`), so relative links and images resolve against
+the page that served them, not a short link that pointed to it.
+
 **Extraction runs on its own thread** (`worker/src/extract.ts`,
 `extractWorker.ts`): JSDOM + Readability are synchronous and, on some markup
 (thousands of tiny nested blocks), superlinear — minutes at 2 MB, during

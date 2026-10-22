@@ -9,7 +9,7 @@ import {
 } from "./errors";
 import { MAX_HTML_BYTES } from "./http";
 import { log } from "./logger";
-import type { FetchHtml } from "./parseArticle";
+import type { FetchedPage, FetchHtml } from "./parseArticle";
 import { TimeoutError, withTimeout } from "./timeout";
 import { routeIfPublic, type LookupAll } from "./urlGuard";
 
@@ -167,7 +167,11 @@ export const browserCircuitBreaker = new CircuitBreaker({
 // or page closed in the background): their failure has nowhere to go.
 function ignoreRejection(): void {}
 
-async function renderPage(url: string, deadline: number, maxHtmlBytes: number): Promise<string> {
+async function renderPage(
+  url: string,
+  deadline: number,
+  maxHtmlBytes: number,
+): Promise<FetchedPage> {
   // Work must finish early enough to leave the context-close reserve.
   const workDeadline = deadline - CONTEXT_CLOSE_TIMEOUT_MS;
   const remaining = () => workDeadline - Date.now();
@@ -242,7 +246,8 @@ async function renderPage(url: string, deadline: number, maxHtmlBytes: number): 
     if (gotoTimedOut && content.trim().length < 50) {
       throw new TimeoutError(`Page navigation timed out and content was empty for ${url}`);
     }
-    return content;
+    // Chromium already decoded the page; its URL is the one after redirects.
+    return { body: content, contentType: "text/html", url: page.url() };
   } catch (err) {
     // A page-level failure leaves the shared browser alone (the context is
     // closed below); only a browser that went away is reported as such.
