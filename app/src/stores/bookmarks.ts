@@ -1099,6 +1099,9 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   // bookmark id — sent again before the next sync, or another device keeps
   // showing the position from before. Kept in memory only.
   const unsentProgress = new Map<string, number>();
+  // The newest progress write per bookmark still in flight.
+  const progressWrites = new Map<string, { seq: number; done: Promise<{ error: unknown }> }>();
+  let progressSeq = 0;
 
   // The local value moves even when the write fails: it is where the user is
   // on this device.
@@ -1106,16 +1109,27 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const rounded = Math.round(progress * 10000) / 10000;
     const bookmark = bookmarks.value.find((b) => b.id === id);
     if (bookmark) bookmark.progress = rounded;
-    const { error } = await supabase.from("bookmarks").update({ progress: rounded }).eq("id", id);
-    // An older write failing after a newer one landed resends the newest
-    // local value, not its own.
-    if (error) unsentProgress.set(id, bookmark?.progress ?? rounded);
-    else unsentProgress.delete(id);
+    const seq = ++progressSeq;
+    const done = Promise.resolve(
+      supabase.from("bookmarks").update({ progress: rounded }).eq("id", id),
+    );
+    progressWrites.set(id, { seq, done });
+    const { error } = await done;
+    // Only the newest write per bookmark decides what is still owed: an
+    // older one settling late (either way) says nothing about the newer
+    // value.
+    if (progressWrites.get(id)?.seq === seq) {
+      progressWrites.delete(id);
+      if (error) unsentProgress.set(id, rounded);
+      else unsentProgress.delete(id);
+    }
     return writeResult(error);
   }
 
-  // Resolves to whether nothing is left unsent.
+  // Resolves to whether nothing is left unsent. Waits for writes still in
+  // flight first: until they land the server may still hold an older value.
   async function sendUnsentProgress(): Promise<boolean> {
+    await Promise.allSettled([...progressWrites.values()].map((w) => w.done));
     await Promise.all([...unsentProgress].map(([id, value]) => updateProgress(id, value)));
     return unsentProgress.size === 0;
   }

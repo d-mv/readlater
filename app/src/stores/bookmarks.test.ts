@@ -2343,6 +2343,47 @@ describe("useBookmarksStore", () => {
       expect(update).toHaveBeenLastCalledWith({ progress: 0.5 });
     });
 
+    test("an older write landing after a newer one failed keeps the newer value unsent", async () => {
+      const older = deferred<{ error: unknown }>();
+      const eqUpdate = vi
+        .fn()
+        .mockReturnValueOnce(older.promise)
+        .mockResolvedValueOnce({ error: { message: "Failed to fetch" } })
+        .mockResolvedValue({ error: null });
+      const update = vi.fn((_fields: { progress: number }) => ({ eq: eqUpdate }));
+      from.mockReturnValue({ update });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "bm-1", progress: 0 })];
+
+      const first = store.updateProgress("bm-1", 0.3);
+      await store.updateProgress("bm-1", 0.5);
+      older.resolve({ error: null });
+      await first;
+      await store.sendUnsentProgress();
+
+      expect(update).toHaveBeenCalledTimes(3);
+      expect(update).toHaveBeenLastCalledWith({ progress: 0.5 });
+    });
+
+    test("sendUnsentProgress waits for a write still in flight", async () => {
+      const inFlight = deferred<{ error: unknown }>();
+      from.mockReturnValue({ update: vi.fn(() => ({ eq: vi.fn(() => inFlight.promise) })) });
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "bm-1", progress: 0 })];
+
+      void store.updateProgress("bm-1", 0.7);
+      let settled = false;
+      const sent = store.sendUnsentProgress().then((ok) => {
+        settled = true;
+        return ok;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(settled).toBe(false);
+
+      inFlight.resolve({ error: null });
+      expect(await sent).toBe(true);
+    });
+
     test("a write that keeps failing stays unsent", async () => {
       const eqUpdate = vi.fn().mockResolvedValue({ error: { message: "Failed to fetch" } });
       from.mockReturnValue({ update: vi.fn(() => ({ eq: eqUpdate })) });
