@@ -15,14 +15,15 @@ const { useDataTransferStore } = await import("./dataTransfer");
 
 type PageResponse = { data: unknown[] | null; error: { message: string } | null };
 
-// Chainable stub for `select(...).order(...).order(...).range(from, to)`.
-// `range` resolves to the page at index from / 1000 (an empty page past the end).
+// Chainable stub for the keyset-paged reads: `select(...).order("id")`, then
+// `.gt("id", last)` after the first page, then `.limit(1000)`, which resolves
+// to the next of `pages` (an empty page past the end).
 function pagedQuery(pages: PageResponse[]) {
-  const range = vi.fn(
-    async (from: number, _to: number): Promise<PageResponse> =>
-      pages[from / 1000] ?? { data: [], error: null },
+  let served = 0;
+  const limit = vi.fn(
+    async (_n: number): Promise<PageResponse> => pages[served++] ?? { data: [], error: null },
   );
-  const query = { order: vi.fn(() => query), range };
+  const query = { order: vi.fn(() => query), gt: vi.fn(() => query), limit };
   return query;
 }
 
@@ -77,10 +78,11 @@ describe("useDataTransferStore", () => {
       expect(columns).toContain("content_md");
       expect(columns).not.toContain("*");
       expect(columns).not.toContain("search_vector");
-      expect(query.order).toHaveBeenCalledWith("created_at", { ascending: false });
+      // Keyset on the unique id: a delete during the export can't shift a
+      // page boundary and skip a row the way offsets did.
       expect(query.order).toHaveBeenCalledWith("id");
-      expect(query.range).toHaveBeenCalledTimes(1);
-      expect(query.range).toHaveBeenCalledWith(0, 999);
+      expect(query.gt).not.toHaveBeenCalled();
+      expect(query.limit).toHaveBeenCalledWith(1000);
       expect(result.error).toBeNull();
       expect(result.payload?.version).toBe(EXPORT_VERSION);
       expect(result.payload?.bookmarks).toHaveLength(1);
@@ -99,14 +101,15 @@ describe("useDataTransferStore", () => {
 
     test("pages past the 1000-row cap and returns every row in order", async () => {
       const rows = Array.from({ length: 2500 }, (_, i) => ({
-        id: `id-${i}`,
+        id: `id-${String(i).padStart(4, "0")}`,
         url: `https://ex.com/${i}`,
         type: "article",
         status: "ready",
         title: `Article ${i}`,
         content_md: "body",
         tags: [],
-        created_at: "2026-01-01T00:00:00Z",
+        // Newest first by id here too, so the payload order matches `rows`.
+        created_at: new Date(Date.UTC(2026, 0, 1) - i * 1000).toISOString(),
       }));
       const query = pagedQuery([
         { data: rows.slice(0, 1000), error: null },
@@ -119,13 +122,77 @@ describe("useDataTransferStore", () => {
       const result = await store.exportBookmarks();
 
       expect(result.error).toBeNull();
-      expect(query.range.mock.calls).toEqual([
-        [0, 999],
-        [1000, 1999],
-        [2000, 2999],
+      expect(query.gt.mock.calls).toEqual([
+        ["id", "id-0999"],
+        ["id", "id-1999"],
       ]);
       expect(result.payload?.bookmarks).toHaveLength(2500);
+      // Newest first, whatever order the pages came in.
       expect(result.payload?.bookmarks.map((b) => b.url)).toEqual(rows.map((r) => r.url));
+    });
+
+    test("exports newest first, ties by id, whatever order the pages came in", async () => {
+      const row = (id: string, created_at: string) => ({
+        id,
+        url: `https://ex.com/${id}`,
+        type: "article",
+        status: "ready",
+        title: id,
+        tags: [],
+        created_at,
+      });
+      from.mockReturnValue({
+        select: () =>
+          pagedQuery([
+            {
+              data: [
+                row("a", "2026-01-01T00:00:00Z"),
+                row("b", "2026-03-01T00:00:00Z"),
+                row("c", "2026-03-01T00:00:00Z"),
+                row("d", "2026-02-01T00:00:00Z"),
+              ],
+              error: null,
+            },
+          ]),
+      });
+
+      const result = await useDataTransferStore().exportBookmarks();
+
+      expect(result.payload?.bookmarks.map((b) => b.title)).toEqual(["c", "b", "d", "a"]);
+    });
+
+    test("a bookmark deleted while the export runs doesn't make it skip another", async () => {
+      // A server-like stub: rows by id, `gt` and `limit` applied for real.
+      let rows = Array.from({ length: 1500 }, (_, i) => ({
+        id: `id-${String(i).padStart(4, "0")}`,
+        url: `https://ex.com/${i}`,
+        type: "article",
+        status: "ready",
+        title: `Article ${i}`,
+        tags: [],
+        created_at: "2026-01-01T00:00:00Z",
+      }));
+      let after: string | null = null;
+      const query = {
+        order: () => query,
+        gt: (_col: string, id: string) => {
+          after = id;
+          return query;
+        },
+        limit: async (n: number) => {
+          const page = rows.filter((r) => after === null || r.id > after).slice(0, n);
+          after = null;
+          // After the first page, a row on it is deleted (another device).
+          if (page.length === 1000) rows = rows.filter((r) => r.id !== "id-0010");
+          return { data: page, error: null };
+        },
+      };
+      from.mockReturnValue({ select: () => query });
+
+      const result = await useDataTransferStore().exportBookmarks();
+
+      // Offsets would have started page two one row late and lost id-1000.
+      expect(result.payload?.bookmarks).toHaveLength(1500);
     });
 
     test("surfaces an error on a later page instead of a truncated export", async () => {
@@ -148,7 +215,7 @@ describe("useDataTransferStore", () => {
       const store = useDataTransferStore();
       const result = await store.exportBookmarks();
 
-      expect(query.range).toHaveBeenCalledTimes(2);
+      expect(query.limit).toHaveBeenCalledTimes(2);
       expect(result.payload).toBeNull();
       expect(result.error).toBe("timeout on page 2");
     });
@@ -207,7 +274,7 @@ describe("useDataTransferStore", () => {
       const duplicate = { ...bookmark, url: "https://arc90.com/x", title: "Existing", tags: [] };
 
       const existingQuery = pagedQuery([
-        { data: [{ url_normalized: "https://arc90.com/x" }], error: null },
+        { data: [{ id: "f-0000", url_normalized: "https://arc90.com/x" }], error: null },
       ]);
 
       const insertSelect = vi.fn().mockResolvedValue({ data: [{ id: "new-1" }], error: null });
@@ -359,6 +426,7 @@ describe("useDataTransferStore", () => {
         tags: [],
       };
       const firstPage = Array.from({ length: 1000 }, (_, i) => ({
+        id: `e-${String(i).padStart(4, "0")}`,
         url_normalized: `https://ex.com/${i}`,
       }));
       const existingQuery = pagedQuery([
@@ -375,10 +443,7 @@ describe("useDataTransferStore", () => {
       const result = await store.importBookmarks(validPayload([bookmark]));
 
       expect(existingQuery.order).toHaveBeenCalledWith("id");
-      expect(existingQuery.range.mock.calls).toEqual([
-        [0, 999],
-        [1000, 1999],
-      ]);
+      expect(existingQuery.gt.mock.calls).toEqual([["id", "e-0999"]]);
       expect(result.error).toBeNull();
       expect(result.imported).toBe(0);
       expect(result.skipped).toEqual([
@@ -572,6 +637,21 @@ describe("useDataTransferStore", () => {
 
       expect(result.imported).toBe(1);
       expect(result.warning).toBe("The bookmarks were imported, but their tags couldn't be saved.");
+    });
+
+    test("imported bookmarks are private, whatever the file says", async () => {
+      const insert = vi.fn((_rows: unknown[]) => ({
+        select: vi.fn().mockResolvedValue({ data: [{ id: "n" }], error: null }),
+      }));
+      from.mockImplementation(() => ({
+        select: () => pagedQuery([{ data: [], error: null }]),
+        insert,
+      }));
+
+      await useDataTransferStore().importBookmarks(payload([row({ is_public: true })]));
+
+      // Sharing asks for confirmation in the app; a file can't skip that.
+      expect(insert.mock.calls[0]?.[0]).toEqual([expect.objectContaining({ is_public: false })]);
     });
 
     test("a failed duplicate check imports nothing instead of risking a failed bulk insert", async () => {

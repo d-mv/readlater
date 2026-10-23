@@ -597,7 +597,8 @@ describe("ReaderView", () => {
         data: { signedUrl: "https://storage.example/open" },
         error: null,
       });
-      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const tab = { opener: {} as unknown, location: { href: "" }, close: vi.fn() };
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => tab as unknown as Window);
 
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
@@ -605,7 +606,8 @@ describe("ReaderView", () => {
       await wrapper.find('[data-testid="open-original"]').trigger("click");
       await flushPromises();
 
-      expect(openSpy).toHaveBeenCalledWith("https://storage.example/open", "_blank", "noopener");
+      expect(tab.location.href).toBe("https://storage.example/open");
+      expect(tab.opener).toBeNull();
       openSpy.mockRestore();
     });
 
@@ -1249,10 +1251,37 @@ describe("ReaderView", () => {
       expect(setViewMode).toHaveBeenCalledWith("1", "markdown");
     });
 
-    test("Open original does nothing when the signed url can't be created", async () => {
+    function fakeTab() {
+      return { opener: {} as unknown, location: { href: "" }, close: vi.fn() };
+    }
+
+    test("Open original opens the tab within the click, then points it at the signed URL", async () => {
+      useBookmarksStore().bookmarks = [parsedPdf()];
+      let resolveUrl!: (value: unknown) => void;
+      storageCreateSignedUrl.mockReturnValue(new Promise((r) => (resolveUrl = r)));
+      const tab = fakeTab();
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => tab as unknown as Window);
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await wrapper.get('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.get('[data-testid="open-original"]').trigger("click");
+      // Opened before the signed URL exists: iOS only allows a popup during
+      // the tap itself, not after an await.
+      expect(openSpy).toHaveBeenCalledWith("", "_blank");
+      expect(tab.opener).toBeNull();
+
+      resolveUrl({ data: { signedUrl: "https://storage.example/a" }, error: null });
+      await flushPromises();
+      expect(tab.location.href).toBe("https://storage.example/a");
+      openSpy.mockRestore();
+    });
+
+    test("Open original closes the tab it opened when the signed url can't be created", async () => {
       useBookmarksStore().bookmarks = [parsedPdf()];
       storageCreateSignedUrl.mockResolvedValue({ data: null, error: { message: "denied" } });
-      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const tab = fakeTab();
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => tab as unknown as Window);
       const wrapper = mount(ReaderView, { props: { id: "1" } });
       await flushPromises();
 
@@ -1261,7 +1290,26 @@ describe("ReaderView", () => {
       await flushPromises();
 
       expect(storageCreateSignedUrl).toHaveBeenCalled();
-      expect(openSpy).not.toHaveBeenCalled();
+      expect(tab.close).toHaveBeenCalled();
+      openSpy.mockRestore();
+    });
+
+    test("Open original doesn't retry a blocked popup after the await", async () => {
+      useBookmarksStore().bookmarks = [parsedPdf()];
+      storageCreateSignedUrl.mockResolvedValue({
+        data: { signedUrl: "https://storage.example/a" },
+        error: null,
+      });
+      const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      await wrapper.get('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.get('[data-testid="open-original"]').trigger("click");
+      await flushPromises();
+
+      expect(openSpy).toHaveBeenCalledTimes(1);
+      expect(storageCreateSignedUrl).not.toHaveBeenCalled();
       openSpy.mockRestore();
     });
 

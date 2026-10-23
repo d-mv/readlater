@@ -57,7 +57,9 @@ async function onExport() {
   link.href = url;
   link.download = `readlater-export-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
-  URL.revokeObjectURL(url);
+  // Not right away: some browsers abort a download whose URL is revoked
+  // during the click.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function onPickFile() {

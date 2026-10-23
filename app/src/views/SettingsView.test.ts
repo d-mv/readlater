@@ -16,7 +16,7 @@ const { useDataTransferStore } = await import("../stores/dataTransfer");
 
 // Chainable stub for the store's paged `select(...).order(...).range(from, to)`.
 function singlePageQuery(response: { data: unknown[] | null; error: { message: string } | null }) {
-  const query = { order: () => query, range: vi.fn().mockResolvedValue(response) };
+  const query = { order: () => query, gt: () => query, limit: vi.fn().mockResolvedValue(response) };
   return query;
 }
 
@@ -73,6 +73,12 @@ describe("SettingsView", () => {
 
     expect(clickSpy).toHaveBeenCalledOnce();
     expect(URL.createObjectURL).toHaveBeenCalledOnce();
+    // Revoked after the browser has taken the download, not right away —
+    // some browsers abort a download whose URL is revoked during click().
+    expect(URL.revokeObjectURL).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock"), {
+      timeout: 2000,
+    });
     expect(wrapper.find('[data-testid="error"]').exists()).toBe(false);
 
     clickSpy.mockRestore();

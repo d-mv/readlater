@@ -21,20 +21,32 @@ interface PageResult<T> {
   error: { message: string } | null;
 }
 
-// Fetches consecutive `.range()` pages until one comes back short. The query
-// must have a stable, unique ordering so pages neither overlap nor skip rows.
-// Stops at the first error and returns it along with the rows read so far.
-async function fetchAllPages<T>(
-  fetchPage: (from: number, to: number) => PromiseLike<PageResult<T>>,
+// Reads a whole table in PAGE_SIZE pages, keyset-paged on the unique id
+// (`id > last id of the previous page`), until a page comes back short.
+// Offsets would let a row deleted mid-read shift the next page and skip a
+// row. Stops at the first error and returns it with the rows read so far.
+async function fetchAllPages<T extends { id: string }>(
+  table: string,
+  columns: string,
 ): Promise<{ data: T[]; error: { message: string } | null }> {
   const rows: T[] = [];
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await fetchPage(from, from + PAGE_SIZE - 1);
+  let after: string | null = null;
+  for (;;) {
+    let query = supabase.from(table).select(columns).order("id");
+    if (after !== null) query = query.gt("id", after);
+    // The untyped client can't infer a row type from a column list.
+    const { data, error } = (await query.limit(PAGE_SIZE)) as unknown as PageResult<T>;
     if (error) return { data: rows, error };
     const page = data ?? [];
     rows.push(...page);
     if (page.length < PAGE_SIZE) return { data: rows, error: null };
+    after = page[page.length - 1]!.id;
   }
+}
+
+function newestFirst(a: Bookmark, b: Bookmark): number {
+  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? 1 : -1;
+  return Number(b.id > a.id) - Number(b.id < a.id);
 }
 
 export interface ExportResult {
@@ -55,19 +67,9 @@ const TAGS_NOT_SAVED = "The bookmarks were imported, but their tags couldn't be 
 
 export const useDataTransferStore = defineStore("dataTransfer", () => {
   async function exportBookmarks(): Promise<ExportResult> {
-    // The untyped client can't infer a row type from a named column list;
-    // the list queries cast the same way.
-    const { data, error } = await fetchAllPages<Bookmark>(
-      (from, to) =>
-        supabase
-          .from("bookmarks")
-          .select(DETAIL_SELECT)
-          .order("created_at", { ascending: false })
-          .order("id")
-          .range(from, to) as unknown as PromiseLike<PageResult<Bookmark>>,
-    );
+    const { data, error } = await fetchAllPages<Bookmark>("bookmarks", DETAIL_SELECT);
     if (error) return { payload: null, error: error.message };
-    return { payload: buildExportPayload(data), error: null };
+    return { payload: buildExportPayload(data.sort(newestFirst)), error: null };
   }
 
   async function importBookmarks(jsonText: string): Promise<ImportResult> {
@@ -93,10 +95,9 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
     // Loaded once up front rather than per-row: this is a personal-library-scale,
     // one-shot operation, so an O(1)-query in-memory Set beats N duplicate queries.
     const { data: existingRows, error: existingError } = await fetchAllPages<{
+      id: string;
       url_normalized: string | null;
-    }>((from, to) =>
-      supabase.from("bookmarks").select("url_normalized").order("id").range(from, to),
-    );
+    }>("bookmarks", "id, url_normalized");
     // A partial set would let a duplicate through, and one duplicate fails
     // the whole bulk insert.
     if (existingError) {
@@ -122,7 +123,13 @@ export const useDataTransferStore = defineStore("dataTransfer", () => {
 
     // 1. One bulk insert. `.select("id")` returns the new ids in insertion
     //    order, so inserted[i] lines up with toImport[i].
-    const rows = toImport.map(({ tags: _tags, ...fields }) => ({ ...fields, user_id: userId }));
+    // Imported rows are private: sharing asks for confirmation in the app,
+    // and a file must not be able to skip that.
+    const rows = toImport.map(({ tags: _tags, ...fields }) => ({
+      ...fields,
+      is_public: false,
+      user_id: userId,
+    }));
     const { data: inserted, error: insertError } = await supabase
       .from("bookmarks")
       .insert(rows)

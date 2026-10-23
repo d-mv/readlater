@@ -448,8 +448,16 @@ function onTogglePdfView() {
 
 async function onOpenOriginalPdf() {
   if (!bookmark.value?.pdf_path) return;
+  // Opened now, within the tap: iOS Safari blocks a popup opened after an
+  // await. It is pointed at the signed URL once that exists. (No "noopener":
+  // that returns no handle to navigate; the opener link is cut by hand.)
+  // A blocked popup can't be opened later either.
+  const tab = window.open("", "_blank");
+  if (!tab) return;
+  tab.opener = null;
   const { url: signedUrl } = await store.getPdfSignedUrl(bookmark.value.pdf_path);
-  if (signedUrl) window.open(signedUrl, "_blank", "noopener");
+  if (signedUrl) tab.location.href = signedUrl;
+  else tab.close();
 }
 
 async function onTrashOriginalPdf() {

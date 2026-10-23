@@ -450,15 +450,22 @@ test("Open original opens the PDF; Trash original removes it and leaves the Mark
   });
   await page.goto(`/b/${bookmark.id}`);
 
-  // Headless Chromium's PDF tab never reports a URL; record the window.open
-  // call instead.
+  // Headless Chromium's PDF tab never reports a URL; stand in for the tab and
+  // record where it is sent. (It opens blank within the tap, then is pointed
+  // at the signed URL.)
   await page.evaluate(() => {
     const opened: string[] = [];
     (window as unknown as { opened: string[] }).opened = opened;
-    window.open = (url?: string | URL) => {
-      opened.push(String(url));
-      return null;
-    };
+    window.open = () =>
+      ({
+        opener: window,
+        close: () => {},
+        location: {
+          set href(url: string) {
+            opened.push(url);
+          },
+        },
+      }) as unknown as Window;
   });
   await menuAction(page, "open-original");
   await expect
