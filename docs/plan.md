@@ -204,7 +204,8 @@ the offline copy, saves committing after sign-out.
 
 **Deploy order for these changes:** apply migration
 `20261022100000_rate_limits_server_side.sql` (with
-`20261022110000_tag_touch_and_user_delete.sql`) and redeploy **all** edge
+`20261022110000_tag_touch_and_user_delete.sql` and
+`20261022120000_url_normalized_keeps_path_case.sql`) and redeploy **all** edge
 functions in the same step (the migration drops the old `bump_rate_limit`
 signatures; old functions fail with 500 until redeployed), then the app and
 the worker.

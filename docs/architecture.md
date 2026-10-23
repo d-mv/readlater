@@ -61,7 +61,8 @@ create table bookmarks (
   id              uuid primary key default gen_random_uuid(),
   user_id         uuid not null references auth.users(id),
   url             text,                -- nullable: notes and uploaded files have no source URL
-  url_normalized  text generated always as (lower(regexp_replace(url, '/+$', ''))) stored,
+  url_normalized  text generated always as (  -- 20261022120000: scheme+host lowercased,
+    regexp_replace(lower(<scheme://host>) || <rest>, '/+$', '')) stored,  -- path/query kept
   type            text not null check (type in ('article', 'youtube', 'note', 'pdf')),
   status          text not null default 'pending'
                     check (status in ('pending', 'processing', 'ready', 'failed')),
@@ -242,7 +243,10 @@ Notes on the shape:
   'markdown' : 'original')` rather than written eagerly, so a bookmark that
   was inserted before the user ever opens the reader doesn't need a second
   write just to pick a default.
-- `url_normalized` (the whole URL lowercased, trailing slashes stripped —
+- `url_normalized` (scheme and host lowercased, path and query kept as
+  typed — they are case-sensitive, e.g. short links and video ids — and
+  trailing slashes stripped, since `20261022120000`; the app's and capture's
+  `normalizeUrl` compute the same value —
   not stripping `utm_*`/`fbclid` yet) backs a real unique index, so both
   insert paths' duplicate check can rely on a Postgres constraint violation
   (`23505`) instead of a racy find-then-insert. The index is per user

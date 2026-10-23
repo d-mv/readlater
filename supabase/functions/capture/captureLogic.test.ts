@@ -60,8 +60,16 @@ Deno.test("isBareUrl: trims surrounding whitespace before checking", () => {
   assertEquals(isBareUrl("  https://example.com/post  "), true);
 });
 
-Deno.test("normalizeUrl: lowercases the whole string", () => {
-  assertEquals(normalizeUrl("HTTPS://Example.com/Post"), "https://example.com/post");
+Deno.test("normalizeUrl: lowercases the scheme and host only", () => {
+  assertEquals(normalizeUrl("HTTPS://Example.com/Post"), "https://example.com/Post");
+});
+
+Deno.test("normalizeUrl: paths and queries keep their case", () => {
+  assertEquals(normalizeUrl("HTTPS://Example.COM:8080/Q?Id=AbC"), "https://example.com:8080/Q?Id=AbC");
+});
+
+Deno.test("normalizeUrl: a string without a scheme only loses trailing slashes", () => {
+  assertEquals(normalizeUrl("Not/A/URL/"), "Not/A/URL");
 });
 
 Deno.test("normalizeUrl: strips one trailing slash", () => {

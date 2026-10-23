@@ -27,8 +27,12 @@ export function isBareUrl(s: string): boolean {
 }
 
 // Mirrors the `url_normalized` generated column in the bookmarks table
-// (lower(regexp_replace(url, '/+$', ''))) so a post-conflict lookup queries
-// by the same value Postgres computed on insert.
+// (20261022120000_url_normalized_keeps_path_case.sql) so a post-conflict
+// lookup queries by the same value Postgres computed on insert: scheme and
+// host lowercased, path and query kept as they are, trailing slashes stripped.
+const ORIGIN = /^[^/?#]*\/\/[^/?#]*/;
+
 export function normalizeUrl(url: string): string {
-  return url.toLowerCase().replace(/\/+$/, "");
+  const origin = ORIGIN.exec(url)?.[0] ?? "";
+  return (origin.toLowerCase() + url.slice(origin.length)).replace(/\/+$/, "");
 }

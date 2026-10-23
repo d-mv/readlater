@@ -2,7 +2,7 @@
 -- unique index), indexes, replica identity.
 begin;
 \ir _helpers.psql
-select plan(43);
+select plan(47);
 
 -- ─── bookmarks_url_http_only ───────────────────────────────────────────────
 select tests.authenticate_as('00000000-0000-0000-0000-00000000000a');
@@ -106,20 +106,41 @@ insert into bookmarks (id, url, type, user_id)
 values ('00000000-0000-0000-0000-0000000000e1', 'https://Example.COM/Path/To///', 'article', auth.uid());
 select is(
   (select url_normalized from bookmarks where id = '00000000-0000-0000-0000-0000000000e1'),
-  'https://example.com/path/to',
-  'url_normalized lowercases and strips trailing slashes'
+  'https://example.com/Path/To',
+  'url_normalized lowercases the scheme and host only, and strips trailing slashes'
 );
 select is(
   (select url_normalized from bookmarks where url is null limit 1),
   null, 'url_normalized is null when url is null'
 );
 select throws_ok(
-  $$insert into bookmarks (url, type, user_id) values ('https://example.com/path/to', 'article', auth.uid())$$,
+  $$insert into bookmarks (url, type, user_id) values ('https://example.com/Path/To', 'article', auth.uid())$$,
   '23505', null, 'same normalized URL rejected for the same user (bookmarks_user_url_normalized_uniq)'
 );
 select throws_ok(
-  $$insert into bookmarks (url, type, user_id) values ('HTTPS://EXAMPLE.COM/PATH/TO/', 'article', auth.uid())$$,
-  '23505', null, 'case/trailing-slash variant counts as a duplicate'
+  $$insert into bookmarks (url, type, user_id) values ('HTTPS://EXAMPLE.COM/Path/To/', 'article', auth.uid())$$,
+  '23505', null, 'scheme/host case and trailing-slash variant counts as a duplicate'
+);
+-- Paths and queries are case-sensitive (short links, video ids): differing
+-- only there is a different page.
+select lives_ok(
+  $$insert into bookmarks (url, type, user_id) values ('https://example.com/path/to', 'article', auth.uid())$$,
+  'a path differing only in case is a different URL'
+);
+select lives_ok(
+  $$insert into bookmarks (url, type, user_id) values ('https://bit.ly/AbC', 'article', auth.uid()),
+                                                      ('https://bit.ly/abc', 'article', auth.uid())$$,
+  'short links differing only in case are both kept'
+);
+select is(
+  (select url_normalized from bookmarks where url = 'https://bit.ly/AbC'),
+  'https://bit.ly/AbC', 'the path keeps its case'
+);
+insert into bookmarks (url, type, user_id)
+values ('HTTPS://Example.COM:8080/Q?Id=AbC', 'article', auth.uid());
+select is(
+  (select url_normalized from bookmarks where url = 'HTTPS://Example.COM:8080/Q?Id=AbC'),
+  'https://example.com:8080/Q?Id=AbC', 'the port is kept and the query keeps its case'
 );
 select lives_ok(
   $$insert into bookmarks (url, type, user_id) values ('https://example.com/path/to?x=1', 'article', auth.uid())$$,

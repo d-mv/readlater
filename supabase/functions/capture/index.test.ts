@@ -370,7 +370,7 @@ Deno.test("handleCapture: a URL already saved reports the existing bookmark as a
   // Looked up by the same normalisation Postgres applies to url_normalized,
   // and scoped to the owner: the service-role client bypasses RLS and URLs
   // are unique per user, so another user's row must not match.
-  assertEquals(supabase.lookups, [{ user_id: OWNER, url_normalized: "https://example.com/post" }]);
+  assertEquals(supabase.lookups, [{ user_id: OWNER, url_normalized: "https://example.com/Post" }]);
 });
 
 Deno.test("handleCapture: a unique violation whose row is gone by lookup time is a generic 500", async () => {

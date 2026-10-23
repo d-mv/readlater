@@ -1,3 +1,4 @@
+import { normalizeUrl } from "./normalizeUrl";
 import { describe, expect, test } from "vitest";
 import type { Bookmark } from "../lib/supabase";
 import {
@@ -237,7 +238,7 @@ describe("partitionForImport", () => {
       toExportBookmark(makeBookmark({ url: "https://arc90.com/x", title: "Existing" })),
       toExportBookmark(makeBookmark({ url: "https://new.example/y", title: "New" })),
     ];
-    const existing = new Set([normalizeMatch("https://arc90.com/x")]);
+    const existing = new Set([normalizeUrl("https://arc90.com/x")]);
 
     const { toImport, skipped } = partitionForImport(rows, existing);
 
@@ -247,9 +248,20 @@ describe("partitionForImport", () => {
     ]);
   });
 
-  test("matches duplicates case-insensitively and ignoring trailing slashes", () => {
+  test("keeps two rows whose paths differ only in case (short links)", () => {
+    const rows = [
+      toExportBookmark(makeBookmark({ url: "https://bit.ly/AbC", title: "One" })),
+      toExportBookmark(makeBookmark({ url: "https://bit.ly/abc", title: "Two" })),
+    ];
+
+    const { toImport } = partitionForImport(rows, new Set([normalizeUrl("https://bit.ly/ABC")]));
+
+    expect(toImport.map((r) => r.title)).toEqual(["One", "Two"]);
+  });
+
+  test("matches duplicates ignoring scheme/host case and trailing slashes", () => {
     const rows = [toExportBookmark(makeBookmark({ url: "HTTPS://Example.com/Path/" }))];
-    const existing = new Set(["https://example.com/path"]);
+    const existing = new Set(["https://example.com/Path"]);
 
     const { toImport, skipped } = partitionForImport(rows, existing);
 
@@ -288,8 +300,4 @@ describe("partitionForImport", () => {
     expect(toImport).toHaveLength(1);
     expect(skipped).toHaveLength(0);
   });
-
-  function normalizeMatch(url: string): string {
-    return url.toLowerCase();
-  }
 });
