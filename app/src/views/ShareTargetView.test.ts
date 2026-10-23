@@ -22,7 +22,7 @@ const { useBookmarksStore } = await import("../stores/bookmarks");
 async function mountAndSave() {
   const wrapper = mount(ShareTargetView);
   await flushPromises();
-  await wrapper.get('[data-testid="save-btn"]').trigger("click");
+  await click(wrapper.get('[data-testid="save-btn"]'));
   await flushPromises();
   return wrapper;
 }
@@ -33,6 +33,12 @@ function mockInsert(inserted: unknown) {
   const insert = vi.fn(() => ({ select }));
   from.mockReturnValue({ insert });
   return insert;
+}
+
+/** A click as the browser reports it: detail 1 for a pointer, 0 for a key. */
+async function click(target: { element: Element }, detail = 1) {
+  target.element.dispatchEvent(new MouseEvent("click", { detail, bubbles: true }));
+  await flushPromises();
 }
 
 describe("ShareTargetView", () => {
@@ -53,8 +59,21 @@ describe("ShareTargetView", () => {
     expect(from).not.toHaveBeenCalled();
     expect(replace).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain("https://arc90.com/x");
-    expect(document.activeElement).toBe(wrapper.get('[data-testid="save-btn"]').element);
+    // Not focused: keys alone can't save what another app shared.
+    expect(document.activeElement).not.toBe(wrapper.get('[data-testid="save-btn"]').element);
     wrapper.unmount();
+  });
+
+  test("ignores Save pressed by keyboard right after the prompt appears", async () => {
+    query.url = "https://arc90.com/x";
+
+    const wrapper = mount(ShareTargetView);
+    await flushPromises();
+    await click(wrapper.get('[data-testid="save-btn"]'), 0);
+    await flushPromises();
+
+    expect(from).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="confirm-panel"]').exists()).toBe(true);
   });
 
   test("Save stores a pending bookmark and routes to the list when the url param is present", async () => {
@@ -93,7 +112,7 @@ describe("ShareTargetView", () => {
     const wrapper = mount(ShareTargetView);
     await flushPromises();
     expect(wrapper.get('[data-testid="shared-title"]').text()).toBe("A great article");
-    await wrapper.get('[data-testid="save-btn"]').trigger("click");
+    await click(wrapper.get('[data-testid="save-btn"]'));
     await flushPromises();
 
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ title: "A great article" }));
@@ -123,7 +142,7 @@ describe("ShareTargetView", () => {
     expect(wrapper.text()).toContain("remember to read this later");
     expect(from).not.toHaveBeenCalled();
 
-    await wrapper.get('[data-testid="save-btn"]').trigger("click");
+    await click(wrapper.get('[data-testid="save-btn"]'));
     await flushPromises();
 
     expect(insert).toHaveBeenCalledWith(expect.objectContaining({ type: "note", status: "ready" }));
@@ -176,7 +195,10 @@ describe("ShareTargetView", () => {
     from.mockReturnValueOnce({ update });
 
     const wrapper = await mountAndSave();
-    await wrapper.get('[data-testid="continue-btn"]').trigger("click");
+    // A keypress right as the prompt appears is ignored.
+    await click(wrapper.get('[data-testid="continue-btn"]'), 0);
+    expect(update).not.toHaveBeenCalled();
+    await click(wrapper.get('[data-testid="continue-btn"]'));
     await flushPromises();
 
     expect(update).toHaveBeenCalled();
@@ -212,8 +234,8 @@ describe("ShareTargetView", () => {
     const wrapper = mount(ShareTargetView);
     await flushPromises();
     const save = wrapper.get('[data-testid="save-btn"]').element as HTMLButtonElement;
-    save.click();
-    save.click();
+    save.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }));
+    save.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }));
     await flushPromises();
 
     expect(insert).toHaveBeenCalledTimes(1);
@@ -255,7 +277,7 @@ describe("ShareTargetView", () => {
       from.mockReturnValue({ update });
 
       const wrapper = await mountAndSave();
-      await wrapper.get('[data-testid="continue-btn"]').trigger("click");
+      await click(wrapper.get('[data-testid="continue-btn"]'));
       await flushPromises();
 
       expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: "pending" }));
@@ -270,8 +292,8 @@ describe("ShareTargetView", () => {
 
       const wrapper = await mountAndSave();
       const button = wrapper.get('[data-testid="continue-btn"]').element as HTMLButtonElement;
-      button.click();
-      button.click();
+      button.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }));
+      button.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }));
       await flushPromises();
 
       expect(update).toHaveBeenCalledTimes(1);

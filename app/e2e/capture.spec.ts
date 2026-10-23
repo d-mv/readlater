@@ -26,9 +26,26 @@ test.describe("bookmarklet popup (/capture)", () => {
     ]);
   });
 
-  test("the Save button is focused so Enter saves", async ({ page, backend }) => {
+  test("keys alone don't save: Save isn't focused, and a quick keypress on it is ignored", async ({
+    page,
+    backend,
+  }) => {
+    // The page's clock stands still, so "right after" can't depend on how
+    // fast this machine is.
+    await page.clock.install({ time: new Date("2026-06-01T12:00:00Z") });
+    await page.clock.pauseAt(new Date("2026-06-01T12:00:01Z"));
     await page.goto(captureUrl({ url: "https://example.com/enter" }));
-    await expect(page.getByTestId("save-btn")).toBeFocused();
+    await expect(page.getByTestId("save-btn")).toBeVisible();
+    await expect(page.getByTestId("save-btn")).not.toBeFocused();
+    await page.keyboard.press("Enter");
+    // Even focused, a keypress right after the prompt appears doesn't count.
+    await page.getByTestId("save-btn").focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByTestId("confirm-panel")).toBeVisible();
+    expect(backend.bookmarks).toHaveLength(0);
+
+    // A keyboard user who gets to Save a moment later can use it.
+    await page.clock.runFor(600);
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("status-placeholder")).toContainText("Saved");
     expect(backend.bookmarks).toHaveLength(1);

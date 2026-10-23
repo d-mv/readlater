@@ -14,7 +14,7 @@ const { default: CaptureView } = await import("./CaptureView.vue");
 const { useBookmarksStore } = await import("../stores/bookmarks");
 
 async function clickSave(wrapper: ReturnType<typeof mount>) {
-  await wrapper.get('[data-testid="save-btn"]').trigger("click");
+  await click(wrapper.get('[data-testid="save-btn"]'));
   await flushPromises();
 }
 
@@ -36,6 +36,12 @@ function mockDuplicateInsert() {
   const contentEditedMaybeSingle = vi.fn().mockResolvedValue({ data: { content_edited: false } });
   const contentEditedEq = vi.fn(() => ({ maybeSingle: contentEditedMaybeSingle }));
   from.mockReturnValueOnce({ select: vi.fn(() => ({ eq: contentEditedEq })) });
+}
+
+/** A click as the browser reports it: detail 1 for a pointer, 0 for a key. */
+async function click(target: { element: Element }, detail = 1) {
+  target.element.dispatchEvent(new MouseEvent("click", { detail, bubbles: true }));
+  await flushPromises();
 }
 
 describe("CaptureView", () => {
@@ -65,14 +71,29 @@ describe("CaptureView", () => {
     expect(wrapper.find('[data-testid="save-btn"]').exists()).toBe(true);
   });
 
-  test("focuses Save, so Enter saves straight away", async () => {
+  test("doesn't focus Save: a page that opened the popup can't save it with keys", async () => {
     query.url = "https://arc90.com/x";
 
     const wrapper = mount(CaptureView, { attachTo: document.body });
     await flushPromises();
 
-    expect(document.activeElement).toBe(wrapper.get('[data-testid="save-btn"]').element);
+    expect(document.activeElement).not.toBe(wrapper.get('[data-testid="save-btn"]').element);
     wrapper.unmount();
+  });
+
+  test("ignores Save pressed by keyboard right after the prompt appears", async () => {
+    query.url = "https://arc90.com/x";
+    const insert = vi.fn();
+    from.mockReturnValue({ insert });
+
+    const wrapper = mount(CaptureView);
+    await flushPromises();
+    // A keyboard activation is a click with detail 0.
+    await click(wrapper.get('[data-testid="save-btn"]'), 0);
+    await flushPromises();
+
+    expect(insert).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="confirm-panel"]').exists()).toBe(true);
   });
 
   test("Save stores a pending bookmark with its title, then closes the window", async () => {
@@ -124,7 +145,11 @@ describe("CaptureView", () => {
     await clickSave(wrapper);
     expect(wrapper.text()).toContain("Already saved");
 
-    await wrapper.find('[data-testid="continue-btn"]').trigger("click");
+    // A keypress right as the prompt appears is ignored here too.
+    await click(wrapper.get('[data-testid="continue-btn"]'), 0);
+    expect(update).not.toHaveBeenCalled();
+
+    await click(wrapper.get('[data-testid="continue-btn"]'));
     await flushPromises();
 
     expect(update).toHaveBeenCalledWith(expect.objectContaining({ status: "pending" }));
@@ -145,7 +170,7 @@ describe("CaptureView", () => {
     const wrapper = mount(CaptureView);
     await flushPromises();
     await clickSave(wrapper);
-    await wrapper.find('[data-testid="continue-btn"]').trigger("click");
+    await click(wrapper.get('[data-testid="continue-btn"]'));
     await flushPromises();
     await vi.advanceTimersByTimeAsync(800);
 
@@ -201,8 +226,8 @@ describe("CaptureView", () => {
     const wrapper = mount(CaptureView);
     await flushPromises();
     const save = wrapper.get('[data-testid="save-btn"]').element as HTMLButtonElement;
-    save.click();
-    save.click();
+    save.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }));
+    save.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }));
     await flushPromises();
 
     expect(insert).toHaveBeenCalledTimes(1);
@@ -219,8 +244,8 @@ describe("CaptureView", () => {
     await flushPromises();
     await clickSave(wrapper);
     const button = wrapper.get('[data-testid="continue-btn"]').element as HTMLButtonElement;
-    button.click();
-    button.click();
+    button.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }));
+    button.dispatchEvent(new MouseEvent("click", { detail: 1, bubbles: true }));
     await flushPromises();
 
     expect(update).toHaveBeenCalledTimes(1);

@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { nextTick, onMounted, ref, shallowRef, useTemplateRef } from "vue";
+import { onMounted, ref, shallowRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { isHttpUrl } from "../utils/bookmarkType";
+import { isDeliberateActivation } from "../utils/deliberateActivation";
 import { isBareUrl, toCaptureOutcome, type CaptureOutcome } from "../utils/captureText";
 import Button from "../shared/ui/Button.vue";
 
@@ -17,7 +18,14 @@ const outcome = ref<CaptureOutcome>({ kind: "working" });
 const shared = shallowRef<
   { kind: "url"; url: string; title?: string } | { kind: "note"; text: string } | null
 >(null);
-const confirmPanel = useTemplateRef<HTMLElement>("confirmPanel");
+// When the current Save/Continue prompt appeared (isDeliberateActivation).
+let promptShownAt = 0;
+watch(
+  () => outcome.value.kind,
+  (kind) => {
+    if (kind === "confirm" || kind === "duplicate") promptShownAt = performance.now();
+  },
+);
 
 function finish() {
   router.replace({ name: "list" });
@@ -27,7 +35,8 @@ function finish() {
 // an ordinary URL any website can navigate to — the OS share sheet and a
 // cross-site link look the same here. Saving therefore waits for the user's
 // click, exactly like /capture.
-async function save() {
+async function save(event: MouseEvent) {
+  if (!isDeliberateActivation(event, promptShownAt)) return;
   const item = shared.value;
   if (outcome.value.kind !== "confirm" || !item) return;
   outcome.value = { kind: "working" };
@@ -44,7 +53,8 @@ async function save() {
   else finish();
 }
 
-async function onContinueRefresh() {
+async function onContinueRefresh(event: MouseEvent) {
+  if (!isDeliberateActivation(event, promptShownAt)) return;
   if (outcome.value.kind !== "duplicate") return;
   const { id } = outcome.value;
   // Like save(): leave the prompt at once, so a double-click refreshes once.
@@ -74,10 +84,6 @@ onMounted(async () => {
   }
 
   outcome.value = { kind: "confirm" };
-  // The Button component doesn't forward an autofocus attribute; focusing it
-  // here gives the same result — Enter (or Space) saves straight away.
-  await nextTick();
-  confirmPanel.value?.querySelector<HTMLButtonElement>('[data-testid="save-btn"]')?.focus();
 });
 </script>
 
@@ -85,7 +91,6 @@ onMounted(async () => {
   <main class="mx-auto flex min-h-screen max-w-480 items-center justify-center bg-canvas">
     <div
       v-if="outcome.kind === 'confirm' && shared"
-      ref="confirmPanel"
       data-testid="confirm-panel"
       class="flex min-w-0 flex-col items-center gap-16 p-32 text-center"
     >

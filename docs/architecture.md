@@ -321,10 +321,14 @@ Seven ways in, all funneling into the same `bookmarks` table:
 ```
 `CaptureView.vue` reads `url`/`title` from the query string, refuses anything
 that isn't http(s) (`isHttpUrl`) up front, shows title and URL with a
-focused **Save** button (Enter saves) and Cancel, and on that click calls
+**Save** button and Cancel, and on that click calls
 `useBookmarksStore().add()` — the same client-side path the Add dialog uses —
 authenticated with whatever Supabase session is already active in that
-browser. It never saves on load: `/capture?url=…` is an ordinary URL any
+browser. Save isn't focused on load, and a keyboard activation of Save or
+Continue (a click with `detail` 0) within 500 ms of the prompt appearing is
+ignored (`utils/deliberateActivation.ts`, `/share-target` too): a page that
+opens the popup from a keydown can't get it saved by asking the user to keep
+pressing Enter. It never saves on load: `/capture?url=…` is an ordinary URL any
 website can open, and an auto-save would let it plant arbitrary URLs in the
 list (which the worker then fetches). After a save the popup shows "Saved"
 and closes itself after 0.8 s (a Close button stays for tabs the browser
