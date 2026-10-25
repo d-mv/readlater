@@ -165,11 +165,11 @@ describe("ShareDialog", () => {
       return true;
     });
     Object.defineProperty(document, "execCommand", { value: execCommand, configurable: true });
-    const select = vi
-      .spyOn(HTMLTextAreaElement.prototype, "select")
-      .mockImplementation(function (this: HTMLTextAreaElement) {
-        this.focus();
-      });
+    const select = vi.spyOn(HTMLTextAreaElement.prototype, "select").mockImplementation(function (
+      this: HTMLTextAreaElement,
+    ) {
+      this.focus();
+    });
     const wrapper = mount(ShareDialog, {
       props: { bookmark: makeBookmark({ is_public: true }), origin: "https://readlater.mlnkv.net" },
     });

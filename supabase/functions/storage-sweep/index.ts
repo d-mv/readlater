@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { checkAuth } from "../_shared/checkAuth.ts";
 import { jsonResponse, serverError } from "../_shared/http.ts";
 

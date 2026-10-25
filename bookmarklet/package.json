@@ -11,7 +11,7 @@
     "unused-deps": "knip --dependencies"
   },
   "devDependencies": {
-    "knip": "^6.29.0",
-    "oxfmt": "^0.61.0"
+    "knip": "^6.43.0",
+    "oxfmt": "^0.74.0"
   }
 }

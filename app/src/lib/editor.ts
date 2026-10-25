@@ -16,13 +16,19 @@ export async function loadMdEditor(): Promise<Component> {
   ]);
   void import("md-editor-v3/lib/style.css");
   const nonce = cspNonce();
-  if (nonce) {
-    config({
+  config({
+    // md-editor 7 escapes raw HTML by default; converted Word/PDF uploads
+    // carry some, and the reader renders it (ArticleContent.vue). The
+    // preview still goes through the component's `sanitize` (DOMPurify).
+    markdownItConfig: (md) => {
+      md.set({ html: true });
+    },
+    ...(nonce && {
       codeMirrorExtensions: (extensions) => [
         ...extensions,
         { type: "cspNonce", extension: EditorView.cspNonce.of(nonce) },
       ],
-    });
-  }
+    }),
+  });
   return MdEditor;
 }

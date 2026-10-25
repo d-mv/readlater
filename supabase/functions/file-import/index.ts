@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { Buffer } from "node:buffer";
 import mammoth from "npm:mammoth@1.12.0";
 import { detectKind, maxBytesFor } from "./fileImportLogic.ts";

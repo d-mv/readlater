@@ -1,5 +1,5 @@
-import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
-import { extractText, getDocumentProxy } from "npm:unpdf@1.8.0";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.118.0";
+import { extractText, getDocumentProxy } from "npm:unpdf@1.9.1";
 import {
   isPdfFilename,
   MAX_PDF_BYTES,

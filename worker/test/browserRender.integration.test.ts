@@ -271,6 +271,21 @@ describe("renderWithBrowser (real Chromium)", () => {
   );
 
   test(
+    "refuses an over-cap Content-Length even when the page finishes loading first",
+    async () => {
+      // A small page loads before the listener's page.close() lands, so the
+      // refusal surfaces from a later step, not from goto. Repeated: the
+      // ordering is up to Chromium.
+      for (let i = 0; i < 10; i++) {
+        await expect(renderWithBrowser(`${base}/article`, undefined, 100)).rejects.toBeInstanceOf(
+          ResponseTooLargeError,
+        );
+      }
+    },
+    SLOW,
+  );
+
+  test(
     "refuses an over-cap page sent without a Content-Length once it has loaded",
     async () => {
       await expect(

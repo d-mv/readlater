@@ -1448,12 +1448,10 @@ describe("ReaderView", () => {
     /** Reader open and tracking at 50% (scrollTop 400). */
     async function openAtHalf(serverRow: () => Bookmark) {
       const update = vi.fn(() => ({ eq: vi.fn().mockResolvedValue({ error: null }) }));
-      const single = vi.fn(
-        async (): Promise<{ data: Bookmark | null; error: unknown }> => ({
-          data: serverRow(),
-          error: null,
-        }),
-      );
+      const single = vi.fn(async (): Promise<{ data: Bookmark | null; error: unknown }> => ({
+        data: serverRow(),
+        error: null,
+      }));
       from.mockReturnValue({ select: vi.fn(() => ({ eq: () => ({ single }) })), update });
       useBookmarksStore().bookmarks = [
         makeBookmark({ id: "1", status: "ready", progress: 0.5, content_md: "Text" }),

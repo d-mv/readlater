@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
+import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.118.0";
 
 // Per-user fixed-window limits, enforced in Postgres: rate_limit_for() owns
 // the limit and window of each action, and bump_rate_limit() does one atomic

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ExtractionTimeoutError, isTransientError } from "../src/errors";
-import { extractArticle, extractInWorker } from "../src/extract";
+import { EXTRACT_TIMEOUT_MS, extractArticle, extractInWorker } from "../src/extract";
 import type { FetchedPage } from "../src/parseArticle";
 
 const page = (html: string, url = "https://example.com/post"): FetchedPage => ({
@@ -35,46 +35,75 @@ describe("extractArticle", () => {
 });
 
 describe("extractInWorker", () => {
-  test("returns what extractArticle returns, from a separate thread", async () => {
-    expect(await extractInWorker(page(ARTICLE_HTML, "https://example.com/post"))).toEqual(
-      extractArticle(page(ARTICLE_HTML, "https://example.com/post")),
-    );
-  });
+  // Each test starts a real thread that loads JSDOM; with the e2e suite
+  // running alongside (pre-commit), that cold start alone can pass the
+  // default 5 s. Give it the same allowance production does.
+  const THREAD_TEST_TIMEOUT = EXTRACT_TIMEOUT_MS;
 
-  test("returns null for a page with too little text", async () => {
-    expect(
-      await extractInWorker(page("<html><body><p>short</p></body></html>", "https://example.com/")),
-    ).toBeNull();
-  });
+  test(
+    "returns what extractArticle returns, from a separate thread",
+    async () => {
+      expect(await extractInWorker(page(ARTICLE_HTML, "https://example.com/post"))).toEqual(
+        extractArticle(page(ARTICLE_HTML, "https://example.com/post")),
+      );
+    },
+    THREAD_TEST_TIMEOUT,
+  );
 
-  test("stops an extraction that runs past the limit, without blocking this thread", async () => {
-    const started = performance.now();
-    let ticks = 0;
-    const ticker = setInterval(() => ticks++, 20);
-    try {
-      await expect(
-        extractInWorker(page(PATHOLOGICAL_HTML, "https://example.com/"), { timeoutMs: 500 }),
-      ).rejects.toBeInstanceOf(ExtractionTimeoutError);
-    } finally {
-      clearInterval(ticker);
-    }
-    expect(performance.now() - started).toBeLessThan(5_000);
-    // The event loop kept running while the worker thread was busy.
-    expect(ticks).toBeGreaterThan(5);
-  });
+  test(
+    "returns null for a page with too little text",
+    async () => {
+      expect(
+        await extractInWorker(
+          page("<html><body><p>short</p></body></html>", "https://example.com/"),
+        ),
+      ).toBeNull();
+    },
+    THREAD_TEST_TIMEOUT,
+  );
+
+  test(
+    "stops an extraction that runs past the limit, without blocking this thread",
+    async () => {
+      const started = performance.now();
+      let ticks = 0;
+      const ticker = setInterval(() => ticks++, 20);
+      try {
+        await expect(
+          extractInWorker(page(PATHOLOGICAL_HTML, "https://example.com/"), { timeoutMs: 500 }),
+        ).rejects.toBeInstanceOf(ExtractionTimeoutError);
+      } finally {
+        clearInterval(ticker);
+      }
+      expect(performance.now() - started).toBeLessThan(5_000);
+      // The event loop kept running while the worker thread was busy.
+      expect(ticks).toBeGreaterThan(5);
+    },
+    THREAD_TEST_TIMEOUT,
+  );
 
   test("a timed-out extraction is a permanent failure, not a retry", () => {
     expect(isTransientError(new ExtractionTimeoutError(20_000))).toBe(false);
   });
 
-  test("a thread that crashes outside the message handler rejects too", async () => {
-    const entry = new URL("./fixtures/crashingWorker.ts", import.meta.url).href;
-    await expect(
-      extractInWorker(page(ARTICLE_HTML, "https://example.com/"), { entry }),
-    ).rejects.toThrow(/boom/);
-  });
+  test(
+    "a thread that crashes outside the message handler rejects too",
+    async () => {
+      const entry = new URL("./fixtures/crashingWorker.ts", import.meta.url).href;
+      await expect(
+        extractInWorker(page(ARTICLE_HTML, "https://example.com/"), { entry }),
+      ).rejects.toThrow(/boom/);
+    },
+    THREAD_TEST_TIMEOUT,
+  );
 
-  test("an error thrown inside the worker rejects with its message", async () => {
-    await expect(extractInWorker(page(ARTICLE_HTML, "not a url"))).rejects.toThrow(/Invalid URL/i);
-  });
+  test(
+    "an error thrown inside the worker rejects with its message",
+    async () => {
+      await expect(extractInWorker(page(ARTICLE_HTML, "not a url"))).rejects.toThrow(
+        /Invalid URL/i,
+      );
+    },
+    THREAD_TEST_TIMEOUT,
+  );
 });

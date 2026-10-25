@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.110.8";
+import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { resolveContent } from "./snippetLogic.ts";
 import { readyNoteRow } from "../_shared/noteRow.ts";
 import { createTurndownService } from "../_shared/turndown.ts";

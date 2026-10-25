@@ -17,4 +17,16 @@ describe("loadMdEditor without a CSP nonce (dev server, tests)", () => {
     expect(document.head.querySelector("style[nonce]")).toBeNull();
     wrapper.unmount();
   });
+
+  test("renders raw HTML in the preview, as the reader does", async () => {
+    const MdEditor = await loadMdEditor();
+    const wrapper = mount(MdEditor, {
+      props: { modelValue: "a <u>b</u> c", noPrettier: true, noHighlight: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    expect(document.querySelector(".md-editor-preview u")?.textContent).toBe("b");
+    wrapper.unmount();
+  });
 });

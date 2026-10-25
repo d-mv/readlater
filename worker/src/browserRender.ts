@@ -196,6 +196,9 @@ async function renderPage(
     throw err;
   });
 
+  // Set by the response listener below, which closes the page: every step
+  // after that fails with "page closed", and goto may already have resolved.
+  let declaredTooLarge = false;
   try {
     // Defence in depth on top of the egress proxy: refuse WebSockets outright
     // and abort requests to private hosts before they leave the page.
@@ -219,7 +222,6 @@ async function renderPage(
     // A document that declares itself over the cap is refused as soon as its
     // headers arrive, instead of being downloaded and parsed first (5 MB of
     // HTML can take longer to parse than the whole render budget).
-    let declaredTooLarge = false;
     page.on("response", (res) => {
       if (res.frame() !== page.mainFrame() || !res.request().isNavigationRequest()) return;
       if (Number(res.headers()["content-length"]) > maxHtmlBytes) {
@@ -234,7 +236,6 @@ async function renderPage(
       const type = (response?.headers()["content-type"] ?? "").split(";")[0]!.trim().toLowerCase();
       if (type && !HTML_TYPES.has(type)) throw new UnsupportedContentTypeError(type);
     } catch (err) {
-      if (declaredTooLarge) throw new ResponseTooLargeError(maxHtmlBytes);
       if (!(err instanceof Error) || err.name !== "TimeoutError") throw err;
       // Pages that never stop loading still have a usable DOM: keep going.
       gotoTimedOut = true;
@@ -259,6 +260,7 @@ async function renderPage(
     // Chromium already decoded the page; its URL is the one after redirects.
     return { body: content, contentType: "text/html", url: page.url() };
   } catch (err) {
+    if (declaredTooLarge) throw new ResponseTooLargeError(maxHtmlBytes);
     // A page-level failure leaves the shared browser alone (the context is
     // closed below); only a browser that went away is reported as such.
     if (!browser.isConnected()) {
