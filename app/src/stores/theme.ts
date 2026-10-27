@@ -8,6 +8,10 @@ export type ThemePreference = Theme | "system";
 // Same key the pre-paint script in index.html reads, so the first paint and
 // the store agree. "system" (or nothing stored) follows the OS setting.
 const STORAGE_KEY = "theme";
+// Each theme's canvas colour (main.css), for the theme-color meta that
+// Android paints the status bar with. Mirrored in public/theme-init.js.
+const THEME_COLOR: Record<Theme, string> = { light: "#EDEAE1", dark: "#171613" };
+
 const CYCLE: Record<ThemePreference, ThemePreference> = {
   light: "dark",
   dark: "system",
@@ -40,6 +44,9 @@ export const useThemeStore = defineStore("theme", () => {
     theme,
     (next) => {
       document.documentElement.dataset.theme = next;
+      document
+        .querySelector('meta[name="theme-color"]')
+        ?.setAttribute("content", THEME_COLOR[next]);
     },
     { immediate: true },
   );

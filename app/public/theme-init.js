@@ -17,4 +17,8 @@
         ? "dark"
         : "light";
   document.documentElement.dataset.theme = theme;
+  // Android's status bar takes this colour: match the applied theme's canvas,
+  // not the OS setting. Same values as THEME_COLOR in stores/theme.ts.
+  var meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", theme === "dark" ? "#171613" : "#EDEAE1");
 })();

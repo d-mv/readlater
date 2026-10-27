@@ -128,4 +128,23 @@ describe("useThemeStore", () => {
       set.mockRestore();
     }
   });
+  test("the theme-color meta follows the applied theme, not the OS", async () => {
+    mockSystemTheme(false);
+    const meta = document.createElement("meta");
+    meta.name = "theme-color";
+    meta.content = "#EDEAE1";
+    document.head.append(meta);
+    try {
+      const store = useThemeStore();
+      store.setPreference("dark");
+      await nextTick();
+      expect(meta.content).toBe("#171613");
+
+      store.setPreference("light");
+      await nextTick();
+      expect(meta.content).toBe("#EDEAE1");
+    } finally {
+      meta.remove();
+    }
+  });
 });
