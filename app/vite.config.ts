@@ -70,8 +70,8 @@ export default defineConfig({
         description: "Personal read-it-later app",
         start_url: "/",
         display: "standalone",
-        background_color: "#EDEAE1",
-        theme_color: "#EDEAE1",
+        background_color: "#171613",
+        theme_color: "#171613",
         icons: [
           { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
           { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
