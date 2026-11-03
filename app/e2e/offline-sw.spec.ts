@@ -1,6 +1,7 @@
 import type { BrowserContext, Page } from "@playwright/test";
 
 import { article, expect, offlineStoreKeys, openRow, PNG_BYTES, row, rows, test } from "./fixtures";
+import { AUTH_STORAGE_KEY } from "./supabaseEnv";
 
 /*
  * Runs against a production build served by `vite preview` (the
@@ -81,4 +82,31 @@ test("offline, a reload starts the app from the precache, the list from IndexedD
   await expect(photo).toHaveAttribute("src", /^blob:/);
   // The saved blob really decodes — not just a swapped URL.
   await expect.poll(() => photo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+});
+
+test("offline with an expired access token, the app starts without waiting out the token refresh", async ({
+  page,
+  context,
+  backend,
+  baseURL,
+}) => {
+  backend.addBookmark({ title: "Saved earlier" });
+
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(1);
+  await waitForServiceWorker(page);
+  // An hour later: the access token has expired, so supabase-js refreshes it
+  // first — offline it retries that for ~25 s.
+  await page.evaluate((key) => {
+    const session = JSON.parse(localStorage.getItem(key)!);
+    session.expires_at = Math.floor(Date.now() / 1000) - 3600;
+    localStorage.setItem(key, JSON.stringify(session));
+  }, AUTH_STORAGE_KEY);
+
+  backend.offline = true;
+  await cutNetwork(context, page, baseURL!);
+  await page.reload();
+
+  // Well inside the refresh retries (expect's 7 s timeout).
+  await expect(row(page, "Saved earlier")).toBeVisible();
 });

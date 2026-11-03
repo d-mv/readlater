@@ -159,10 +159,16 @@ export const useAuthStore = defineStore("auth", () => {
   // cold page load, e.g. a bookmarklet-opened window) — sharing one promise
   // means that second call is a no-op await rather than a duplicate
   // getSession() round-trip and a second onAuthStateChange subscription.
+  //
+  // With a cached login, init() doesn't wait for the session: an expired
+  // access token is refreshed on the way, and offline supabase-js retries
+  // that refresh for ~25 s — a blank screen at every offline launch. The
+  // session goes on loading in the background; isAuthenticated already holds
+  // from the cached login, and a session found over ends it then.
   let initPromise: Promise<void> | null = null;
   function init(): Promise<void> {
     if (!initPromise) {
-      initPromise = (async () => {
+      const loaded = (async () => {
         try {
           await loadSession();
 
@@ -177,6 +183,7 @@ export const useAuthStore = defineStore("auth", () => {
           // Offline mode: keep offlineUser and session
         }
       })();
+      initPromise = offlineUser.value ? Promise.resolve() : loaded;
     }
     return initPromise;
   }

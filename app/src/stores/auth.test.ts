@@ -141,6 +141,38 @@ describe("useAuthStore", () => {
     expect(store.isAuthenticated).toBe(true);
   });
 
+  test("with a cached login, init resolves without waiting for the session to load", async () => {
+    storeOfflineUser();
+    // Offline, an expired access token's refresh is retried for ~25 s.
+    let finishLoading!: (value: unknown) => void;
+    getSession.mockReturnValue(new Promise((resolve) => (finishLoading = resolve)));
+
+    const store = useAuthStore();
+    await store.init();
+
+    expect(store.isAuthenticated).toBe(true);
+    expect(store.session).toBeNull();
+
+    finishLoading({ data: { session: { user: { id: "u1", email: "a@b.c" } } } });
+    await vi.waitFor(() => expect(store.session).not.toBeNull());
+    expect(onAuthStateChange).toHaveBeenCalledOnce();
+  });
+
+  test("with no cached login, init waits for the session to load", async () => {
+    let finishLoading!: (value: unknown) => void;
+    getSession.mockReturnValue(new Promise((resolve) => (finishLoading = resolve)));
+
+    const store = useAuthStore();
+    let settled = false;
+    const init = store.init().then(() => (settled = true));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(settled).toBe(false);
+
+    finishLoading({ data: { session: { user: { id: "u1", email: "a@b.c" } } } });
+    await init;
+    expect(store.isAuthenticated).toBe(true);
+  });
+
   test("checkSession loads a session supabase-js still has", async () => {
     getSession.mockResolvedValue({ data: { session: { user: { id: "u1" } } } });
 
