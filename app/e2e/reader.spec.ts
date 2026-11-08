@@ -381,7 +381,7 @@ test("a YouTube bookmark mounts the privacy-enhanced player only on tap", async 
   await page.getByTestId("youtube-play").click();
   await expect(page.locator('iframe[title="YouTube video player"]')).toHaveAttribute(
     "src",
-    "https://www.youtube-nocookie.com/embed/abc123",
+    "https://www.youtube-nocookie.com/embed/abc123?autoplay=1",
   );
 });
 

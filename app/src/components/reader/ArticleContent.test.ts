@@ -258,7 +258,9 @@ describe("ArticleContent", () => {
       await wrapper.find('button[data-testid="youtube-play"]').trigger("click");
       const iframe = wrapper.find("iframe");
       expect(iframe.exists()).toBe(true);
-      expect(iframe.attributes("src")).toBe("https://www.youtube-nocookie.com/embed/abc123");
+      expect(iframe.attributes("src")).toBe(
+        "https://www.youtube-nocookie.com/embed/abc123?autoplay=1",
+      );
       expect(wrapper.find('button[data-testid="youtube-play"]').exists()).toBe(false);
     });
 

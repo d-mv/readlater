@@ -49,6 +49,6 @@ test("a public YouTube bookmark offers the click-to-play player", async ({ page,
   await page.getByTestId("youtube-play").click();
   await expect(page.locator('iframe[title="YouTube video player"]')).toHaveAttribute(
     "src",
-    "https://www.youtube-nocookie.com/embed/xyz789",
+    "https://www.youtube-nocookie.com/embed/xyz789?autoplay=1",
   );
 });

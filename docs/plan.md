@@ -78,11 +78,10 @@ editor with `content_edited` guard on both refresh paths). The preview
 fidelity and phone single-pane checks are real-browser e2e tests now
 (`app/e2e/editor.spec.ts`, `68b9eda`). Remaining:
 
-- **Backfill `youtube_video_id`** for rows captured before the column existed —
-  the worker derives the id from the URL (`youtubeMeta.ts` `extractVideoId`),
-  so a one-off script can reuse that. Until then those rows show thumbnail only.
-- **Real-browser pass** of the click-to-play embed; re-confirm the
-  `youtube-nocookie.com/embed/<id>` URL shape.
+- **Done 2026-11-08:** no `youtube_video_id` backfill needed (production has
+  no YouTube row without one); real-browser check of the click-to-play embed
+  — the `youtube-nocookie.com/embed/<id>` URL shape still loads under the
+  app's CSP, and the embed now autoplays after the tap (app 0.9.33).
 - **Editor theming depth** — theme switching is wired; matching the Braun
   tokens (`main.css`) is not. Revisit if it feels off-brand. CodeMirror's
   injected styles are allowed by a per-response CSP nonce (`d441c95`);

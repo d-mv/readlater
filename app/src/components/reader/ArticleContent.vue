@@ -167,7 +167,11 @@ const displayContentMd = computed(() => {
   return sanitizeMarkdownImageLinks(raw);
 });
 
-const embedUrl = computed(() => `https://www.youtube-nocookie.com/embed/${props.youtubeVideoId}`);
+// The iframe only mounts after the tap on our play button, so it starts
+// playing at once instead of asking for a second tap on YouTube's.
+const embedUrl = computed(
+  () => `https://www.youtube-nocookie.com/embed/${props.youtubeVideoId}?autoplay=1`,
+);
 
 // Runs on the raw rendered HTML, before sanitizing: DOMParser builds an inert
 // document (no scripts run, no images load), and DOMPurify still has the last
