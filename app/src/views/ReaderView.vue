@@ -609,7 +609,9 @@ watch(
         class="flex flex-col items-center gap-12 px-16 py-64 text-center text-ink-faint"
       >
         <IconLoader2 :size="28" class="animate-spin" />
-        <p class="m-0 font-sans text-base">Processing…</p>
+        <p class="m-0 font-sans text-base">
+          {{ bookmark.status === "ready" ? "Loading…" : "Processing…" }}
+        </p>
       </div>
     </div>
     <TagInput

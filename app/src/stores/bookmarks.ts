@@ -188,6 +188,15 @@ async function loadOfflineBookmarks(): Promise<Bookmark[]> {
   });
 }
 
+// navigator.onLine can say online on a dead or captive connection, where a
+// request takes seconds to fail; a downloaded article waits this long for the
+// network before it opens from its copy.
+const COPY_FALLBACK_MS = 2_000;
+
+function delay(ms: number): Promise<null> {
+  return new Promise((resolve) => setTimeout(() => resolve(null), ms));
+}
+
 export type BookmarkFilter = "all" | "archived";
 
 export const useBookmarksStore = defineStore("bookmarks", () => {
@@ -871,12 +880,18 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       if (isOffline) {
         throw new Error("Offline");
       }
-      const { data, error } = await supabase
+      const request = supabase
         .from("bookmarks")
         .select(DETAIL_SELECT)
         .eq("id", id)
-        .single<Bookmark>();
-      if (!error && data) {
+        .single<Bookmark>()
+        .then(({ data, error }) => (error ? null : data));
+      // A downloaded article gives the network a short head start, then opens
+      // from its copy (a late answer is dropped).
+      const data = useOfflineCacheStore().isCached(id)
+        ? await Promise.race([request, delay(COPY_FALLBACK_MS)])
+        : await request;
+      if (data) {
         const index = bookmarks.value.findIndex((b) => b.id === id);
         if (index >= 0) {
           bookmarks.value[index] = data;

@@ -1091,6 +1091,23 @@ describe("ReaderView", () => {
       expect(removeTag).toHaveBeenCalledWith("1", "t1");
     });
 
+    test("a ready article whose body is still loading says Loading, not Processing", async () => {
+      const store = useBookmarksStore();
+      store.bookmarks = [makeBookmark({ id: "1", status: "ready", content_md: undefined })];
+      vi.spyOn(store, "fetchOne").mockReturnValue(new Promise(() => {}));
+      const wrapper = mount(ReaderView, { props: { id: "1" } });
+      await flushPromises();
+
+      expect(wrapper.get('[data-testid="status-placeholder"]').text()).toBe("Loading…");
+    });
+
+    test("an article still on the worker says Processing", async () => {
+      const { wrapper } = mountReady({ status: "processing", content_md: null });
+      await flushPromises();
+
+      expect(wrapper.get('[data-testid="status-placeholder"]').text()).toBe("Processing…");
+    });
+
     test("a failed article without an error message shows no details line", async () => {
       const { wrapper } = mountReady({ status: "failed", error_message: null });
       await flushPromises();

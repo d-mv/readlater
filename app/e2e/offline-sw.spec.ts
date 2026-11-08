@@ -84,6 +84,25 @@ test("offline, a reload starts the app from the precache, the list from IndexedD
   await expect.poll(() => photo.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
 });
 
+test("on a connection that says online but never answers, a downloaded article opens from its copy", async ({
+  page,
+  backend,
+}) => {
+  backend.addBookmark({ title: "Lie-fi", content_md: "Read from the copy." });
+
+  await page.goto("/");
+  await waitForServiceWorker(page);
+  const toggle = row(page, "Lie-fi").getByTestId("offline-toggle");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true", { timeout: 5_000 });
+
+  backend.stalled = true;
+  await page.reload();
+  await openRow(page, "Lie-fi");
+  // The reader gives the network 2 s, then opens the copy.
+  await expect(article(page)).toHaveText("Read from the copy.", { timeout: 4_000 });
+});
+
 test("offline with an expired access token, the app starts without waiting out the token refresh", async ({
   page,
   context,

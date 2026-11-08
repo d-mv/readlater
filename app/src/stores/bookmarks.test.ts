@@ -133,12 +133,13 @@ vi.mock("../lib/offlineDb", () => ({
   },
 }));
 
-const { removeCachedBookmark, refreshCached } = vi.hoisted(() => ({
+const { removeCachedBookmark, refreshCached, isCached } = vi.hoisted(() => ({
   removeCachedBookmark: vi.fn(),
   refreshCached: vi.fn(),
+  isCached: vi.fn(),
 }));
 vi.mock("./offlineCache", () => ({
-  useOfflineCacheStore: () => ({ removeCachedBookmark, refreshCached }),
+  useOfflineCacheStore: () => ({ removeCachedBookmark, refreshCached, isCached }),
 }));
 
 const { useBookmarksStore } = await import("./bookmarks");
@@ -205,6 +206,7 @@ describe("useBookmarksStore", () => {
     getSyncState.mockResolvedValue(undefined);
     removeCachedBookmark.mockResolvedValue(undefined);
     refreshCached.mockResolvedValue(undefined);
+    isCached.mockReturnValue(false);
     hydrateArticleContent.mockImplementation(
       (article: { content_md: string }) => article.content_md,
     );
@@ -2929,6 +2931,77 @@ describe("useBookmarksStore", () => {
   });
 
   describe("fetchOne fallbacks", () => {
+    // navigator.onLine says online, but the request never answers.
+    function stalledSingle() {
+      from.mockReturnValue({
+        select: () => ({
+          eq: () => ({ single: () => new Promise(() => {}) }),
+        }),
+      });
+    }
+
+    function downloadedCopy(id: string) {
+      isCached.mockImplementation((key: string) => key === id);
+      getArticle.mockResolvedValue({
+        id,
+        content_md: "cached body",
+        translated_content_md: null,
+        images: [],
+        cachedAt: "2026-01-01T00:00:00Z",
+        bookmark: makeBookmark({ id, title: "Downloaded" }),
+      });
+    }
+
+    test("a downloaded article opens from its copy when the network doesn't answer in 2 s", async () => {
+      vi.useFakeTimers();
+      stalledSingle();
+      downloadedCopy("dl");
+
+      const store = useBookmarksStore();
+      const pending = store.fetchOne("dl");
+      await vi.advanceTimersByTimeAsync(1_999);
+      expect(getArticle).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      const result = await pending;
+
+      expect(result?.content_md).toBe("cached body");
+      vi.useRealTimers();
+    });
+
+    test("a downloaded article still takes the network row when it answers in time", async () => {
+      from.mockReturnValue({
+        select: () => ({
+          eq: () => ({
+            single: vi.fn().mockResolvedValue({
+              data: makeBookmark({ id: "dl", content_md: "fresh body" }),
+              error: null,
+            }),
+          }),
+        }),
+      });
+      downloadedCopy("dl");
+
+      const store = useBookmarksStore();
+      const result = await store.fetchOne("dl");
+
+      expect(result?.content_md).toBe("fresh body");
+      expect(getArticle).not.toHaveBeenCalled();
+    });
+
+    test("an article with no download keeps waiting for the network", async () => {
+      vi.useFakeTimers();
+      stalledSingle();
+
+      const store = useBookmarksStore();
+      let settled = false;
+      store.fetchOne("remote").then(() => (settled = true));
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(settled).toBe(false);
+      expect(getArticle).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
     function failingSingle() {
       from.mockReturnValue({
         select: () => ({

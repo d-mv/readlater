@@ -474,6 +474,11 @@ export class FakeBackend {
    * are still answered by the handlers here.
    */
   offline = false;
+  /**
+   * While set, Supabase requests never get an answer — a connection that
+   * navigator.onLine reports as up but that carries nothing.
+   */
+  stalled = false;
 
   private failures: Failure[] = [];
   // Seeded rows go back in time from here; writes go forward from `clock`, so
@@ -599,6 +604,7 @@ export class FakeBackend {
       await route.abort("internetdisconnected");
       return;
     }
+    if (this.stalled) return;
     if (request.method() === "OPTIONS") {
       await route.fulfill({ status: 204, headers: CORS_HEADERS });
       return;

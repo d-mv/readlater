@@ -998,7 +998,9 @@ DB):
   downloaded articles (rows in `articles`); this store just refreshes their
   metadata, and a listed row with no downloaded body is left out. The list
   view refetches on the browser's `offline` event, so an open list switches
-  to it when the connection drops. An online cold start reads only
+  to it when the connection drops. `fetchOne()` for a downloaded article
+  waits at most 2 s for the network (`navigator.onLine` can claim a dead
+  connection is up), then opens the copy. An online cold start reads only
   this store, never the articles, so snapshot rows stay body-less (no
   offline `blob:` bodies in the list).
 - Never loading blobs just to list: `articles` has `cachedAt` and
