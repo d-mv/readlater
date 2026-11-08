@@ -124,10 +124,9 @@ function select(action: () => void) {
   close();
 }
 
+// No confirmation: the delete waits out an Undo toast before it's sent.
 function onDelete() {
-  if (window.confirm("Delete this article? This can't be undone.")) {
-    emit("delete");
-  }
+  emit("delete");
   close();
 }
 

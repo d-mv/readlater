@@ -128,19 +128,13 @@ test("archive moves the article to the Archived tab", async ({ page, backend }) 
   await expect(rows(page).getByTestId("title")).toHaveText(["Done with this"]);
 });
 
-test("delete asks first, then removes the article", async ({ page, backend }) => {
+test("delete removes the article without asking (Undo covers it)", async ({ page, backend }) => {
   const bookmark = backend.addBookmark({ title: "Delete me" });
   backend.addBookmark({ title: "Keep me" });
   await page.clock.install();
   await page.goto("/");
   await row(page, "Delete me").getByRole("button").first().click();
 
-  answerNextConfirm(page, false);
-  await menuAction(page, "delete-item");
-  await expect(readerTitle(page)).toHaveText("Delete me");
-  expect(backend.bookmark(bookmark.id)).toBeDefined();
-
-  answerNextConfirm(page, true);
   await menuAction(page, "delete-item");
   await expect(page).toHaveURL(/\/$/);
   await expect(rows(page).getByTestId("title")).toHaveText(["Keep me"]);
@@ -155,7 +149,6 @@ test("a delete the server refuses puts the row back in the list", async ({ page,
   await page.goto("/");
   await row(page, "Undeletable").getByRole("button").first().click();
   backend.fail((c) => c.method === "DELETE" && c.name === "bookmarks");
-  answerNextConfirm(page, true);
   await menuAction(page, "delete-item");
 
   await expect(page).toHaveURL(/\/$/);

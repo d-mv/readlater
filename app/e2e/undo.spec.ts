@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 
 import type { FakeBackend } from "./fakeBackend";
-import { answerNextConfirm, expect, menuAction, openRow, rows, test } from "./fixtures";
+import { expect, menuAction, openRow, rows, test } from "./fixtures";
 
 // The undo window (stores/undo.ts UNDO_WINDOW_MS).
 const UNDO_WINDOW_MS = 5000;
@@ -20,7 +20,6 @@ function seed(backend: FakeBackend) {
 
 async function deleteFromReader(page: Page) {
   await openRow(page, "Middle");
-  answerNextConfirm(page, true);
   await menuAction(page, "delete-item");
   await expect(page).toHaveURL(/\/$/);
 }
@@ -108,7 +107,6 @@ test("a second delete sends the first at once; only the second can be undone", a
   await page.goto("/");
   await deleteFromReader(page);
   await openRow(page, "Last");
-  answerNextConfirm(page, true);
   await menuAction(page, "delete-item");
 
   await expect.poll(() => backend.bookmark(middle.id)).toBeUndefined();

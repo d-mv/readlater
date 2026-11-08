@@ -267,20 +267,13 @@ describe("ReaderMenu", () => {
     expect(wrapper.find('[data-testid="translate-page-item"]').exists()).toBe(false);
   });
 
-  test("emits delete when confirmed", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  test("emits delete straight away, without a confirmation (Undo covers it)", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
     const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
     await openMenu(wrapper);
     await wrapper.find('[data-testid="delete-item"]').trigger("click");
     expect(wrapper.emitted("delete")).toHaveLength(1);
-  });
-
-  test("does not emit delete when the confirmation is cancelled", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(false);
-    const wrapper = mount(ReaderMenu, { props: { bookmark: makeBookmark() } });
-    await openMenu(wrapper);
-    await wrapper.find('[data-testid="delete-item"]').trigger("click");
-    expect(wrapper.emitted("delete")).toBeUndefined();
+    expect(confirmSpy).not.toHaveBeenCalled();
   });
 
   test("shows 'Mark as read' and emits markRead when unread", async () => {
