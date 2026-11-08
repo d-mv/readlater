@@ -790,6 +790,27 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   too, `20261022110000`), `bookmark_deletions` (after-delete trigger,
   owner-read RLS, kept indefinitely; none is written when the delete comes
   from removing the auth user, whose bookmarks now cascade).
+- **Sort** — newest first (default) or oldest first, one toggle at the
+  end of the status-tab row (`SortToggle.vue`, an `IconButton` named
+  "Oldest first" with `aria-pressed`), remembered per device in
+  `localStorage` (`listSort`, via `lib/localStore.ts`). `store.setSort()`.
+  Oldest first is its own `listSession` kind, `oldest`: the same keyset
+  query ascending (`created_at > cursor`, or equal with a greater `id`),
+  paged by the same sentinel. It is never persisted to IndexedDB nor
+  delta-synced — `persistOfflineList()` only writes the `recent` window,
+  whose sync state stays as it was, so switching back to newest first
+  resumes the persisted list by delta. Instead, a `fetch()` while oldest
+  first (coming back to the app, `online`) re-reads the whole loaded window
+  in one request (rows loaded rounded up to a page, capped at PostgREST's
+  1000 `max_rows`), so the user keeps their place. Realtime: UPDATE /
+  DELETE apply as usual (not persisted); an INSERT is listed only where it
+  sorts inside the loaded window — a new row sorts last, so it appears once
+  the last page is loaded and `loadMore` brings it before that; rows the
+  user adds follow the same rule. Search results (unpaged) and the offline
+  snapshot are ordered client-side: oldest first is the newest-first result
+  reversed, and switching the sort over them reverses them without
+  re-running the full-text query. The list never ranked by relevance, so
+  the chosen order holds everywhere.
 - **Undo for archive and delete** — `stores/undo.ts` owns one notice at a
   time, shown by `components/undo/UndoToast.vue` (mounted once in `App.vue`,
   so it outlives the reader → list navigation; built on the shared
@@ -935,7 +956,7 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   run on submit (Enter) / clear only, not per keystroke. An empty query is
   skipped client-side (an empty `websearch_to_tsquery` matches nothing) and
   falls back to the normal list query. A search loads its whole result set
-  unpaged.
+  unpaged, in the chosen sort (see **Sort**).
 - **Dialogs and labels** — `shared/ui/Dialog.vue` is a native `<dialog>`
   opened with `showModal()` (page inert behind it, Escape closes, focus goes
   back to the opener). The search and tag inputs carry `aria-label`s.

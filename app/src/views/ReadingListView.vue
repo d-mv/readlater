@@ -9,6 +9,7 @@ import { IconSettings } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
 import StatusTabs from "../components/list/StatusTabs.vue";
+import SortToggle from "../components/list/SortToggle.vue";
 import BookmarkList from "../components/list/BookmarkList.vue";
 import AddBookmarkDialog from "../components/list/AddBookmarkDialog.vue";
 import TagFilterBar from "../components/list/TagFilterBar.vue";
@@ -16,7 +17,7 @@ import ThemeToggle from "../components/ThemeToggle.vue";
 import IconButton from "../shared/ui/IconButton.vue";
 import Input from "../shared/ui/Input.vue";
 import Button from "../shared/ui/Button.vue";
-import type { BookmarkFilter } from "../stores/bookmarks";
+import type { BookmarkFilter, ListSort } from "../stores/bookmarks";
 
 const router = useRouter();
 const store = useBookmarksStore();
@@ -134,6 +135,12 @@ function onChangeFilter(filter: BookmarkFilter) {
   store.setFilter(filter);
 }
 
+function onChangeSort(sort: ListSort) {
+  savedScrollPosition = 0;
+  window.scrollTo(0, 0);
+  store.setSort(sort);
+}
+
 async function onToggleOffline(id: string) {
   const bookmark = store.bookmarks.find((b) => b.id === id);
   if (!bookmark) return;
@@ -214,7 +221,9 @@ function onToggleTag(tagId: string) {
       :active-filter="store.filter"
       :unread-count="store.unreadCount"
       @change="onChangeFilter"
-    />
+    >
+      <SortToggle :sort="store.sort" @change="onChangeSort" />
+    </StatusTabs>
     <BookmarkList
       :bookmarks="store.visibleBookmarks"
       :cached-ids="offlineCache.cachedIds"

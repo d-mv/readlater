@@ -10,6 +10,7 @@ import { normalizeUrl } from "../utils/normalizeUrl";
 import { readingTimeFromWordCount, wordCount } from "../utils/reading";
 import { DETAIL_SELECT, LIST_SELECT } from "../lib/bookmarkColumns";
 import * as offlineDb from "../lib/offlineDb";
+import { readLocal, writeLocal } from "../lib/localStore";
 import { useAuthStore } from "./auth";
 import { useOfflineCacheStore } from "./offlineCache";
 
@@ -39,6 +40,9 @@ function writeResult(error: unknown): WriteResult {
   return { error: error ? WRITE_FAILED : null };
 }
 const PAGE_SIZE = 50;
+// PostgREST's max_rows: a request for more comes back cut to this, which
+// would read as "no more pages".
+const MAX_ROWS = 1000;
 // A delta larger than this means the local copy is far behind; a fresh first
 // page is cheaper than replaying it.
 const DELTA_LIMIT = 200;
@@ -73,6 +77,10 @@ function compareKeys(a: offlineDb.ListCursor, b: offlineDb.ListCursor): number {
 
 function byCreatedAtDesc(a: Bookmark, b: Bookmark) {
   return compareKeys(b, a);
+}
+
+function byCreatedAtAsc(a: Bookmark, b: Bookmark) {
+  return compareKeys(a, b);
 }
 
 function cursorOf(row: Bookmark | undefined): offlineDb.ListCursor | null {
@@ -199,6 +207,17 @@ function delay(ms: number): Promise<null> {
 
 export type BookmarkFilter = "all" | "archived";
 
+// The list's order. Both page by the same (created_at, id) keyset, one
+// descending, one ascending.
+export type ListSort = "newest" | "oldest";
+
+// A per-device preference (localStorage), like the font size.
+const SORT_STORAGE_KEY = "listSort";
+
+function readStoredSort(): ListSort {
+  return readLocal(SORT_STORAGE_KEY) === "oldest" ? "oldest" : "newest";
+}
+
 export const useBookmarksStore = defineStore("bookmarks", () => {
   const bookmarks = ref<Bookmark[]>([]);
   const filter = shallowRef<BookmarkFilter>("all");
@@ -208,6 +227,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   const hasMore = shallowRef(false);
   const searchQuery = shallowRef("");
   const activeTagIds = ref<string[]>([]);
+  const sort = shallowRef<ListSort>(readStoredSort());
 
   // Deletes the user can still take back (the undo toast): the row is off the
   // list at once, but the server delete and the offline-copy eviction wait for
@@ -265,6 +285,21 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     activeTagIds.value = next;
   }
 
+  // A paged window is re-read in the new order (the oldest-first one never
+  // replaces the persisted newest-first list; coming back to newest first
+  // delta-syncs that). A search result or the offline snapshot is whole
+  // already and held in the other order, so it is just reversed.
+  async function setSort(next: ListSort): Promise<void> {
+    if (next === sort.value) return;
+    sort.value = next;
+    writeLocal(SORT_STORAGE_KEY, next);
+    if (listSession.kind === "search" || listSession.kind === "offline") {
+      bookmarks.value = [...bookmarks.value].reverse();
+      return;
+    }
+    await fetch();
+  }
+
   // What `bookmarks` currently holds, so async results and live events can
   // tell whether they still apply:
   // - "recent": the unfiltered newest-first window, paged by `cursor` (the
@@ -272,41 +307,66 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   //   or Realtime don't move it), current as of `watermark` (the newest
   //   updated_at / deleted_at it reflects; null until a row has been seen).
   //   The only kind mirrored to the offline list.
+  // - "oldest": the unfiltered oldest-first window, paged by `cursor` (the
+  //   newest paged row). Never persisted nor delta-synced — the persisted
+  //   list and its sync state describe the newest-first window, and this one
+  //   would overwrite them with a window the delta can't keep current. A
+  //   fetch() re-reads the loaded window instead.
   // - "search": a whole, unpaged full-text result set for `query`.
   // - "offline": a read-only snapshot from IndexedDB after a failed fetch.
   // Every fetch() bumps `listGeneration`; a response (fetch or loadMore)
   // started under an older generation is discarded.
   type ListSession =
     | { kind: "recent"; cursor: offlineDb.ListCursor | null; watermark: string | null }
+    | { kind: "oldest"; cursor: offlineDb.ListCursor | null }
     | { kind: "search"; query: string }
     | { kind: "offline"; query: string };
   let listSession: ListSession = { kind: "recent", cursor: null, watermark: null };
   let listGeneration = 0;
 
-  // One page of the list, newest first. `query` applies full-text search;
-  // tag filtering is resolved client-side against the loaded set (see
-  // visibleBookmarks), so it costs no query. `before` is the keyset cursor
-  // for loadMore(): rows strictly after it in (created_at desc, id desc)
-  // order — created_at alone would skip the rest of a batch an import
-  // stamped with the cursor row's instant. Values are quoted for PostgREST's
-  // logic-tree syntax (timestamps contain `:` and `.`).
+  // The order `bookmarks` is held in. A paged window has its own; a search
+  // or the offline snapshot follows the chosen sort (setSort re-sorts them).
+  function sessionOrder(): ListSort {
+    if (listSession.kind === "recent") return "newest";
+    if (listSession.kind === "oldest") return "oldest";
+    return sort.value;
+  }
+
+  function rowOrder(): (a: Bookmark, b: Bookmark) => number {
+    return sessionOrder() === "oldest" ? byCreatedAtAsc : byCreatedAtDesc;
+  }
+
+  // One page of the list, newest first (or oldest first). `query` applies
+  // full-text search; tag filtering is resolved client-side against the
+  // loaded set (see visibleBookmarks), so it costs no query. `after` is the
+  // keyset cursor for loadMore(): rows strictly after it in (created_at, id)
+  // order, descending or ascending — created_at alone would skip the rest of
+  // a batch an import stamped with the cursor row's instant. Values are
+  // quoted for PostgREST's logic-tree syntax (timestamps contain `:` and `.`).
   async function queryBookmarks(
-    opts: { query?: string; limit?: number; before?: offlineDb.ListCursor } = {},
+    opts: {
+      query?: string;
+      limit?: number;
+      after?: offlineDb.ListCursor;
+      order?: ListSort;
+    } = {},
   ): Promise<Bookmark[]> {
     let query = supabase.from("bookmarks").select(LIST_SELECT);
+    const ascending = opts.order === "oldest";
 
     if (opts.query) {
       query = query.textSearch("search_vector", opts.query, { type: "websearch" });
     }
-    if (opts.before) {
-      const { created_at: at, id } = opts.before;
-      query = query.or(`created_at.lt."${at}",and(created_at.eq."${at}",id.lt."${id}")`);
+    if (opts.after) {
+      const { created_at: at, id } = opts.after;
+      const op = ascending ? "gt" : "lt";
+      query = query.or(`created_at.${op}."${at}",and(created_at.eq."${at}",id.${op}."${id}")`);
     }
     if (opts.limit) query = query.limit(opts.limit);
 
     const { data, error, status } = await query
-      .order("created_at", { ascending: false })
-      .order("id", { ascending: false });
+      .order("created_at", { ascending })
+      .order("id", { ascending });
     if (status === UNAUTHORIZED) throw new SessionExpiredError();
     if (error) throw error;
     return (data ?? []) as unknown as Bookmark[];
@@ -340,9 +400,17 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   }
 
   // Whether a row belongs to the paged window — rows past the cursor in
-  // keyset order arrive through loadMore(), fresh.
-  function inWindow(row: Bookmark, cursor: offlineDb.ListCursor | null, more: boolean) {
-    return !more || cursor === null || compareKeys(row, cursor) >= 0;
+  // keyset order (older newest-first, newer oldest-first) arrive through
+  // loadMore(), fresh.
+  function inWindow(
+    row: Bookmark,
+    cursor: offlineDb.ListCursor | null,
+    more: boolean,
+    order: ListSort = "newest",
+  ) {
+    if (!more || cursor === null) return true;
+    const side = compareKeys(row, cursor);
+    return order === "oldest" ? side <= 0 : side >= 0;
   }
 
   // Brings the "recent" list up to date by delta instead of re-reading the
@@ -416,6 +484,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const isCurrent = () => generation === listGeneration;
     // Snapshot the query: the input can change while this request is in flight.
     const query = searchQuery.value.trim();
+    const order = sort.value;
+    // An oldest-first refresh re-reads as many rows as are loaded, so the
+    // user keeps their place (it has no delta sync to patch them instead).
+    const loadedRows = listSession.kind === "oldest" ? bookmarks.value.length : 0;
     loading.value = true;
     const auth = useAuthStore();
     try {
@@ -430,12 +502,29 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // Before the delta: it would otherwise bring back the server's older
       // position for a row this device read offline.
       await sendUnsentProgress();
+      if (!query && order === "oldest") {
+        const limit = Math.min(
+          MAX_ROWS,
+          Math.ceil(Math.max(loadedRows, 1) / PAGE_SIZE) * PAGE_SIZE,
+        );
+        const page = await queryBookmarks({ limit, order });
+        if (!isCurrent()) return;
+        bookmarks.value = withoutRemoving(page);
+        listSession = { kind: "oldest", cursor: cursorOf(page.at(-1)) };
+        hasMore.value = page.length === limit;
+        return;
+      }
       if (!query && (await syncRecent(isCurrent))) return;
       // A search result set is bounded and worth showing whole; only the
       // unfiltered list is paged.
       const page = await queryBookmarks(query ? { query } : { limit: PAGE_SIZE });
       if (!isCurrent()) return;
-      bookmarks.value = withoutRemoving(page);
+      // Search results follow the chosen sort, applied here rather than by
+      // the query: the set is unpaged, so ordering it locally is exact, and
+      // switching the sort over a search costs no second full-text query.
+      // Not relevance (ts_rank): the list has never ranked by it, and a sort
+      // the user picked should hold for every list they look at.
+      bookmarks.value = withoutRemoving(query && order === "oldest" ? [...page].reverse() : page);
       if (query) {
         listSession = { kind: "search", query };
         hasMore.value = false;
@@ -459,7 +548,11 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // Postgres full-text search doesn't run against the cached copy — fall
       // back to a plain substring match over title/excerpt (content_md isn't
       // cached in list metadata, so offline search can't reach article bodies).
-      const offlineRows = withoutRemoving(offlineBookmarks);
+      // The snapshot comes newest first (undated rows last); oldest first is
+      // that reversed.
+      const offlineRows = withoutRemoving(
+        order === "oldest" ? offlineBookmarks.reverse() : offlineBookmarks,
+      );
       bookmarks.value = needle
         ? offlineRows.filter(
             (b) =>
@@ -473,11 +566,13 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     }
   }
 
-  // Appends the next older page. Only the unfiltered list pages; a no-op
-  // during a search or offline, or while a page is in flight.
+  // Appends the next page (older newest-first, newer oldest-first). Only the
+  // unfiltered list pages; a no-op during a search or offline, or while a
+  // page is in flight.
   async function loadMore() {
     const session = listSession;
-    if (session.kind !== "recent" || !hasMore.value || loadingMore.value) return;
+    if (session.kind !== "recent" && session.kind !== "oldest") return;
+    if (!hasMore.value || loadingMore.value) return;
     if (!session.cursor) {
       hasMore.value = false;
       return;
@@ -485,7 +580,11 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     const generation = listGeneration;
     loadingMore.value = true;
     try {
-      const page = await queryBookmarks({ limit: PAGE_SIZE, before: session.cursor });
+      const page = await queryBookmarks({
+        limit: PAGE_SIZE,
+        after: session.cursor,
+        order: session.kind === "oldest" ? "oldest" : "newest",
+      });
       // A fetch() started meanwhile (search, clear, refresh) owns the list now.
       if (generation !== listGeneration || listSession !== session) return;
       const seen = new Set(bookmarks.value.map((b) => b.id));
@@ -498,11 +597,11 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // updated_at says nothing about them. Raising it here could skip a
       // page-1 change Realtime missed; the next delta just re-reads this
       // page's recently changed rows instead.
-      listSession = {
-        kind: "recent",
-        cursor: cursorOf(page.at(-1)) ?? session.cursor,
-        watermark: session.watermark,
-      };
+      const cursor = cursorOf(page.at(-1)) ?? session.cursor;
+      listSession =
+        session.kind === "recent"
+          ? { kind: "recent", cursor, watermark: session.watermark }
+          : { kind: "oldest", cursor };
       hasMore.value = page.length === PAGE_SIZE;
       persistOfflineList();
     } catch {
@@ -561,16 +660,21 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     if (payload.eventType === "INSERT") {
       // A search view is a filtered result; a new row may not match it, so
       // leave it out until the user re-runs the search.
-      if (listSession.kind !== "recent" && listSession.query !== "") return;
+      if (listSession.kind === "search") return;
+      if (listSession.kind === "offline" && listSession.query !== "") return;
       const row = { ...(payload.new as Bookmark), tags: payload.new.tags ?? [] };
       if (removing.has(row.id) || bookmarks.value.some((b) => b.id === row.id)) return;
       // An import inserts rows with their original dates: older than the
       // loaded pages, loadMore brings them; otherwise they go where they
-      // sort, not on top.
-      if (listSession.kind === "recent" && !inWindow(row, listSession.cursor, hasMore.value)) {
+      // sort, not on top. Oldest first, a new row sorts last — it is listed
+      // once the last page is loaded, and loadMore brings it before that.
+      if (
+        (listSession.kind === "recent" || listSession.kind === "oldest") &&
+        !inWindow(row, listSession.cursor, hasMore.value, sessionOrder())
+      ) {
         return;
       }
-      bookmarks.value = [...bookmarks.value, row].sort(byCreatedAtDesc);
+      bookmarks.value = [...bookmarks.value, row].sort(rowOrder());
     } else if (payload.eventType === "UPDATE") {
       const row = payload.new as Bookmark;
       const existing = bookmarks.value.find((b) => b.id === row.id);
@@ -647,14 +751,17 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     activeTagIds.value = [];
   }
 
-  // Puts a row the server just created at the top of the list. Its Realtime
-  // INSERT can arrive before the insert's own response, in which case the
-  // row is already listed: the response (the full row, tags included)
-  // replaces it in place rather than adding a second copy.
+  // Puts a row the server just created at the top of the list — at the
+  // bottom oldest first, and only once the last page is loaded (until then
+  // loadMore brings it, like its Realtime INSERT). Its Realtime INSERT can
+  // arrive before the insert's own response, in which case the row is
+  // already listed: the response (the full row, tags included) replaces it
+  // in place rather than adding a second copy.
   function addToList(row: Bookmark) {
     const index = bookmarks.value.findIndex((b) => b.id === row.id);
     if (index >= 0) bookmarks.value[index] = row;
-    else bookmarks.value.unshift(row);
+    else if (sessionOrder() === "newest") bookmarks.value.unshift(row);
+    else if (!hasMore.value) bookmarks.value.push(row);
   }
 
   async function add(url: string, options?: { title?: string }): Promise<AddBookmarkResult> {
@@ -1225,12 +1332,14 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     hasMore,
     searchQuery,
     activeTagIds,
+    sort,
     visibleBookmarks,
     unreadCount,
     allTags,
     setFilter,
     setSearchQuery,
     setActiveTagIds,
+    setSort,
     fetch,
     loadMore,
     subscribeToChanges,

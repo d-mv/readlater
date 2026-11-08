@@ -25,4 +25,12 @@ describe("StatusTabs", () => {
     const wrapper = mount(StatusTabs, { props: { activeFilter: "all", unreadCount: 0 } });
     expect(wrapper.text()).not.toContain("unread");
   });
+
+  test("renders list controls after the unread count", () => {
+    const wrapper = mount(StatusTabs, {
+      props: { activeFilter: "all", unreadCount: 3 },
+      slots: { default: '<button data-testid="extra">x</button>' },
+    });
+    expect(wrapper.find('[data-testid="extra"]').exists()).toBe(true);
+  });
 });

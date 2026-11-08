@@ -419,6 +419,17 @@ describe("ReadingListView", () => {
     expect(scrollToSpy).toHaveBeenCalledWith(0, 0);
   });
 
+  test("the sort toggle switches the order and scrolls back to the top", async () => {
+    const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const { wrapper, store } = await mountSettled();
+    const setSort = vi.spyOn(store, "setSort").mockResolvedValue(undefined);
+
+    await wrapper.get('[data-testid="sort-toggle"]').trigger("click");
+
+    expect(setSort).toHaveBeenCalledWith("oldest");
+    expect(scrollToSpy).toHaveBeenCalledWith(0, 0);
+  });
+
   test("toggling an active tag removes it from the filter", async () => {
     const { wrapper, store } = await mountSettled();
     store.setActiveTagIds(["tag-1", "tag-2"]);

@@ -188,9 +188,10 @@ nonce (`d441c95`), and sign-out removes supabase-js's stored session itself
 
 **Product gaps:** undo for archive/delete — done 2026-11-08 (toast with
 Undo, delete deferred 5 s; architecture "Undo for archive and delete"; an
-undone archive doesn't restore the evicted offline copy). Not built: bulk actions, sort
-options, offline full-text search, keyboard shortcuts, audit log,
-capture-key rotation, share-link revoke UI.
+undone archive doesn't restore the evicted offline copy). Sort options —
+done 2026-11-08 (newest/oldest first, per device; architecture "Sort").
+Not built: bulk actions, offline full-text search, keyboard shortcuts,
+audit log, capture-key rotation, share-link revoke UI.
 
 ---
 

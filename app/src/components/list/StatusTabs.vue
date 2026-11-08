@@ -24,10 +24,12 @@ const options: TabOption<BookmarkFilter>[] = [
     class="border-b border-line px-16 py-12"
     @update:model-value="emit('change', $event)"
   >
-    <span
-      v-if="unreadCount > 0"
-      class="num ml-auto pb-8 text-sm text-ink-muted sm:text-2xs uppercase"
-      >{{ unreadCount }} unread</span
-    >
+    <div class="ml-auto flex items-center gap-12">
+      <span v-if="unreadCount > 0" class="num pb-8 text-sm text-ink-muted sm:text-2xs uppercase"
+        >{{ unreadCount }} unread</span
+      >
+      <!-- Controls for the whole list (the sort toggle). -->
+      <slot />
+    </div>
   </Tabs>
 </template>

@@ -3838,4 +3838,336 @@ describe("useBookmarksStore", () => {
       expect(await store.unarchive("elsewhere")).toEqual({ error: null });
     });
   });
+
+  describe("oldest-first sort", () => {
+    // Ascending (created_at, id): b0 is the oldest.
+    const minute = (k: number) =>
+      `2026-01-01T${String(Math.floor(k / 60)).padStart(2, "0")}:${String(k % 60).padStart(2, "0")}:00Z`;
+    const asc = (n: number, offset = 0) =>
+      Array.from({ length: n }, (_, i) =>
+        makeBookmark({
+          id: `b${offset + i}`,
+          created_at: minute(offset + i),
+          updated_at: minute(offset + i),
+        }),
+      );
+    /** The PostgREST filter for "after this keyset cursor" in ascending order. */
+    const afterAsc = (createdAt: string, id: string) =>
+      `created_at.gt."${createdAt}",and(created_at.eq."${createdAt}",id.gt."${id}")`;
+
+    beforeEach(() => {
+      localStorage.clear();
+    });
+
+    test("newest first is the default; a stored choice is read back", () => {
+      expect(useBookmarksStore().sort).toBe("newest");
+
+      localStorage.setItem("listSort", "oldest");
+      setActivePinia(createPinia());
+      expect(useBookmarksStore().sort).toBe("oldest");
+
+      localStorage.setItem("listSort", "sideways");
+      setActivePinia(createPinia());
+      expect(useBookmarksStore().sort).toBe("newest");
+    });
+
+    test("the first page is read ascending and never persisted or delta-synced", async () => {
+      localStorage.setItem("listSort", "oldest");
+      const query = listQuery(asc(50));
+      from.mockReturnValue({ select: () => query });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(query.order.mock.calls).toEqual([
+        ["created_at", { ascending: true }],
+        ["id", { ascending: true }],
+      ]);
+      expect(query.limit).toHaveBeenCalledWith(50);
+      expect(query.gte).not.toHaveBeenCalled();
+      expect(getSyncState).not.toHaveBeenCalled();
+      expect(store.bookmarks[0]?.id).toBe("b0");
+      expect(store.hasMore).toBe(true);
+      await Promise.resolve();
+      expect(replaceBookmarksList).not.toHaveBeenCalled();
+    });
+
+    test("loadMore pages on to newer rows past the newest loaded (created_at, id)", async () => {
+      localStorage.setItem("listSort", "oldest");
+      const second = listQuery(asc(3, 50));
+      from
+        .mockReturnValueOnce({ select: () => listQuery(asc(50)) })
+        .mockReturnValueOnce({ select: () => second });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+      await store.loadMore();
+
+      expect(second.or).toHaveBeenCalledWith(afterAsc("2026-01-01T00:49:00Z", "b49"));
+      expect(second.order).toHaveBeenCalledWith("created_at", { ascending: true });
+      expect(store.bookmarks.map((b) => b.id).slice(-3)).toEqual(["b50", "b51", "b52"]);
+      expect(store.hasMore).toBe(false);
+      expect(replaceBookmarksList).not.toHaveBeenCalled();
+    });
+
+    test("an empty page keeps the cursor where it was", async () => {
+      localStorage.setItem("listSort", "oldest");
+      const third = listQuery([]);
+      from
+        .mockReturnValueOnce({ select: () => listQuery(asc(50)) })
+        .mockReturnValueOnce({ select: () => listQuery(asc(50, 50)) })
+        .mockReturnValueOnce({ select: () => third });
+
+      const store = useBookmarksStore();
+      await store.fetch();
+      // Pretend the second page came back full but the third is empty.
+      await store.loadMore();
+      await store.loadMore();
+
+      expect(third.or).toHaveBeenCalledWith(afterAsc("2026-01-01T01:39:00Z", "b99"));
+      expect(store.hasMore).toBe(false);
+    });
+
+    test("a refresh re-reads the whole loaded window, not just the first page", async () => {
+      localStorage.setItem("listSort", "oldest");
+      from
+        .mockReturnValueOnce({ select: () => listQuery(asc(50)) })
+        .mockReturnValueOnce({ select: () => listQuery(asc(50, 50)) });
+      const store = useBookmarksStore();
+      await store.fetch();
+      await store.loadMore();
+
+      const reread = listQuery(asc(100));
+      from.mockReturnValue({ select: () => reread });
+      await store.fetch();
+
+      expect(reread.limit).toHaveBeenCalledWith(100);
+      expect(store.bookmarks).toHaveLength(100);
+      expect(store.hasMore).toBe(true);
+    });
+
+    test("the re-read is capped at PostgREST's max_rows", async () => {
+      localStorage.setItem("listSort", "oldest");
+      from.mockReturnValueOnce({ select: () => listQuery(asc(50)) });
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.bookmarks = Array.from({ length: 1200 }, (_, i) => makeBookmark({ id: `x${i}` }));
+
+      const reread = listQuery([]);
+      from.mockReturnValue({ select: () => reread });
+      await store.fetch();
+
+      expect(reread.limit).toHaveBeenCalledWith(1000);
+    });
+
+    test("switching sorts saves the choice and re-reads the list in the new order", async () => {
+      const first = listQuery(asc(2).reverse());
+      from.mockReturnValue({ select: () => first });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      const ascending = listQuery(asc(2));
+      from.mockReturnValue({ select: () => ascending });
+      await store.setSort("oldest");
+
+      expect(localStorage.getItem("listSort")).toBe("oldest");
+      expect(store.sort).toBe("oldest");
+      expect(ascending.order).toHaveBeenCalledWith("created_at", { ascending: true });
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["b0", "b1"]);
+    });
+
+    test("choosing the sort already in use does nothing", async () => {
+      const store = useBookmarksStore();
+      await store.setSort("newest");
+
+      expect(from).not.toHaveBeenCalled();
+      expect(localStorage.getItem("listSort")).toBeNull();
+    });
+
+    test("back to newest first resumes the persisted list by delta, untouched meanwhile", async () => {
+      localStorage.setItem("listSort", "oldest");
+      getSyncState.mockResolvedValue({
+        watermark: "2026-10-09T00:00:00Z",
+        cursor: null,
+        hasMore: false,
+      });
+      getBookmarksList.mockResolvedValue([
+        makeBookmark({ id: "persisted", created_at: "2026-10-09T00:00:00Z" }),
+      ]);
+      const delta = listQuery([]);
+      from.mockImplementation((table: string) => ({
+        select: () => (table === "bookmark_deletions" ? listQuery([]) : delta),
+      }));
+      const store = useBookmarksStore();
+      await store.fetch();
+      expect(getSyncState).not.toHaveBeenCalled();
+
+      await store.setSort("newest");
+
+      expect(getSyncState).toHaveBeenCalled();
+      expect(delta.gte).toHaveBeenCalledWith("updated_at", "2026-10-08T23:55:00.000Z");
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["persisted"]);
+    });
+
+    test("search results follow the chosen order; switching re-sorts them without a query", async () => {
+      localStorage.setItem("listSort", "oldest");
+      // The server answers newest first.
+      from.mockReturnValue({ select: () => listQuery(asc(3).reverse()) });
+      const store = useBookmarksStore();
+      store.setSearchQuery("rust");
+      await store.fetch();
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["b0", "b1", "b2"]);
+
+      from.mockClear();
+      await store.setSort("newest");
+
+      expect(from).not.toHaveBeenCalled();
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["b2", "b1", "b0"]);
+    });
+
+    test("the offline snapshot is shown oldest first", async () => {
+      localStorage.setItem("listSort", "oldest");
+      vi.stubGlobal("navigator", { onLine: false });
+      getBookmarksList.mockResolvedValue(asc(3));
+      downloaded("b0", "b1", "b2");
+
+      const store = useBookmarksStore();
+      await store.fetch();
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["b0", "b1", "b2"]);
+
+      await store.setSort("newest");
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["b2", "b1", "b0"]);
+      vi.unstubAllGlobals();
+    });
+
+    test("an oldest-first page that answers after a newer fetch is dropped", async () => {
+      localStorage.setItem("listSort", "oldest");
+      let answer!: (value: unknown) => void;
+      const slow = listQuery(asc(2));
+      slow.result.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+      from.mockReturnValueOnce({ select: () => slow });
+      const store = useBookmarksStore();
+      const first = store.fetch();
+
+      from.mockReturnValueOnce({ select: () => listQuery([makeBookmark({ id: "fresh" })]) });
+      await store.fetch();
+      answer({ data: asc(2), error: null });
+      await first;
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["fresh"]);
+    });
+
+    test("loadMore does nothing at the end of the list or while a page is loading", async () => {
+      localStorage.setItem("listSort", "oldest");
+      from.mockReturnValueOnce({ select: () => listQuery(asc(2)) });
+      const store = useBookmarksStore();
+      await store.fetch();
+      from.mockClear();
+      await store.loadMore();
+      expect(from).not.toHaveBeenCalled();
+
+      from.mockReturnValueOnce({ select: () => listQuery(asc(50)) });
+      await store.fetch();
+      from.mockReturnValue({ select: () => listQuery(asc(1, 50)) });
+      from.mockClear();
+      await Promise.all([store.loadMore(), store.loadMore()]);
+      expect(from).toHaveBeenCalledTimes(1);
+    });
+
+    test("an INSERT doesn't land in an offline search result", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      getBookmarksList.mockResolvedValue(asc(2));
+      downloaded("b0", "b1");
+      const store = useBookmarksStore();
+      store.setSearchQuery("title");
+      await store.fetch();
+      store.subscribeToChanges();
+
+      emitRealtime({ eventType: "INSERT", new: makeBookmark({ id: "fresh" }) });
+
+      expect(store.bookmarks.some((b) => b.id === "fresh")).toBe(false);
+      vi.unstubAllGlobals();
+    });
+
+    describe("new rows", () => {
+      test("a Realtime INSERT is left for loadMore while newer pages remain", async () => {
+        localStorage.setItem("listSort", "oldest");
+        from.mockReturnValue({ select: () => listQuery(asc(50)) });
+        const store = useBookmarksStore();
+        await store.fetch();
+        store.subscribeToChanges();
+
+        emitRealtime({
+          eventType: "INSERT",
+          new: makeBookmark({ id: "fresh", created_at: "2026-11-01T00:00:00Z" }),
+        });
+
+        expect(store.bookmarks.some((b) => b.id === "fresh")).toBe(false);
+      });
+
+      test("once the end is loaded, a Realtime INSERT goes last and isn't persisted", async () => {
+        localStorage.setItem("listSort", "oldest");
+        from.mockReturnValue({ select: () => listQuery(asc(2)) });
+        const store = useBookmarksStore();
+        await store.fetch();
+        store.subscribeToChanges();
+
+        emitRealtime({
+          eventType: "INSERT",
+          new: makeBookmark({ id: "fresh", created_at: "2026-11-01T00:00:00Z" }),
+        });
+        emitRealtime({
+          eventType: "INSERT",
+          new: makeBookmark({ id: "imported", created_at: "2026-01-01T00:00:30Z" }),
+        });
+
+        expect(store.bookmarks.map((b) => b.id)).toEqual(["b0", "imported", "b1", "fresh"]);
+        expect(replaceBookmarksList).not.toHaveBeenCalled();
+      });
+
+      test("an imported row inside the loaded window is listed where it sorts", async () => {
+        localStorage.setItem("listSort", "oldest");
+        from.mockReturnValue({ select: () => listQuery(asc(50)) });
+        const store = useBookmarksStore();
+        await store.fetch();
+        store.subscribeToChanges();
+
+        emitRealtime({
+          eventType: "INSERT",
+          new: makeBookmark({ id: "imported", created_at: "2025-01-01T00:00:00Z" }),
+        });
+
+        expect(store.bookmarks[0]?.id).toBe("imported");
+      });
+
+      function insertReturning(row: Bookmark) {
+        const single = vi.fn().mockResolvedValue({ data: row, error: null });
+        return { insert: () => ({ select: () => ({ single }) }) };
+      }
+
+      test("an added note is listed last once the end is loaded", async () => {
+        localStorage.setItem("listSort", "oldest");
+        from.mockReturnValueOnce({ select: () => listQuery(asc(2)) });
+        const store = useBookmarksStore();
+        await store.fetch();
+
+        from.mockReturnValueOnce(insertReturning(makeBookmark({ id: "note" })));
+        await store.addNote("hello");
+
+        expect(store.bookmarks.map((b) => b.id)).toEqual(["b0", "b1", "note"]);
+      });
+
+      test("an added note waits for loadMore while newer pages remain", async () => {
+        localStorage.setItem("listSort", "oldest");
+        from.mockReturnValueOnce({ select: () => listQuery(asc(50)) });
+        const store = useBookmarksStore();
+        await store.fetch();
+
+        from.mockReturnValueOnce(insertReturning(makeBookmark({ id: "note" })));
+        await store.addNote("hello");
+
+        expect(store.bookmarks.some((b) => b.id === "note")).toBe(false);
+      });
+    });
+  });
 });
