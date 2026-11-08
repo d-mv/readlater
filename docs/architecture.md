@@ -764,8 +764,9 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
 - **Writes** — every store write returns `WriteResult { error }` and changes
   local state only after the server accepted it (a failed write would
   otherwise leave this device showing a state delta sync never corrects,
-  since `updated_at` didn't move). `remove()` is the exception: optimistic,
-  with the row put back where it was if the delete fails. `add()` /
+  since `updated_at` didn't move). `remove()` is the exception: optimistic
+  and deferred (see **Undo** below), with the row put back where it was if
+  the delete fails. `add()` /
   `addNote()` / snippet / file imports put the returned row in place by id,
   so a Realtime INSERT that arrived first isn't listed twice.
 - **Delta sync** — the unfiltered list is persisted to IndexedDB with a sync
@@ -789,12 +790,39 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   too, `20261022110000`), `bookmark_deletions` (after-delete trigger,
   owner-read RLS, kept indefinitely; none is written when the delete comes
   from removing the auth user, whose bookmarks now cascade).
+- **Undo for archive and delete** — `stores/undo.ts` owns one notice at a
+  time, shown by `components/undo/UndoToast.vue` (mounted once in `App.vue`,
+  so it outlives the reader → list navigation; built on the shared
+  `shared/ui/Toast.vue`, an always-present `role="status"` live region) for
+  `UNDO_WINDOW_MS` = 5 s. The reader menu's Archive / Delete go through it.
+  Archive is written at once as before (offline copy evicted); Undo calls
+  `store.unarchive()` and the row reappears in its sorted place — the
+  evicted offline copy is not restored. Delete is staged:
+  `store.remove(id)` drops the row locally and records it (`stagedRemoval`
+  + the `removing` id set, which also covers a delete in flight); the server
+  delete, Storage cleanup and offline-copy/metadata eviction run only in
+  `store.commitRemove()` — when the window ends, on `pagehide` /
+  `visibilitychange`→hidden (`undo.flush()`, like reading progress; iOS
+  skips pagehide), or when a new archive/delete takes over the toast (the
+  earlier delete is committed at once). `undoRemove(id)` puts the row back
+  at its old index and nothing is sent. A refused commit puts the row back
+  and the toast shows the error (danger tone). Rows in `removing` are
+  filtered from every read that lands rows in the list (first page, search,
+  delta sync, `loadMore`, offline snapshot, Realtime INSERT) and `fetchOne`
+  returns null for them, so nothing resurrects a row the user deleted; a
+  Realtime DELETE or a delta tombstone for the staged id (deleted on another
+  device) drops the staged delete — nothing left to send or undo. Sign out
+  commits a staged delete first (bounded to 3 s, while the session still
+  works); `bookmarks.reset()` otherwise drops it, because every other reset
+  runs with the session already gone (expired, other tab, another user) —
+  the row then simply stays on the server.
 - **Live updates** — `store.subscribeToChanges()` opens one Realtime
   `postgres_changes` channel (RLS-scoped, no body columns in the payload).
   INSERT prepends (unless already listed), UPDATE merges into a loaded row
   (keeping its body and tags) but **keeps the local `updated_at`** — the
   merged row may still carry stale tags or body, and the old stamp makes the
   next delta sync replace it with the full projection. DELETE drops. An
+  INSERT for a row whose delete is staged or in flight is ignored. An
   UPDATE that only moved `progress` (the reader's saves) isn't persisted to
   IndexedDB. Replaces the former list/reader `setInterval` polls.
 - **Reader** (`ReaderView.vue`, `ArticleContent.vue`) — markdown rendered via

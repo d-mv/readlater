@@ -209,6 +209,22 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   const searchQuery = shallowRef("");
   const activeTagIds = ref<string[]>([]);
 
+  // Deletes the user can still take back (the undo toast): the row is off the
+  // list at once, but the server delete and the offline-copy eviction wait for
+  // commitRemove(). At most one is staged; `removing` also holds a delete
+  // that is in flight, until the server answers.
+  let stagedRemoval: { id: string; row: Bookmark | undefined; index: number } | null = null;
+  const removing = new Set<string>();
+  // Bumped by reset(): a delete answering after it belongs to a list that's gone.
+  let removalEpoch = 0;
+
+  // Every read that lands rows in the list (a page, a delta, the offline copy,
+  // Realtime) goes through this, so none of them can bring back a row the
+  // user just deleted while its server row still exists.
+  function withoutRemoving(rows: Bookmark[]): Bookmark[] {
+    return rows.filter((b) => !removing.has(b.id));
+  }
+
   const visibleBookmarks = computed(() => {
     const wantArchived = filter.value === "archived";
     const tagIds = activeTagIds.value;
@@ -347,7 +363,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       ({ cursor, watermark } = state);
       // Downloaded articles outside the window carry metadata of unknown age;
       // leave them for loadMore() rather than show them stale.
-      bookmarks.value = snapshot.filter((b) => inWindow(b, cursor, state.hasMore));
+      bookmarks.value = withoutRemoving(snapshot).filter((b) => inWindow(b, cursor, state.hasMore));
       listSession = { kind: "recent", cursor, watermark };
       hasMore.value = state.hasMore;
     }
@@ -361,6 +377,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     // Done before the size check: a fresh first page moves the watermark past
     // these tombstones, so this is their only chance.
     const gone = new Set(deleted.map((d) => d.bookmark_id));
+    // Deleted elsewhere already: nothing left to send, nothing to undo.
+    if (stagedRemoval && gone.has(stagedRemoval.id)) dropStagedRemoval(stagedRemoval.id);
     const offlineCache = useOfflineCacheStore();
     await Promise.all(
       [...gone].map((id) =>
@@ -387,7 +405,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     for (const row of changed) watermark = latest(watermark, row.updated_at);
     for (const d of deleted) watermark = latest(watermark, d.deleted_at);
 
-    bookmarks.value = [...byId.values()].sort(byCreatedAtDesc);
+    bookmarks.value = withoutRemoving([...byId.values()]).sort(byCreatedAtDesc);
     listSession = { kind: "recent", cursor, watermark };
     persistOfflineList();
     return true;
@@ -417,7 +435,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // unfiltered list is paged.
       const page = await queryBookmarks(query ? { query } : { limit: PAGE_SIZE });
       if (!isCurrent()) return;
-      bookmarks.value = page;
+      bookmarks.value = withoutRemoving(page);
       if (query) {
         listSession = { kind: "search", query };
         hasMore.value = false;
@@ -441,12 +459,13 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // Postgres full-text search doesn't run against the cached copy — fall
       // back to a plain substring match over title/excerpt (content_md isn't
       // cached in list metadata, so offline search can't reach article bodies).
+      const offlineRows = withoutRemoving(offlineBookmarks);
       bookmarks.value = needle
-        ? offlineBookmarks.filter(
+        ? offlineRows.filter(
             (b) =>
               b.title?.toLowerCase().includes(needle) || b.excerpt?.toLowerCase().includes(needle),
           )
-        : offlineBookmarks;
+        : offlineRows;
       listSession = { kind: "offline", query };
       hasMore.value = false;
     } finally {
@@ -470,7 +489,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // A fetch() started meanwhile (search, clear, refresh) owns the list now.
       if (generation !== listGeneration || listSession !== session) return;
       const seen = new Set(bookmarks.value.map((b) => b.id));
-      bookmarks.value = [...bookmarks.value, ...page.filter((b) => !seen.has(b.id))];
+      bookmarks.value = [
+        ...bookmarks.value,
+        ...withoutRemoving(page).filter((b) => !seen.has(b.id)),
+      ];
       // The watermark stays put: it vouches for what the last delta (and
       // Realtime) saw of the rows already loaded, and an older page's newer
       // updated_at says nothing about them. Raising it here could skip a
@@ -541,7 +563,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // leave it out until the user re-runs the search.
       if (listSession.kind !== "recent" && listSession.query !== "") return;
       const row = { ...(payload.new as Bookmark), tags: payload.new.tags ?? [] };
-      if (bookmarks.value.some((b) => b.id === row.id)) return;
+      if (removing.has(row.id) || bookmarks.value.some((b) => b.id === row.id)) return;
       // An import inserts rows with their original dates: older than the
       // loaded pages, loadMore brings them; otherwise they go where they
       // sort, not on top.
@@ -574,6 +596,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     } else {
       // DELETE — the only event type left.
       const id = (payload.old as { id?: string }).id;
+      // Deleted elsewhere while staged here: nothing left to send or undo.
+      if (id && stagedRemoval?.id === id) dropStagedRemoval(id);
       if (id) bookmarks.value = bookmarks.value.filter((b) => b.id !== id);
     }
     persistOfflineList();
@@ -600,7 +624,17 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   // Sign-out: back to the empty state a fresh load starts from. Bumping the
   // generation discards any fetch or page still in flight, so the previous
   // account's rows can't land after the reset.
+  //
+  // A staged delete is dropped, not sent: reset runs when the session is
+  // already over (expired, another tab signed out, another user signing in),
+  // so a delete now would be refused or hit the wrong account. The row stays
+  // on the server and is listed again at the same user's next sign-in. A
+  // deliberate Sign out commits it first, while the session still works
+  // (auth.signOut → undo.flush).
   function reset() {
+    stagedRemoval = null;
+    removing.clear();
+    removalEpoch += 1;
     persistAgain = false;
     listGeneration += 1;
     listSession = { kind: "recent", cursor: null, watermark: null };
@@ -875,6 +909,8 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   }
 
   async function fetchOne(id: string): Promise<Bookmark | null> {
+    // Deleted here, the server just hasn't been told yet.
+    if (removing.has(id)) return null;
     try {
       const isOffline = typeof navigator !== "undefined" && !navigator.onLine;
       if (isOffline) {
@@ -1050,23 +1086,67 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return writeResult(null);
   }
 
-  // Optimistic, unlike the other writes: the reader navigates back to the
-  // list without waiting, so the row leaves the list at once and is put back
-  // where it was if the server refuses the delete.
-  async function remove(id: string): Promise<WriteResult> {
+  // The undo toast's way back from archive().
+  async function unarchive(id: string): Promise<WriteResult> {
+    const { error } = await supabase.from("bookmarks").update({ archived: false }).eq("id", id);
+    if (error) return writeResult(error);
+    const bookmark = bookmarks.value.find((b) => b.id === id);
+    if (bookmark) bookmark.archived = false;
+    return writeResult(null);
+  }
+
+  // Optimistic, unlike the other writes: the row leaves the list at once and
+  // the server hears of it only at commitRemove() — the undo toast's window
+  // (stores/undo.ts). A delete still staged from before is committed now:
+  // one undo at a time.
+  function remove(id: string): void {
+    if (removing.has(id)) return;
+    if (stagedRemoval) void commitRemove();
     const index = bookmarks.value.findIndex((b) => b.id === id);
-    const removed = index === -1 ? undefined : bookmarks.value[index];
+    const row = index === -1 ? undefined : bookmarks.value[index];
     bookmarks.value = bookmarks.value.filter((b) => b.id !== id);
+    stagedRemoval = { id, row, index };
+    removing.add(id);
+  }
+
+  // Puts a row whose delete didn't happen back where it was.
+  function restore(removal: { id: string; row: Bookmark | undefined; index: number }) {
+    const { id, row, index } = removal;
+    if (!row || bookmarks.value.some((b) => b.id === id)) return;
+    bookmarks.value.splice(Math.min(index, bookmarks.value.length), 0, row);
+    persistOfflineList();
+  }
+
+  function dropStagedRemoval(id: string) {
+    removing.delete(id);
+    stagedRemoval = null;
+  }
+
+  // Undo: the staged delete never reaches the server.
+  function undoRemove(id: string): void {
+    const staged = stagedRemoval;
+    if (staged?.id !== id) return;
+    dropStagedRemoval(id);
+    restore(staged);
+  }
+
+  // Sends the staged delete, if any. A refused delete puts the row back
+  // where it was.
+  async function commitRemove(): Promise<WriteResult> {
+    const staged = stagedRemoval;
+    if (!staged) return writeResult(null);
+    stagedRemoval = null;
+    const { id, row } = staged;
+    const epoch = removalEpoch;
     const { error } = await supabase.from("bookmarks").delete().eq("id", id);
+    removing.delete(id);
     if (error) {
-      if (removed && !bookmarks.value.some((b) => b.id === id)) {
-        bookmarks.value.splice(Math.min(index, bookmarks.value.length), 0, removed);
-      }
+      if (epoch === removalEpoch) restore(staged);
       return writeResult(error);
     }
-    if (removed) {
+    if (row) {
       try {
-        removeStorageObjects(removed);
+        removeStorageObjects(row);
       } catch {
         // Best-effort: the server-side orphan sweep is the backstop.
       }
@@ -1171,7 +1251,10 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     markRead,
     markUnread,
     archive,
+    unarchive,
     remove,
+    undoRemove,
+    commitRemove,
     setPublic,
     addTag,
     removeTag,

@@ -186,7 +186,9 @@ on fd 3 and never sits in its env (`6c3b503`), the editor's styles use a CSP
 nonce (`d441c95`), and sign-out removes supabase-js's stored session itself
 (`20e53e3`).
 
-**Product gaps not built:** undo for archive/delete, bulk actions, sort
+**Product gaps:** undo for archive/delete — done 2026-11-08 (toast with
+Undo, delete deferred 5 s; architecture "Undo for archive and delete"; an
+undone archive doesn't restore the evicted offline copy). Not built: bulk actions, sort
 options, offline full-text search, keyboard shortcuts, audit log,
 capture-key rotation, share-link revoke UI.
 

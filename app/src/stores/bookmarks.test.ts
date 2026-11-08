@@ -1751,7 +1751,8 @@ describe("useBookmarksStore", () => {
 
     const store = useBookmarksStore();
     await store.fetch();
-    await store.remove("1");
+    store.remove("1");
+    await store.commitRemove();
 
     expect(del).toHaveBeenCalled();
     expect(eq).toHaveBeenCalledWith("id", "1");
@@ -1768,7 +1769,8 @@ describe("useBookmarksStore", () => {
       });
       const store = useBookmarksStore();
       await store.fetch();
-      return store.remove(row.id);
+      store.remove(row.id);
+      return store.commitRemove();
     }
 
     test("the original PDF and a thumbnail in our assets bucket are removed", async () => {
@@ -1863,7 +1865,8 @@ describe("useBookmarksStore", () => {
 
       const store = useBookmarksStore();
       await store.fetch();
-      const result = await store.remove("2");
+      store.remove("2");
+      const result = await store.commitRemove();
 
       expect(result.error).toBeTruthy();
       expect(store.bookmarks.map((b) => b.id)).toEqual(["1", "2", "3"]);
@@ -3455,7 +3458,8 @@ describe("useBookmarksStore", () => {
       const store = useBookmarksStore();
       store.bookmarks = [makeBookmark({ id: "1" })];
 
-      const result = await store.remove("1");
+      store.remove("1");
+      const result = await store.commitRemove();
 
       expect(result.error).toBeNull();
       expect(store.bookmarks).toEqual([]);
@@ -3471,7 +3475,8 @@ describe("useBookmarksStore", () => {
         }),
       ];
 
-      await store.remove("1");
+      store.remove("1");
+      await store.commitRemove();
 
       expect(storageRemoveFrom).not.toHaveBeenCalled();
     });
@@ -3482,7 +3487,8 @@ describe("useBookmarksStore", () => {
       });
       const store = useBookmarksStore();
 
-      const result = await store.remove("elsewhere");
+      store.remove("elsewhere");
+      const result = await store.commitRemove();
 
       expect(result.error).toBeTruthy();
       expect(store.bookmarks).toEqual([]);
@@ -3493,12 +3499,343 @@ describe("useBookmarksStore", () => {
       from.mockReturnValue({ delete: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }) });
       const store = useBookmarksStore();
 
-      const result = await store.remove("elsewhere");
+      store.remove("elsewhere");
+      const result = await store.commitRemove();
 
       expect(result.error).toBeNull();
       expect(deleteBookmarkMeta).toHaveBeenCalledWith("elsewhere");
       expect(removeCachedBookmark).toHaveBeenCalledWith("elsewhere");
       expect(storageRemoveFrom).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("deferred remove (undo)", () => {
+    const row = (id: string, created: string, updated = created, extra: Partial<Bookmark> = {}) =>
+      makeBookmark({
+        id,
+        created_at: `2026-10-${created}T00:00:00Z`,
+        updated_at: `2026-10-${updated}T00:00:00Z`,
+        ...extra,
+      });
+    const threeRows = () => [row("c", "03"), row("b", "02"), row("a", "01")];
+
+    /** bookmarks reads answer `rows` (then `later`), deletions `tombstones`; deletes go to `del`. */
+    function backend(
+      rows: Bookmark[],
+      opts: { deleteError?: unknown; tombstones?: unknown[]; later?: Bookmark[] } = {},
+    ) {
+      const eq = vi.fn().mockResolvedValue({ error: opts.deleteError ?? null });
+      const del = vi.fn(() => ({ eq }));
+      let reads = 0;
+      from.mockImplementation((table: string) => ({
+        select: () => {
+          if (table === "bookmark_deletions") return listQuery(opts.tombstones ?? []);
+          reads += 1;
+          return listQuery(reads > 1 && opts.later ? opts.later : rows);
+        },
+        delete: del,
+      }));
+      return { del, eq };
+    }
+
+    test("remove takes the row off the list at once but deletes nothing yet", async () => {
+      const { del } = backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      store.remove("b");
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "a"]);
+      expect(del).not.toHaveBeenCalled();
+      expect(deleteBookmarkMeta).not.toHaveBeenCalled();
+      expect(removeCachedBookmark).not.toHaveBeenCalled();
+    });
+
+    test("commitRemove deletes on the server and evicts the offline copy", async () => {
+      const { eq } = backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+
+      const result = await store.commitRemove();
+
+      expect(result.error).toBeNull();
+      expect(eq).toHaveBeenCalledWith("id", "b");
+      expect(deleteBookmarkMeta).toHaveBeenCalledWith("b");
+      expect(removeCachedBookmark).toHaveBeenCalledWith("b");
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "a"]);
+    });
+
+    test("commitRemove with nothing pending sends nothing", async () => {
+      const { del } = backend([]);
+      const store = useBookmarksStore();
+
+      expect(await store.commitRemove()).toEqual({ error: null });
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    test("undoRemove puts the row back where it was and nothing is ever deleted", async () => {
+      const { del } = backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+      replaceBookmarksList.mockClear();
+
+      store.undoRemove("b");
+      await store.commitRemove();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "b", "a"]);
+      expect(del).not.toHaveBeenCalled();
+      expect(replaceBookmarksList).toHaveBeenCalled();
+    });
+
+    test("undoRemove of an id that isn't pending changes nothing", async () => {
+      const { del } = backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+
+      store.undoRemove("a");
+      await store.commitRemove();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "a"]);
+      expect(del).toHaveBeenCalledTimes(1);
+    });
+
+    test("undoing the delete of a row that wasn't loaded puts nothing back", () => {
+      backend([]);
+      const store = useBookmarksStore();
+      store.remove("elsewhere");
+
+      store.undoRemove("elsewhere");
+
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("a second remove commits the first at once; only the second waits", async () => {
+      const { eq } = backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      store.remove("b");
+      store.remove("c");
+
+      expect(eq.mock.calls).toEqual([["id", "b"]]);
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["a"]);
+      store.undoRemove("c");
+      await vi.waitFor(() => expect(deleteBookmarkMeta).toHaveBeenCalledWith("b"));
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "a"]);
+    });
+
+    test("removing the pending row again doesn't commit it", async () => {
+      const { del } = backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      store.remove("b");
+      store.remove("b");
+      store.undoRemove("b");
+
+      expect(del).not.toHaveBeenCalled();
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "b", "a"]);
+    });
+
+    test("reset drops a pending delete: without the session it can't be sent", async () => {
+      const { del } = backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+
+      store.reset();
+      await store.commitRemove();
+
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    test("a refused delete answering after a reset doesn't put the old row back", async () => {
+      let answer: (value: { error: unknown }) => void = () => {};
+      const eq = vi.fn(() => new Promise<{ error: unknown }>((resolve) => (answer = resolve)));
+      from.mockImplementation(() => ({
+        select: () => listQuery(threeRows()),
+        delete: () => ({ eq }),
+      }));
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+      const committing = store.commitRemove();
+
+      store.reset();
+      answer({ error: { message: "down" } });
+
+      expect((await committing).error).toBeTruthy();
+      expect(store.bookmarks).toEqual([]);
+    });
+
+    test("a Realtime INSERT of the pending row doesn't bring it back", async () => {
+      backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+      store.remove("b");
+
+      emitRealtime({ eventType: "INSERT", new: row("b", "02") });
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "a"]);
+    });
+
+    test("a Realtime DELETE of the pending row (deleted elsewhere) leaves nothing to undo or send", async () => {
+      const { del } = backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+      store.remove("b");
+
+      emitRealtime({ eventType: "DELETE", old: { id: "b" } });
+      store.undoRemove("b");
+      await store.commitRemove();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "a"]);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    test("a delta sync doesn't bring back the pending row", async () => {
+      backend(threeRows(), { later: [row("b", "02", "09", { title: "Edited elsewhere" })] });
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "a"]);
+    });
+
+    test("a tombstone for the pending row leaves nothing to undo or send", async () => {
+      const { del } = backend(threeRows(), {
+        later: [],
+        tombstones: [{ bookmark_id: "b", deleted_at: "2026-10-09T00:00:00Z" }],
+      });
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+
+      await store.fetch();
+      store.undoRemove("b");
+      await store.commitRemove();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "a"]);
+      expect(del).not.toHaveBeenCalled();
+    });
+
+    test("a row whose delete is in flight isn't brought back by a sync either", async () => {
+      let answer: (value: { error: null }) => void = () => {};
+      const eq = vi.fn(() => new Promise<{ error: null }>((resolve) => (answer = resolve)));
+      from.mockImplementation((table: string) => ({
+        select: () => listQuery(table === "bookmark_deletions" ? [] : threeRows()),
+        delete: () => ({ eq }),
+      }));
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+      const committing = store.commitRemove();
+
+      await store.fetch();
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["c", "a"]);
+      answer({ error: null });
+      await committing;
+    });
+
+    test("a fresh page and an older page leave the pending row out", async () => {
+      const page = Array.from({ length: 50 }, (_, i) =>
+        row(`p${i}`, String(28 - Math.floor(i / 2)).padStart(2, "0")),
+      );
+      // The older page re-sends the row, as a page boundary shifting would.
+      const older = [page[3]!];
+      let reads = 0;
+      from.mockImplementation(() => ({
+        select: () => listQuery((reads += 1) === 4 ? older : page),
+        delete: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }),
+      }));
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("p3");
+
+      // A search re-reads a fresh result set.
+      store.setSearchQuery("x");
+      await store.fetch();
+      expect(store.bookmarks.some((b) => b.id === "p3")).toBe(false);
+      store.setSearchQuery("");
+      await store.fetch();
+      await store.loadMore();
+
+      expect(store.bookmarks.some((b) => b.id === "p3")).toBe(false);
+    });
+
+    test("the offline list leaves the pending row out", async () => {
+      backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+      getBookmarksList.mockResolvedValue(threeRows().map((b) => ({ ...b, content_md: undefined })));
+      downloaded("a", "b", "c");
+      authState.session = null;
+      authState.checkSession.mockResolvedValue(false);
+
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id).sort()).toEqual(["a", "c"]);
+    });
+
+    test("fetchOne of the pending row finds nothing", async () => {
+      backend(threeRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("b");
+      from.mockClear();
+
+      expect(await store.fetchOne("b")).toBeNull();
+      expect(from).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("unarchive", () => {
+    test("puts an archived row back in the list", async () => {
+      const eq = vi.fn().mockResolvedValue({ error: null });
+      const update = vi.fn(() => ({ eq }));
+      from.mockReturnValue({
+        select: () => listQuery([makeBookmark({ id: "1", archived: true })]),
+        update,
+      });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      const result = await store.unarchive("1");
+
+      expect(result.error).toBeNull();
+      expect(update).toHaveBeenCalledWith({ archived: false });
+      expect(eq).toHaveBeenCalledWith("id", "1");
+      expect(store.bookmarks[0]?.archived).toBe(false);
+    });
+
+    test("a refused unarchive keeps the row archived", async () => {
+      const eq = vi.fn().mockResolvedValue({ error: { message: "down" } });
+      from.mockReturnValue({
+        select: () => listQuery([makeBookmark({ id: "1", archived: true })]),
+        update: () => ({ eq }),
+      });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      const result = await store.unarchive("1");
+
+      expect(result.error).toBeTruthy();
+      expect(store.bookmarks[0]?.archived).toBe(true);
+    });
+
+    test("unarchiving a row that isn't loaded only writes to the server", async () => {
+      from.mockReturnValue({ update: () => ({ eq: vi.fn().mockResolvedValue({ error: null }) }) });
+      const store = useBookmarksStore();
+
+      expect(await store.unarchive("elsewhere")).toEqual({ error: null });
     });
   });
 });

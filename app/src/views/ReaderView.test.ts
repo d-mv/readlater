@@ -41,6 +41,7 @@ vi.mock("vue-router", () => ({ useRouter: () => ({ push: pushMock }) }));
 const { default: ReaderView } = await import("./ReaderView.vue");
 const { useBookmarksStore } = await import("../stores/bookmarks");
 const { useOfflineCacheStore } = await import("../stores/offlineCache");
+const { useUndoStore } = await import("../stores/undo");
 
 function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
   return {
@@ -659,17 +660,11 @@ describe("ReaderView", () => {
   });
 
   describe("deleting", () => {
-    test("navigates back to the list immediately without awaiting deletion response from store", async () => {
-      let resolveRemove: (val?: unknown) => void = () => {};
-      const removePromise = new Promise((res) => {
-        resolveRemove = res;
-      });
+    test("navigates back to the list at once and leaves the server delete to the undo window", async () => {
       const ready = makeBookmark({ id: "1", status: "ready" });
       const single = vi.fn().mockResolvedValue({ data: ready, error: null });
-      const eqSelect = vi.fn(() => ({ single }));
-      const select = vi.fn(() => ({ eq: eqSelect }));
-      const eqDelete = vi.fn().mockReturnValue(removePromise);
-      const deleteFn = vi.fn(() => ({ eq: eqDelete }));
+      const select = vi.fn(() => ({ eq: vi.fn(() => ({ single })) }));
+      const deleteFn = vi.fn();
       from.mockReturnValue({ select, delete: deleteFn });
       vi.spyOn(window, "confirm").mockReturnValue(true);
 
@@ -680,9 +675,10 @@ describe("ReaderView", () => {
       await wrapper.find('[data-testid="delete-item"]').trigger("click");
 
       expect(pushMock).toHaveBeenCalledWith({ name: "list" });
-
-      resolveRemove({ error: null });
-      await flushPromises();
+      expect(useUndoStore().notice).toEqual({ kind: "deleted", id: "1" });
+      expect(useBookmarksStore().bookmarks.some((b) => b.id === "1")).toBe(false);
+      expect(deleteFn).not.toHaveBeenCalled();
+      useUndoStore().reset();
     });
   });
 
@@ -1023,6 +1019,8 @@ describe("ReaderView", () => {
 
       expect(archive).toHaveBeenCalledWith("1");
       expect(pushMock).toHaveBeenCalledWith({ name: "list" });
+      expect(useUndoStore().notice).toEqual({ kind: "archived", id: "1" });
+      useUndoStore().reset();
     });
 
     test("Mark as read and Mark as unread write through the store", async () => {

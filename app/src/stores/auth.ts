@@ -5,6 +5,12 @@ import { AUTH_STORAGE_KEY, supabase } from "../lib/supabase";
 import * as offlineDb from "../lib/offlineDb";
 import { useBookmarksStore } from "./bookmarks";
 import { useOfflineCacheStore } from "./offlineCache";
+import { useUndoStore } from "./undo";
+
+// How long Sign out waits for a delete still in its undo window. Bounded so a
+// network that never answers can't hold the sign-out up; the request is sent
+// either way.
+const SIGN_OUT_FLUSH_MS = 3000;
 
 const OFFLINE_AUTH_KEY = "rl-auth-user";
 // The user whose list, sync state and downloads IndexedDB holds. Unlike
@@ -87,6 +93,7 @@ export const useAuthStore = defineStore("auth", () => {
     bookmarks.unsubscribeFromChanges();
     bookmarks.reset();
     useOfflineCacheStore().reset();
+    useUndoStore().reset();
   }
 
   // Everything of the current account on the device, IndexedDB included.
@@ -234,6 +241,12 @@ export const useAuthStore = defineStore("auth", () => {
   // articles) go before the session itself. Local cleanup is best-effort and
   // never blocks the sign-out.
   async function signOut() {
+    // A delete still in its undo window goes first, while the session can
+    // still send it (reset() would drop it — see bookmarks.reset).
+    await Promise.race([
+      useUndoStore().flush(),
+      new Promise<void>((resolve) => setTimeout(resolve, SIGN_OUT_FLUSH_MS)),
+    ]);
     await clearDevice();
     endSession();
     // supabase-js refreshes an expired token before signing out and, if that

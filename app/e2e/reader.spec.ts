@@ -131,6 +131,7 @@ test("archive moves the article to the Archived tab", async ({ page, backend }) 
 test("delete asks first, then removes the article", async ({ page, backend }) => {
   const bookmark = backend.addBookmark({ title: "Delete me" });
   backend.addBookmark({ title: "Keep me" });
+  await page.clock.install();
   await page.goto("/");
   await row(page, "Delete me").getByRole("button").first().click();
 
@@ -143,11 +144,14 @@ test("delete asks first, then removes the article", async ({ page, backend }) =>
   await menuAction(page, "delete-item");
   await expect(page).toHaveURL(/\/$/);
   await expect(rows(page).getByTestId("title")).toHaveText(["Keep me"]);
+  // Sent once the undo window is over.
+  await page.clock.fastForward(5000);
   await expect.poll(() => backend.bookmark(bookmark.id)).toBeUndefined();
 });
 
 test("a delete the server refuses puts the row back in the list", async ({ page, backend }) => {
   const bookmark = backend.addBookmark({ title: "Undeletable" });
+  await page.clock.install();
   await page.goto("/");
   await row(page, "Undeletable").getByRole("button").first().click();
   backend.fail((c) => c.method === "DELETE" && c.name === "bookmarks");
@@ -155,7 +159,13 @@ test("a delete the server refuses puts the row back in the list", async ({ page,
   await menuAction(page, "delete-item");
 
   await expect(page).toHaveURL(/\/$/);
+  await expect(rows(page)).toHaveCount(0);
+  await page.clock.fastForward(5000);
+
   await expect(rows(page).getByTestId("title")).toHaveText(["Undeletable"]);
+  await expect(page.getByTestId("undo-toast-message")).toHaveText(
+    "Couldn't save the change. Check your connection and try again.",
+  );
   expect(backend.bookmark(bookmark.id)).toBeDefined();
 });
 

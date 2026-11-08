@@ -16,25 +16,34 @@ vi.mock("../lib/supabase", () => ({
   },
 }));
 
-const { calls, unsubscribeFromChanges, resetBookmarks, resetOfflineCache, clearAll } = vi.hoisted(
-  () => {
-    const calls: string[] = [];
-    const record = (name: string) => vi.fn(() => void calls.push(name));
-    return {
-      calls,
-      unsubscribeFromChanges: record("unsubscribe"),
-      resetBookmarks: record("resetBookmarks"),
-      resetOfflineCache: record("resetOfflineCache"),
-      clearAll: vi.fn(async () => void calls.push("clearAll")),
-    };
-  },
-);
+const {
+  calls,
+  unsubscribeFromChanges,
+  resetBookmarks,
+  resetOfflineCache,
+  resetUndo,
+  flushUndo,
+  clearAll,
+} = vi.hoisted(() => {
+  const calls: string[] = [];
+  const record = (name: string) => vi.fn(() => void calls.push(name));
+  return {
+    calls,
+    unsubscribeFromChanges: record("unsubscribe"),
+    resetBookmarks: record("resetBookmarks"),
+    resetOfflineCache: record("resetOfflineCache"),
+    resetUndo: record("resetUndo"),
+    flushUndo: vi.fn(async () => void calls.push("flushUndo")),
+    clearAll: vi.fn(async () => void calls.push("clearAll")),
+  };
+});
 vi.mock("./bookmarks", () => ({
   useBookmarksStore: () => ({ unsubscribeFromChanges, reset: resetBookmarks }),
 }));
 vi.mock("./offlineCache", () => ({
   useOfflineCacheStore: () => ({ reset: resetOfflineCache }),
 }));
+vi.mock("./undo", () => ({ useUndoStore: () => ({ reset: resetUndo, flush: flushUndo }) }));
 vi.mock("../lib/offlineDb", () => ({ clearAll }));
 
 const { AuthRetryableFetchError, AuthApiError, AuthSessionMissingError } =
@@ -62,7 +71,7 @@ describe("useAuthStore", () => {
     vi.restoreAllMocks();
   });
 
-  test("signOut drops Realtime, the in-memory list and IndexedDB before signing out", async () => {
+  test("signOut sends a delete still waiting for undo, then drops Realtime, the in-memory list and IndexedDB before signing out", async () => {
     storeOfflineUser();
     signOut.mockImplementation(async () => {
       calls.push("signOut");
@@ -73,9 +82,11 @@ describe("useAuthStore", () => {
     await store.signOut();
 
     expect(calls).toEqual([
+      "flushUndo",
       "unsubscribe",
       "resetBookmarks",
       "resetOfflineCache",
+      "resetUndo",
       "clearAll",
       "signOut",
     ]);
@@ -525,7 +536,7 @@ describe("useAuthStore", () => {
       const store = useAuthStore();
       await store.sessionExpired();
 
-      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache"]);
+      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache", "resetUndo"]);
       expect(clearAll).not.toHaveBeenCalled();
     });
 
@@ -539,7 +550,7 @@ describe("useAuthStore", () => {
 
       onChange("SIGNED_OUT", null);
 
-      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache"]);
+      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache", "resetUndo"]);
     });
 
     test("init finding the session over drops the in-memory list", async () => {
@@ -547,7 +558,7 @@ describe("useAuthStore", () => {
 
       await useAuthStore().init();
 
-      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache"]);
+      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache", "resetUndo"]);
     });
   });
 
@@ -580,7 +591,13 @@ describe("useAuthStore", () => {
       const result = await useAuthStore().signIn("b@b.c", "pw");
 
       expect(result.error).toBeNull();
-      expect(calls).toEqual(["unsubscribe", "resetBookmarks", "resetOfflineCache", "clearAll"]);
+      expect(calls).toEqual([
+        "unsubscribe",
+        "resetBookmarks",
+        "resetOfflineCache",
+        "resetUndo",
+        "clearAll",
+      ]);
       expect(localStorage.getItem("rl-data-owner")).toBe("u2");
     });
 

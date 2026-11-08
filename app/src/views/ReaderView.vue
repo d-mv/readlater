@@ -15,6 +15,7 @@ import { IconLoader2, IconAlertTriangle, IconRefresh } from "@tabler/icons-vue";
 import type { Bookmark } from "../lib/supabase";
 import { useBookmarksStore, type WriteResult } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
+import { useUndoStore } from "../stores/undo";
 import { useScrollProgress } from "../composables/useScrollProgress";
 import { useDebouncedFn } from "../composables/useDebouncedFn";
 import { readerByline } from "../utils/format";
@@ -33,6 +34,7 @@ const props = defineProps<{
 
 const router = useRouter();
 const store = useBookmarksStore();
+const undo = useUndoStore();
 const offlineCache = useOfflineCacheStore();
 
 const bookmark = computed(() => store.bookmarks.find((b) => b.id === props.id) ?? null);
@@ -281,14 +283,15 @@ function onBack() {
   router.push({ name: "list" });
 }
 
+// Both offer Undo in the app-level toast, which outlives this view.
 async function onArchive() {
-  if (await run(store.archive(props.id))) router.push({ name: "list" });
+  if (await run(undo.archive(props.id))) router.push({ name: "list" });
 }
 
-// Doesn't wait for the server: the row leaves the list at once and comes back
-// if the delete fails (see store.remove).
+// The row leaves the list at once; the server delete waits for the undo
+// window to pass (see stores/undo.ts), and the row comes back if it fails.
 function onDelete() {
-  store.remove(props.id);
+  undo.remove(props.id);
   router.push({ name: "list" });
 }
 
