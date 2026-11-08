@@ -1142,14 +1142,37 @@ the per-project Supabase CLI wrapper; `supabase.id` names the profile.)
   `~/backups/read-later/<UTC timestamp>/`, outside the repo so a deploy's
   rsync can never ship a dump (it holds auth.users password hashes) to the
   server. Override with `BACKUP_DIR`.
-- **Restore** — bring the target to the same migrations (`sb db push` to a
-  new project, or a local `db reset`), then
-  `bash scripts/restore.sh <backup dir> <postgres URL>`: one transaction,
-  triggers off, replaces all rows in public, auth and storage metadata. It
-  refuses a hosted URL unless `RESTORE_TO_HOSTED=1`. Then upload the Storage
-  objects with the `sb storage cp` loop it prints.
+- **Nightly on the VPS** — `ops/backup/readlater-backup.sh`, installed as
+  `/usr/local/sbin/readlater-backup` and run by `readlater-backup.timer`
+  (03:30 server time, ±20 min; a missed night runs at boot). Same layout as
+  `scripts/backup.sh` plus `vault-secret-names.txt`, into
+  `/var/backups/readlater/<UTC stamp>/` (root-only); 14 days kept;
+  `/var/backups/readlater/last-success` holds the last good run. pg_dump
+  (`postgres:17.6-alpine`) and the AWS CLI (`amazon/aws-cli:2.31.0`, against
+  Storage's S3 endpoint) run in containers that get the credentials only via
+  `--env-file /etc/readlater-backup.env` (root, 600; layout in
+  `ops/backup/backup.env.example`): the session-pooler Postgres login and a
+  Storage-only S3 key — no account-wide access token on the server.
+  Install/update: `bash ops/backup/install.sh` (enables the timer once the
+  env file exists). Check: `systemctl status readlater-backup.service`,
+  `journalctl -u readlater-backup`.
+- **Vault secrets are not in any backup** (only their names). Both are
+  recreated from the dashboard after a restore: `project_url` and
+  `service_role_key`, with the `vault.create_secret` calls in §8.
+- **Restore** — in this order:
+  1. bring the target to the same migrations (`sb db push` to a new
+     project, or a local `db reset`);
+  2. `bash scripts/restore.sh <backup dir> <postgres URL>`: one transaction,
+     triggers off, replaces all rows in public, auth and storage metadata.
+     It refuses a hosted URL unless `RESTORE_TO_HOSTED=1`;
+  3. upload the Storage objects to the same target with the `aws s3 cp`
+     loop it prints, using that target's S3 keys (not `sb storage cp
+     --linked`, which writes to production);
+  4. recreate the Vault secrets (above), then deploy the edge functions.
 - Verified 2026-10-12 by restoring a production backup into the isolated
-  local test stack (101 bookmarks, 2 tags, 1 user, 2 objects).
+  local test stack (101 bookmarks, 2 tags, 1 user, 2 objects), and
+  2026-11-08 end to end for the VPS job: backup of the local test stack →
+  `db reset` → steps 2–3 (rows, user and Storage object back).
 
 ## 9. Development & testing
 

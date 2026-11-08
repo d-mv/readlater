@@ -1,0 +1,12 @@
+[Unit]
+Description=Read Later production backup (database + Storage)
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/readlater-backup
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=1h

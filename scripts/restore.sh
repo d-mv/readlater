@@ -39,8 +39,11 @@ psql "$db_url" -tA -c "select 'bookmarks=' || (select count(*) from public.bookm
   || ' storage objects=' || (select count(*) from storage.objects)"
 
 cat <<EOF
-✔ database restored. Upload the Storage objects to the target project:
+✔ database restored. Upload the Storage objects to the SAME target, with an
+  env file holding that target's S3 keys (layout: ops/backup/backup.env.example).
+  Not \`sb storage cp --linked\`: that writes to the linked (production) project.
   for b in bookmark-pdfs bookmark-assets; do
-    sb storage cp --experimental --linked -r "$backup/storage/\$b" ss:///
+    docker run --rm --env-file <target env file> -v "$backup/storage:/in" \\
+      amazon/aws-cli:2.31.0 s3 cp --recursive "/in/\$b" "s3://\$b"
   done
 EOF
