@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { domainFromUrl, listRowMeta, readerByline } from "./format";
+import { domainFromUrl, listRowMeta, readerByline, shortDate } from "./format";
 
 describe("domainFromUrl", () => {
   test("strips protocol and www", () => {
@@ -59,5 +59,14 @@ describe("readerByline", () => {
 
   test("omits the byline prefix when there is no author", () => {
     expect(readerByline({ author: null, reading_time: 6 })).toBe("6 min read");
+  });
+});
+
+describe("shortDate", () => {
+  test("formats an ISO timestamp as a short date: year, day, and no time of day", () => {
+    const text = shortDate("2026-11-03T10:00:00Z");
+    expect(text).toMatch(/2026/);
+    expect(text).toMatch(/\b3\b/);
+    expect(text).not.toMatch(/10:00|:/);
   });
 });

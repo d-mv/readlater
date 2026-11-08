@@ -87,8 +87,10 @@ test("the reader fits the viewport with long code lines and unbroken words", asy
 
 test("settings and the login screen fit the viewport", async ({ page, backend }) => {
   backend.addBookmark();
+  backend.addBookmark({ title: "A".repeat(120), is_public: true });
   await page.goto("/settings");
   await expect(page.getByTestId("export-btn")).toBeVisible();
+  await expect(page.getByTestId("shared-link")).toBeVisible();
   await expectNoHorizontalScroll(page);
 
   await page.getByTestId("sign-out-btn").click();

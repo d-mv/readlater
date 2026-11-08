@@ -997,12 +997,23 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   against existing normalized URLs and is batched: one existing-URL select,
   one bulk bookmark insert, one bulk tag upsert, one bulk `bookmark_tags`
   upsert. Export and the existing-URL select page with `.range()` in
-  1000-row steps (PostgREST's `max_rows`). **Sign out** lives here too (§7).
+  1000-row steps (PostgREST's `max_rows`). **Shared links**
+  (`components/settings/SharedLinksSection.vue` +
+  `composables/useSharedLinks.ts`): one RLS-scoped read of the owner's
+  `is_public = true` rows (`id, title, url, created_at`, newest first, no
+  paging — far under `max_rows`), each with its `/s/:id` link (opens in a new
+  tab), a copy button (`utils/clipboard.ts`, announced through an sr-only
+  status) and **Revoke**, which goes through `store.setPublic(id, false)` —
+  the share dialog's write, so a loaded list row updates too — and drops the
+  row on success (the error is shown and the row kept otherwise). Loading,
+  error (with Try again) and empty states; a load generation keeps a late
+  read or revoke from overwriting a newer one. **Sign out** lives here too (§7).
 - **Sharing** (`ShareDialog.vue`) — toggle bound to `bookmark.is_public`
   (`store.setPublic()`), a read-only `/s/:id` link with copy button and
   `navigator.share()` where available. First-time enabling a share gets a
   confirm step (enumeration caveat, §2); unsharing is a plain toggle-off
-  (reversible, same link if re-shared since the id is stable).
+  (reversible, same link if re-shared since the id is stable). Every shared
+  link can also be reviewed and revoked in one place, Settings → Shared links.
 - **Public view** (`PublicReaderView.vue`, route `/s/:id`) — reuses
   `ArticleContent.vue`, no reader actions, fetches via the
   `get_public_bookmark` RPC rather than the authed store path. The router's

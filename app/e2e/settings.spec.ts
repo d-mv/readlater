@@ -105,6 +105,8 @@ test("export downloads every bookmark with its tags as JSON", async ({ page, bac
 
 test("a failed export shows an error", async ({ page, backend }) => {
   await page.goto("/settings");
+  // The shared-links section reads bookmarks too; let it finish first.
+  await expect(page.getByTestId("shared-links")).toHaveAttribute("aria-busy", "false");
   backend.fail((c) => c.name === "bookmarks" && c.method === "GET", {
     body: { code: "XX000", message: "export broke", details: null, hint: null },
   });

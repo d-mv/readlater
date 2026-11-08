@@ -8,6 +8,7 @@ import type { SkippedRow } from "../utils/dataTransfer";
 import Button from "../shared/ui/Button.vue";
 import IconButton from "../shared/ui/IconButton.vue";
 import Message from "../shared/ui/Message.vue";
+import SharedLinksSection from "../components/settings/SharedLinksSection.vue";
 
 const router = useRouter();
 const store = useDataTransferStore();
@@ -154,6 +155,8 @@ async function onFileSelected(event: Event) {
         </li>
       </ul>
     </section>
+
+    <SharedLinksSection />
 
     <section class="mb-16 rounded-sm border border-line bg-raised p-20">
       <h2 class="label m-0 mb-12">Account</h2>

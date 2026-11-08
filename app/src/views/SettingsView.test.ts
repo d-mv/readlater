@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { flushPromises, mount } from "@vue/test-utils";
+import { config, flushPromises, mount } from "@vue/test-utils";
 import { EXPORT_VERSION } from "../utils/dataTransfer";
 
 const { from } = vi.hoisted(() => ({ from: vi.fn() }));
@@ -10,6 +10,9 @@ vi.mock("../stores/auth", () => ({ useAuthStore: () => ({ userId: "user-1", sign
 
 const { push, replace } = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() }));
 vi.mock("vue-router", () => ({ useRouter: () => ({ push, replace }) }));
+
+// The sections that load their own data have their own tests.
+config.global.stubs = { SharedLinksSection: true };
 
 const { default: SettingsView } = await import("./SettingsView.vue");
 const { useDataTransferStore } = await import("../stores/dataTransfer");
@@ -36,6 +39,11 @@ describe("SettingsView", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  test("shows the shared-links section", () => {
+    const wrapper = mount(SettingsView);
+    expect(wrapper.findComponent({ name: "SharedLinksSection" }).exists()).toBe(true);
   });
 
   test("Back navigates to the reading list", async () => {

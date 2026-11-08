@@ -194,8 +194,10 @@ Keyboard shortcuts — done 2026-11-08 (list and reader, `?` for help;
 architecture "Keyboard shortcuts"). Bulk actions — done 2026-11-08
 (Select in the list header, `x`/Escape; Archive or Unarchive, Delete, Mark
 read, Save offline; one `id=in.(…)` request per action, archive/unarchive/
-delete undoable as a batch; architecture "Bulk actions"). Not built: offline
-full-text search, audit log, capture-key rotation, share-link revoke UI.
+delete undoable as a batch; architecture "Bulk actions"). Share-link revoke
+UI — done 2026-11-08 (Settings → Shared links: every public bookmark with
+its link, copy and Revoke via `store.setPublic`). Not built: offline
+full-text search, audit log, capture-key rotation.
 
 ---
 

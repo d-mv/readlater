@@ -34,3 +34,12 @@ export function readerByline({ author, reading_time }: ReaderBylineInput): strin
   if (!author) return timePart;
   return timePart ? `By ${author} · ${timePart}` : `By ${author}`;
 }
+
+// "Nov 3, 2026" (in the viewer's locale) for a stored timestamp.
+export function shortDate(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
