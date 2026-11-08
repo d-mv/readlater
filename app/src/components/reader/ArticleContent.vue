@@ -238,7 +238,9 @@ const safeHtml = computed(() =>
          highlight.js from unpkg.com, which the CSP (nginx.conf) blocks.
          no-img-zoom-in: preview images aren't worth a zoom overlay, and
          medium-zoom is aliased to its build that injects no <style>
-         (vite.config.ts). -->
+         (vite.config.ts).
+         preview-theme="reader": a theme md-editor has no CSS for, so the
+         preview takes the reader's .prose styling (lib/editor.css). -->
 
     <MdEditor
       v-if="editing"
@@ -246,6 +248,7 @@ const safeHtml = computed(() =>
       :model-value="modelValue ?? ''"
       @update:model-value="emit('update:modelValue', $event)"
       :theme="themeStore.theme"
+      preview-theme="reader"
       :toolbars="editorToolbars"
       :preview="!isNarrowViewport"
       :sanitize="sanitizeHtml"

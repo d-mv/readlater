@@ -12,6 +12,10 @@ import { VitePWA } from "vite-plugin-pwa";
 const EDITOR_PACKAGE =
   /node_modules\/(md-editor-v3|@codemirror\/|@lezer\/|@vavt\/|@marijn\/|@lucide\/vue|markdown-it-(image-figures|sub|sup)|medium-zoom|style-mod|w3c-keyname|crelt)/;
 
+// md-editor's stylesheet reaches the build through the app's overrides on
+// it (src/lib/editor.css), so that file names the emitted CSS asset.
+const EDITOR_STYLESHEET = /md-editor-v3|src\/lib\/editor\.css$/;
+
 function isEditorChunk(moduleIds: readonly string[]): boolean {
   return moduleIds.length > 0 && moduleIds.every((id) => EDITOR_PACKAGE.test(id));
 }
@@ -51,7 +55,7 @@ export default defineConfig({
             ? "assets/editor/[name]-[hash].js"
             : "assets/[name]-[hash].js",
         assetFileNames: (asset) =>
-          asset.originalFileNames.some((name) => name.includes("md-editor-v3"))
+          asset.originalFileNames.some((name) => EDITOR_STYLESHEET.test(name))
             ? "assets/editor/[name]-[hash][extname]"
             : "assets/[name]-[hash][extname]",
       },

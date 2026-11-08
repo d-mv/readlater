@@ -82,10 +82,14 @@ fidelity and phone single-pane checks are real-browser e2e tests now
   no YouTube row without one); real-browser check of the click-to-play embed
   — the `youtube-nocookie.com/embed/<id>` URL shape still loads under the
   app's CSP, and the embed now autoplays after the tap (app 0.9.33).
-- **Editor theming depth** — theme switching is wired; matching the Braun
-  tokens (`main.css`) is not. Revisit if it feels off-brand. CodeMirror's
-  injected styles are allowed by a per-response CSP nonce (`d441c95`);
-  browsers without `style-src-elem` (Safari < 15.4) show the editor unstyled.
+- **Done 2026-11-08: editor theming depth** — the editor wears the Braun
+  tokens, type and 2px radius, and its preview the reader's `.prose`, in
+  both themes (`app/src/lib/editor.css`, the CodeMirror theme in
+  `lib/editor.ts`; `e2e/editor.spec.ts` checks colours and preview type).
+  Left as they are: md-editor's `<figure>` around a lone image (the reader's
+  `<p>`) and slightly tighter code-block lines. CodeMirror's injected styles
+  are still allowed by the per-response CSP nonce (`d441c95`); browsers
+  without `style-src-elem` (Safari < 15.4) show the editor unstyled.
 - **Offline editing** — out of scope; would need a write queue-and-replay that
   no write in the app has today.
 

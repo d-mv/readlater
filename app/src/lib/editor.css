@@ -1,0 +1,115 @@
+/* md-editor-v3 in the app's Braun look (main.css tokens, type, radius).
+   Loaded with the editor (lib/editor.ts), never by the base bundle. Its own
+   sheet comes first, so the rules below win ties by order. Unlayered, like
+   md-editor's: anything in main.css's layers would lose to it. */
+@import "md-editor-v3/lib/style.css";
+
+/* md-editor's palette, mapped onto the app's tokens. The tokens already
+   switch under [data-theme=dark], so one mapping serves both themes; the
+   [data-theme] variants out-rank md-editor's own dark block. */
+.md-editor,
+.md-editor[data-theme],
+.md-editor-modal-container,
+.md-editor-modal-container[data-theme] {
+  --md-color: var(--color-ink);
+  --md-hover-color: var(--color-ink);
+  --md-bk-color: var(--color-raised);
+  --md-bk-color-outstand: var(--color-recessed);
+  --md-bk-hover-color: var(--color-canvas);
+  --md-border-color: var(--color-line);
+  --md-border-hover-color: var(--color-line-strong);
+  --md-border-active-color: var(--color-ink-faint);
+  --md-modal-mask: var(--color-scrim);
+  /* Depth is a tone shift plus a hairline, never a shadow. */
+  --md-modal-shadow: none;
+  --md-scrollbar-bg-color: transparent;
+  --md-scrollbar-thumb-color: var(--color-line-strong);
+  --md-scrollbar-thumb-hover-color: var(--color-ink-faint);
+  --md-scrollbar-thumb-active-color: var(--color-ink-faint);
+  font-family: var(--font-sans);
+}
+
+.md-editor,
+.md-editor-modal,
+.md-editor-menu,
+.md-editor-toolbar-item,
+.md-editor-input,
+.md-editor-btn,
+.md-editor-custom-scrollbar__thumb {
+  border-radius: var(--radius-sm);
+}
+
+.md-editor-modal {
+  font-family: var(--font-sans);
+}
+
+/* The source pane is a well, like the title input above it (the CodeMirror
+   theme in lib/editor.ts paints the editor itself), in the app's mono. */
+.md-editor .md-editor-input-wrapper {
+  background-color: var(--color-recessed);
+}
+
+.md-editor .cm-editor .cm-scroller {
+  font-family: var(--font-mono);
+}
+
+/* The footer reads as one of the app's labels. */
+.md-editor .md-editor-footer {
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--color-ink-faint);
+}
+
+/* The preview is set like the reader. ArticleContent passes
+   preview-theme="reader", a theme md-editor ships no rules for, so none of
+   its default-theme styling applies. The editor sits inside the reader's
+   .prose, so reverting md-editor's remaining element rules (revert-layer
+   rolls back past every unlayered rule to the layered ones) leaves .prose
+   (main.css) to style the preview exactly as it styles the article. */
+.md-editor .md-editor-preview.reader-theme {
+  /* As .prose, which the preview's ancestors in md-editor override. */
+  font-family: var(--font-serif);
+  font-size: var(--rl-article-font-size, 16px);
+  line-height: 1.65;
+  color: var(--color-ink);
+  word-break: normal;
+}
+
+.md-editor
+  .md-editor-preview.reader-theme
+  :is(
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    p,
+    a,
+    strong,
+    em,
+    ul,
+    ol,
+    li,
+    blockquote,
+    details,
+    pre,
+    code,
+    hr,
+    figure,
+    figcaption,
+    img,
+    table,
+    tr,
+    th,
+    td
+  ) {
+  all: revert-layer;
+}
+
+/* The reader's code blocks have no copy/collapse bar. */
+.md-editor .reader-theme .md-editor-code-head {
+  display: none;
+}

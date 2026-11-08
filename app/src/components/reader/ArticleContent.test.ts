@@ -438,6 +438,15 @@ describe("ArticleContent", () => {
       localStorage.removeItem("theme");
     });
 
+    test("gives the preview no md-editor theme, so it takes the reader's .prose styling", async () => {
+      const wrapper = mount(ArticleContent, {
+        props: { contentMd: "", editing: true, modelValue: "" },
+      });
+      await flushPromises();
+      // lib/editor.css styles the preview under .reader-theme.
+      expect(wrapper.findComponent(MdEditor).props("previewTheme")).toBe("reader");
+    });
+
     test("starts single-pane (no split preview) on a narrow viewport, with a preview-only toggle", async () => {
       window.innerWidth = 400;
       const wrapper = mount(ArticleContent, {

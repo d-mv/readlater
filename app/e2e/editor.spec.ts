@@ -164,3 +164,52 @@ test("turning the phone to landscape while previewing brings the input back", as
   await expect(preview(page)).toBeVisible();
   await expect(previewOnlyToggle(page)).toHaveCount(0);
 });
+
+/** A main.css colour token as the browser computes it (rgb()). */
+function tokenColor(page: Page, token: string): Promise<string> {
+  return page.evaluate((name) => {
+    const probe = document.createElement("div");
+    probe.style.color = `var(${name})`;
+    document.body.append(probe);
+    const value = getComputedStyle(probe).color;
+    probe.remove();
+    return value;
+  }, token);
+}
+
+function css(locator: Locator, property: string): Promise<string> {
+  return locator.evaluate((el, prop) => getComputedStyle(el).getPropertyValue(prop), property);
+}
+
+for (const theme of ["light", "dark"] as const) {
+  test(`in the ${theme} theme the editor wears the app's tokens and previews in the reader's type`, async ({
+    page,
+    backend,
+  }) => {
+    await page.addInitScript((value) => localStorage.setItem("theme", value), theme);
+    await openEditor(page, backend);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+
+    const editor = page.locator(".md-editor");
+    const source = page.locator(".cm-editor");
+    expect(await css(editor, "background-color")).toBe(await tokenColor(page, "--color-raised"));
+    expect(await css(editor, "border-top-color")).toBe(await tokenColor(page, "--color-line"));
+    expect(await css(source, "background-color")).toBe(await tokenColor(page, "--color-recessed"));
+    expect(await css(source, "color")).toBe(await tokenColor(page, "--color-ink"));
+    // md-editor's syntax colours are dropped: a link in the source is ink.
+    expect(await css(page.locator(".cm-line span", { hasText: "a link" }).first(), "color")).toBe(
+      await tokenColor(page, "--color-ink"),
+    );
+
+    if (await previewOnlyToggle(page).isVisible()) await previewOnlyToggle(page).click();
+    const article = page.getByTestId("article");
+    const paragraph = preview(page).locator("li").first();
+    for (const property of ["font-family", "font-size", "line-height", "color"]) {
+      expect(await css(paragraph, property)).toBe(await css(article, property));
+    }
+    // Headings as in the reader (.prose): the interface sans, not bold.
+    const heading = preview(page).locator("h1");
+    expect(await css(heading, "font-family")).toContain("Space Grotesk");
+    expect(await css(heading, "font-weight")).toBe("500");
+  });
+}

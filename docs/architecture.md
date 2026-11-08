@@ -846,7 +846,15 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   nonce (`lib/editor.ts`, §8). Toolbar
   trimmed to basic formatting;
   preview sanitized through the app's `DOMPurify` (the library does not escape
-  raw HTML by default); theme bound to the theme store. Below 640px it is
+  raw HTML by default); theme bound to the theme store. Styled to match the
+  app: `lib/editor.css` (loaded with the editor, emitted under
+  `assets/editor/`) imports md-editor's sheet and maps its `--md-*` variables
+  onto the `main.css` tokens, so one mapping serves light and dark; the
+  source pane is a recessed well in the mono face, via a CodeMirror theme in
+  `lib/editor.ts` (token colours, monochrome markdown). The preview runs
+  with `preview-theme="reader"`, a theme md-editor ships no CSS for, and
+  `all: revert-layer` on its elements hands them back to the reader's
+  `.prose` rules, which the editor sits inside. Below 640px it is
   one pane with md-editor's `previewOnly` toggle (its plain `preview`
   toggle would split a phone screen into two ~175px columns); md-editor
   reads `preview` only on mount, so crossing the breakpoint switches the
