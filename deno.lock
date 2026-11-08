@@ -9,7 +9,7 @@
     "npm:@supabase/postgrest-js@2.118.0": "2.118.0",
     "npm:@supabase/realtime-js@2.118.0": "2.118.0",
     "npm:@supabase/storage-js@2.118.0": "2.118.0",
-    "npm:mammoth@1.12.0": "1.12.0",
+    "npm:mammoth@1.12.3": "1.12.3",
     "npm:turndown@7.2.4": "7.2.4",
     "npm:unpdf@1.9.1": "1.9.1"
   },
@@ -135,8 +135,8 @@
         "underscore"
       ]
     },
-    "mammoth@1.12.0": {
-      "integrity": "sha512-cwnK1RIcRdDMi2HRx2EXGYlxqIEh0Oo3bLhorgnsVJi2UkbX1+jKxuBNR9PC5+JaX7EkmJxFPmo6mjLpqShI2w==",
+    "mammoth@1.12.3": {
+      "integrity": "sha512-kkv2MrSFk3f/w3uLsz4FG/91LdWp2j+qmp7AjG2v7w2xgX5YDxiaFlaWourXrXtyUR6335+9guyIlPBnhHLvKw==",
       "dependencies": [
         "@xmldom/xmldom",
         "argparse",

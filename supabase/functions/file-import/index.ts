@@ -1,6 +1,6 @@
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { Buffer } from "node:buffer";
-import mammoth from "npm:mammoth@1.12.0";
+import mammoth from "npm:mammoth@1.12.3";
 import { detectKind, maxBytesFor } from "./fileImportLogic.ts";
 import { decodeBase64, titleFromFilename } from "../_shared/file.ts";
 import { readyNoteRow } from "../_shared/noteRow.ts";
