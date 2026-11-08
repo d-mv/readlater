@@ -1,7 +1,7 @@
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
-import { flushPromises, mount } from "@vue/test-utils";
+import { enableAutoUnmount, flushPromises, mount } from "@vue/test-utils";
 import { useBookmarksStore } from "../stores/bookmarks";
 
 const pushMock = vi.fn();
@@ -43,6 +43,10 @@ class FakeIntersectionObserver {
 }
 
 const { default: ReadingListView } = await import("./ReadingListView.vue");
+
+// A list left mounted keeps its document keydown listener, which would
+// answer (and claim) the shortcut keys later tests press.
+enableAutoUnmount(afterEach);
 
 // The mount-time fetch falls back to the IndexedDB snapshot (no session in
 // tests), which can resolve after a single flush and reset hasMore — wait it
@@ -495,6 +499,130 @@ describe("ReadingListView", () => {
       expect(fetchOneSpy).not.toHaveBeenCalled();
       expect(cacheSpy).not.toHaveBeenCalled();
       expect(removeSpy).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("keyboard shortcuts", () => {
+    const row = (id: string) =>
+      ({
+        id,
+        title: `Row ${id}`,
+        type: "article",
+        status: "ready",
+        archived: false,
+        read_at: null,
+        tags: [],
+        url: null,
+      }) as never;
+
+    async function mountWithRows() {
+      const wrapper = mount(ReadingListView, { attachTo: document.body });
+      const store = useBookmarksStore();
+      await vi.waitFor(() => expect(store.loading).toBe(false));
+      await flushPromises();
+      store.bookmarks = [row("1"), row("2"), row("3")];
+      await flushPromises();
+      return { wrapper, store };
+    }
+
+    function press(key: string, target: EventTarget = document.body) {
+      target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    }
+
+    const focusedTitle = () =>
+      document.activeElement?.closest('[data-testid="row"]')?.querySelector('[data-testid="title"]')
+        ?.textContent;
+
+    test("j/k and the arrows move focus through the rows, stopping at either end", async () => {
+      await mountWithRows();
+
+      press("j");
+      expect(focusedTitle()).toBe("Row 1");
+      press("j");
+      press("ArrowDown");
+      expect(focusedTitle()).toBe("Row 3");
+      press("j");
+      expect(focusedTitle()).toBe("Row 3");
+      press("k");
+      expect(focusedTitle()).toBe("Row 2");
+      press("ArrowUp");
+      press("ArrowUp");
+      expect(focusedTitle()).toBe("Row 1");
+    });
+
+    test("k with nothing focused starts at the first row", async () => {
+      await mountWithRows();
+
+      press("k");
+
+      expect(focusedTitle()).toBe("Row 1");
+    });
+
+    test("moving from a row's offline toggle goes to the next row", async () => {
+      const { wrapper } = await mountWithRows();
+      (wrapper.findAll('[data-testid="offline-toggle"]')[0]!.element as HTMLElement).focus();
+
+      press("j");
+
+      expect(focusedTitle()).toBe("Row 2");
+    });
+
+    test("o opens the focused row, and does nothing with no row focused", async () => {
+      await mountWithRows();
+
+      press("o");
+      expect(pushMock).not.toHaveBeenCalled();
+
+      press("j");
+      press("j");
+      press("o");
+      expect(pushMock).toHaveBeenCalledWith({ name: "reader", params: { id: "2" } });
+    });
+
+    test("with no rows, j does nothing", async () => {
+      mount(ReadingListView, { attachTo: document.body });
+      await flushPromises();
+
+      press("j");
+
+      expect(document.activeElement).toBe(document.body);
+    });
+
+    test("/ focuses search, and keys typed there stay text", async () => {
+      const { wrapper } = await mountWithRows();
+
+      press("/");
+      const search = wrapper.get('input[data-testid="search-input"]').element;
+      expect(document.activeElement).toBe(search);
+
+      press("j", search);
+      expect(document.activeElement).toBe(search);
+    });
+
+    test("a opens the Add dialog", async () => {
+      const { wrapper } = await mountWithRows();
+
+      press("a");
+      await flushPromises();
+
+      expect(wrapper.find("dialog").exists()).toBe(true);
+    });
+
+    test("? shows the shortcuts, and they close again", async () => {
+      const { wrapper } = await mountWithRows();
+
+      press("?");
+      await flushPromises();
+      const help = wrapper.find('[data-testid="shortcuts-help"]');
+      expect(help.exists()).toBe(true);
+      expect(help.text()).toContain("Next item");
+
+      // Open dialog: the page's shortcuts are off.
+      press("j");
+      expect(focusedTitle()).toBeUndefined();
+
+      await help.get('[data-testid="close-btn"]').trigger("click");
+      expect(wrapper.find('[data-testid="shortcuts-help"]').exists()).toBe(false);
     });
   });
 });

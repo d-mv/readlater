@@ -68,6 +68,7 @@ const displayTitle = computed(() => {
     class="flex w-full items-center gap-4 border-t border-line px-16 first-of-type:border-t-0 transition-colors duration-(--duration) hover:bg-raised"
   >
     <button
+      data-testid="row-open"
       class="flex min-w-0 flex-1 cursor-pointer items-center gap-12 border-0 bg-transparent px-0 py-14 text-left [font:inherit]"
       type="button"
       @click="emit('open', bookmark.id)"

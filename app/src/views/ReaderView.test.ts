@@ -1652,4 +1652,105 @@ describe("ReaderView", () => {
       expect(single).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe("keyboard shortcuts", () => {
+    function mountReady(overrides: Partial<Bookmark> = {}) {
+      const store = useBookmarksStore();
+      store.bookmarks = [
+        makeBookmark({ id: "1", status: "ready", content_md: "Body", ...overrides }),
+      ];
+      const wrapper = mount(ReaderView, { props: { id: "1" }, attachTo: document.body });
+      return { store, wrapper };
+    }
+
+    function press(key: string, target: EventTarget = document.body) {
+      target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+    }
+
+    test("Escape and u go back to the list", async () => {
+      mountReady();
+      await flushPromises();
+
+      press("Escape");
+      press("u");
+
+      expect(pushMock).toHaveBeenCalledTimes(2);
+      expect(pushMock).toHaveBeenCalledWith({ name: "list" });
+    });
+
+    test("e archives through the undo store, like the menu", async () => {
+      const { store } = mountReady();
+      const archive = vi.spyOn(store, "archive").mockResolvedValue({ error: null });
+      await flushPromises();
+
+      press("e");
+      await flushPromises();
+
+      expect(archive).toHaveBeenCalledWith("1");
+      expect(useUndoStore().notice).toEqual({ kind: "archived", id: "1" });
+      expect(pushMock).toHaveBeenCalledWith({ name: "list" });
+      useUndoStore().reset();
+    });
+
+    test("e does nothing when there is no bookmark on screen", async () => {
+      const store = useBookmarksStore();
+      vi.spyOn(store, "fetchOne").mockResolvedValue(null);
+      const archive = vi.spyOn(store, "archive");
+      mount(ReaderView, { props: { id: "missing" }, attachTo: document.body });
+      await flushPromises();
+
+      press("e");
+
+      expect(archive).not.toHaveBeenCalled();
+    });
+
+    test("m toggles read and unread once the article is ready", async () => {
+      const { store } = mountReady({ read_at: null });
+      const markRead = vi.spyOn(store, "markRead").mockResolvedValue({ error: null });
+      const markUnread = vi.spyOn(store, "markUnread").mockResolvedValue({ error: null });
+      await flushPromises();
+
+      press("m");
+      expect(markRead).toHaveBeenCalledWith("1");
+
+      store.bookmarks[0]!.read_at = "2026-02-01T00:00:00Z";
+      press("m");
+      expect(markUnread).toHaveBeenCalledWith("1");
+
+      store.bookmarks[0]!.status = "pending";
+      press("m");
+      expect(markRead).toHaveBeenCalledTimes(1);
+      expect(markUnread).toHaveBeenCalledTimes(1);
+    });
+
+    test("? shows the reader's shortcuts; Escape then closes the help, not the reader", async () => {
+      const { wrapper } = mountReady();
+      await flushPromises();
+
+      press("?");
+      await flushPromises();
+      const help = wrapper.find('[data-testid="shortcuts-help"]');
+      expect(help.text()).toContain("Back to list");
+
+      press("Escape", help.element);
+      expect(pushMock).not.toHaveBeenCalled();
+
+      await help.get('[data-testid="close-btn"]').trigger("click");
+      expect(wrapper.find('[data-testid="shortcuts-help"]').exists()).toBe(false);
+    });
+
+    test("no shortcut fires while editing", async () => {
+      const { store, wrapper } = mountReady();
+      const archive = vi.spyOn(store, "archive");
+      await flushPromises();
+      await wrapper.get('[data-testid="menu-trigger"]').trigger("click");
+      await wrapper.get('[data-testid="edit-item"]').trigger("click");
+
+      press("e");
+      press("u");
+
+      expect(archive).not.toHaveBeenCalled();
+      expect(pushMock).not.toHaveBeenCalled();
+    });
+  });
 });

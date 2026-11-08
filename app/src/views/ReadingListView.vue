@@ -14,6 +14,8 @@ import BookmarkList from "../components/list/BookmarkList.vue";
 import AddBookmarkDialog from "../components/list/AddBookmarkDialog.vue";
 import TagFilterBar from "../components/list/TagFilterBar.vue";
 import ThemeToggle from "../components/ThemeToggle.vue";
+import ShortcutsHelp, { type ShortcutHelpItem } from "../components/ShortcutsHelp.vue";
+import { useKeyboardShortcuts } from "../composables/useKeyboardShortcuts";
 import IconButton from "../shared/ui/IconButton.vue";
 import Input from "../shared/ui/Input.vue";
 import Button from "../shared/ui/Button.vue";
@@ -186,14 +188,68 @@ function onToggleTag(tagId: string) {
     : [...store.activeTagIds, tagId];
   store.setActiveTagIds(next);
 }
+
+// Keyboard: j/k (or the arrows) move focus through the rows' open buttons —
+// real focus, so the :focus-visible ring shows it and Tab carries on from
+// there; Enter (the button's own) or o opens the focused row.
+const listRoot = useTemplateRef<HTMLElement>("listRoot");
+const addDialog = useTemplateRef<InstanceType<typeof AddBookmarkDialog>>("addDialog");
+const showShortcuts = ref(false);
+
+const SHORTCUTS: ShortcutHelpItem[] = [
+  { keys: ["j", "↓"], label: "Next item" },
+  { keys: ["k", "↑"], label: "Previous item" },
+  { keys: ["o", "Enter"], label: "Open item" },
+  { keys: ["/"], label: "Search" },
+  { keys: ["a"], label: "Add" },
+  { keys: ["?"], label: "Show shortcuts" },
+];
+
+// listRoot is the view's root element: it exists whenever a key can arrive.
+function rowButtons(): HTMLButtonElement[] {
+  return Array.from(
+    listRoot.value!.querySelectorAll<HTMLButtonElement>('[data-testid="row-open"]'),
+  );
+}
+
+// The row holding focus (its open button or its offline toggle), or -1.
+function focusedRow(buttons: HTMLButtonElement[]): number {
+  const row = document.activeElement?.closest('[data-testid="row"]');
+  return row ? buttons.findIndex((button) => row.contains(button)) : -1;
+}
+
+function moveRowFocus(step: 1 | -1) {
+  const buttons = rowButtons();
+  if (buttons.length === 0) return;
+  const current = focusedRow(buttons);
+  const next = current === -1 ? 0 : Math.min(buttons.length - 1, Math.max(0, current + step));
+  buttons[next]!.focus();
+}
+
+function openFocusedRow() {
+  const buttons = rowButtons();
+  buttons[focusedRow(buttons)]?.click();
+}
+
+useKeyboardShortcuts({
+  j: () => moveRowFocus(1),
+  ArrowDown: () => moveRowFocus(1),
+  k: () => moveRowFocus(-1),
+  ArrowUp: () => moveRowFocus(-1),
+  o: openFocusedRow,
+  "/": () =>
+    listRoot.value!.querySelector<HTMLInputElement>('[data-testid="search-input"]')!.focus(),
+  a: () => addDialog.value?.open(),
+  "?": () => (showShortcuts.value = true),
+});
 </script>
 
 <template>
-  <main class="mx-auto min-h-screen max-w-640 bg-canvas sm:border-x sm:border-line">
+  <main ref="listRoot" class="mx-auto min-h-screen max-w-640 bg-canvas sm:border-x sm:border-line">
     <div class="flex items-center justify-between px-16 pt-16 pb-4">
       <h1 class="m-0 font-sans text-md font-medium tracking-tight text-ink">Read Later</h1>
       <div class="flex items-center gap-12">
-        <AddBookmarkDialog />
+        <AddBookmarkDialog ref="addDialog" />
         <IconButton title="Settings" @click="router.push({ name: 'settings' })">
           <IconSettings :size="18" />
         </IconButton>
@@ -240,5 +296,6 @@ function onToggleTag(tagId: string) {
         Load more
       </Button>
     </div>
+    <ShortcutsHelp v-if="showShortcuts" :shortcuts="SHORTCUTS" @close="showShortcuts = false" />
   </main>
 </template>

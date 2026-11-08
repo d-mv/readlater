@@ -811,6 +811,27 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   reversed, and switching the sort over them reverses them without
   re-running the full-text query. The list never ranked by relevance, so
   the chosen order holds everywhere.
+- **Keyboard shortcuts** — one composable,
+  `composables/useKeyboardShortcuts.ts`: a document `keydown` listener
+  while the view is mounted, single keys by `KeyboardEvent.key`, no
+  library. A key is never a shortcut when Ctrl/Meta/Alt is held (Shift is
+  allowed: `?`), mid-IME-composition, already `preventDefault`ed, typed
+  into an `input` / `textarea` / `select` / contenteditable (the markdown
+  editor's CodeMirror), pressed inside an open `role="menu"` (the reader
+  menu owns its arrows and Escape), or while any `dialog[open]` exists
+  (the modal owns its keys; Escape closes it first). A handled key is
+  `preventDefault`ed. List (`ReadingListView`): `j`/`↓` and `k`/`↑` move
+  real DOM focus between the rows' open buttons (`data-testid="row-open"`;
+  from nothing focused they start at the first row, they stop at either
+  end), so the global `:focus-visible` ring shows it and Tab continues from
+  there; Enter (the button's own) or `o` opens the focused row; `/` focuses
+  search; `a` opens the Add dialog (`AddBookmarkDialog` exposes `open`);
+  `?` opens `components/ShortcutsHelp.vue` (shared `Dialog`). Reader:
+  `Escape`/`u` back to the list, `e` archive through `stores/undo.ts` (same
+  path as the menu, so the Undo toast appears), `m` mark read/unread (only
+  once the article is ready, like the menu), `?` help. The reader's
+  shortcuts are off while editing, so a stray key outside the editor can't
+  leave or archive the draft. Nothing is announced beyond the focus move.
 - **Undo for archive and delete** — `stores/undo.ts` owns one notice at a
   time, shown by `components/undo/UndoToast.vue` (mounted once in `App.vue`,
   so it outlives the reader → list navigation; built on the shared

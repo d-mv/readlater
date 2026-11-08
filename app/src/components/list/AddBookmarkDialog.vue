@@ -81,6 +81,9 @@ function close() {
   phase.value = { kind: "closed" };
 }
 
+// The list's "a" shortcut opens the dialog like the Add button does.
+defineExpose({ open });
+
 function setMode(next: Mode) {
   mode.value = next;
   if (phase.value.kind === "editing") showError(null);

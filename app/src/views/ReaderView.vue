@@ -25,6 +25,8 @@ import ReaderProgressBar from "../components/reader/ReaderProgressBar.vue";
 import ArticleContent from "../components/reader/ArticleContent.vue";
 import ShareDialog from "../components/reader/ShareDialog.vue";
 import TagInput from "../components/reader/TagInput.vue";
+import ShortcutsHelp, { type ShortcutHelpItem } from "../components/ShortcutsHelp.vue";
+import { useKeyboardShortcuts } from "../composables/useKeyboardShortcuts";
 import Button from "../shared/ui/Button.vue";
 import Message from "../shared/ui/Message.vue";
 
@@ -474,6 +476,39 @@ watch(
     pdfSignedUrl.value = null;
   },
 );
+
+// Keyboard: the same actions as the header and menu (archive goes through
+// the undo store, so the Undo toast appears). Off while editing, where a
+// stray key outside the editor must not leave or archive the draft.
+const showShortcuts = ref(false);
+
+const SHORTCUTS: ShortcutHelpItem[] = [
+  { keys: ["u", "Esc"], label: "Back to list" },
+  { keys: ["e"], label: "Archive" },
+  { keys: ["m"], label: "Mark read / unread" },
+  { keys: ["?"], label: "Show shortcuts" },
+];
+
+// Offered when the menu offers Mark as read / unread: once it's ready.
+function onToggleRead() {
+  const current = bookmark.value;
+  if (current?.status !== "ready") return;
+  if (current.read_at === null) onMarkRead();
+  else onMarkUnread();
+}
+
+useKeyboardShortcuts(
+  {
+    Escape: onBack,
+    u: onBack,
+    e: () => {
+      if (bookmark.value) onArchive();
+    },
+    m: onToggleRead,
+    "?": () => (showShortcuts.value = true),
+  },
+  () => !editing.value,
+);
 </script>
 
 <template>
@@ -659,4 +694,5 @@ watch(
     <IconLoader2 :size="28" class="animate-spin text-ink-muted" />
     <p class="m-0 font-sans text-base">Loading…</p>
   </div>
+  <ShortcutsHelp v-if="showShortcuts" :shortcuts="SHORTCUTS" @close="showShortcuts = false" />
 </template>
