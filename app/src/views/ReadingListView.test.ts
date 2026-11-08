@@ -323,6 +323,18 @@ describe("ReadingListView", () => {
     expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 
+  test("losing the connection refetches the list (the offline snapshot)", async () => {
+    const { wrapper, store } = await mountSettled();
+    const fetchSpy = vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+
+    window.dispatchEvent(new Event("offline"));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    wrapper.unmount();
+    window.dispatchEvent(new Event("offline"));
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
   test("a second intersection while a page is loading doesn't start another page", async () => {
     const { store } = await mountSettled();
     store.bookmarks = [{ id: "1", archived: false, tags: [] } as never];

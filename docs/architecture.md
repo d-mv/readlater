@@ -994,7 +994,11 @@ DB):
   of the *unfiltered* list and on Realtime events while showing it — never
   from search results or the offline snapshot, and not for a Realtime UPDATE
   that only moved `progress` (the reader's ~2 s saves) — and read as a
-  fallback when `fetch()` fails offline. An online cold start reads only
+  fallback when `fetch()` fails offline. The offline snapshot lists only
+  downloaded articles (rows in `articles`); this store just refreshes their
+  metadata, and a listed row with no downloaded body is left out. The list
+  view refetches on the browser's `offline` event, so an open list switches
+  to it when the connection drops. An online cold start reads only
   this store, never the articles, so snapshot rows stay body-less (no
   offline `blob:` bodies in the list).
 - Never loading blobs just to list: `articles` has `cachedAt` and

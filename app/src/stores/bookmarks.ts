@@ -168,22 +168,17 @@ async function loadOfflineBookmarks(): Promise<Bookmark[]> {
     );
   }
 
-  // The listed metadata is the fresher copy; a downloaded article keeps its
-  // body. getAllArticles() already returned every downloaded article, so a
-  // listed row not among them simply has no offline body.
+  // Offline, only downloaded articles can be read, so only they are listed.
+  // The listed metadata is the fresher copy of their title, tags, etc.; a
+  // listed row with no downloaded body is left out.
   for (const meta of metaList) {
     const existing = byId.get(meta.id);
-    byId.set(
-      meta.id,
-      existing
-        ? {
-            ...meta,
-            content_md: existing.content_md,
-            translated_content_md:
-              existing.translated_content_md ?? meta.translated_content_md ?? null,
-          }
-        : { ...meta, content_md: null },
-    );
+    if (!existing) continue;
+    byId.set(meta.id, {
+      ...meta,
+      content_md: existing.content_md,
+      translated_content_md: existing.translated_content_md ?? meta.translated_content_md ?? null,
+    });
   }
 
   return Array.from(byId.values()).sort((a, b) => {

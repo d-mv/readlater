@@ -71,9 +71,9 @@ test("offline, a reload starts the app from the precache, the list from IndexedD
   await page.reload();
 
   // The shell and route chunks come from the precache, the list from the
-  // IndexedDB snapshot.
-  await expect(rows(page)).toHaveCount(2);
-  await expect(row(page, "Not downloaded")).toBeVisible();
+  // IndexedDB snapshot — only the downloaded article, which can be read.
+  await expect(rows(page)).toHaveCount(1);
+  await expect(row(page, "Not downloaded")).toHaveCount(0);
 
   await openRow(page, "For the plane");
   await expect(article(page)).toContainText("Before the photo.");
@@ -95,6 +95,10 @@ test("offline with an expired access token, the app starts without waiting out t
   await page.goto("/");
   await expect(rows(page)).toHaveCount(1);
   await waitForServiceWorker(page);
+  // Offline lists only downloaded articles.
+  const toggle = row(page, "Saved earlier").getByTestId("offline-toggle");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true", { timeout: 5_000 });
   // An hour later: the access token has expired, so supabase-js refreshes it
   // first — offline it retries that for ~25 s.
   await page.evaluate((key) => {

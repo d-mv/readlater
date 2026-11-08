@@ -176,6 +176,19 @@ function makeBookmark(overrides: Partial<Bookmark>): Bookmark {
   };
 }
 
+// Marks these ids as downloaded for offline reading (bodies only; the
+// listed metadata supplies the rest).
+function downloaded(...ids: string[]) {
+  getAllArticles.mockResolvedValue(
+    ids.map((id) => ({
+      id,
+      content_md: `body ${id}`,
+      images: [],
+      cachedAt: "2026-01-01T00:00:00Z",
+    })),
+  );
+}
+
 describe("useBookmarksStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
@@ -280,6 +293,7 @@ describe("useBookmarksStore", () => {
       from.mockReturnValue({ select: () => query });
       authState.sessionExpired.mockImplementation(async () => {});
       getBookmarksList.mockResolvedValue([makeBookmark({ id: "cached" })]);
+      downloaded("cached");
 
       const store = useBookmarksStore();
       await store.fetch();
@@ -320,6 +334,7 @@ describe("useBookmarksStore", () => {
     test("an ordinary network error still falls back to the offline snapshot", async () => {
       from.mockReturnValue({ select: () => listQuery(null, { message: "Failed to fetch" }) });
       getBookmarksList.mockResolvedValue([makeBookmark({ id: "cached" })]);
+      downloaded("cached");
 
       const store = useBookmarksStore();
       await store.fetch();
@@ -1015,6 +1030,7 @@ describe("useBookmarksStore", () => {
         processed_at: null,
       },
     ]);
+    downloaded("1");
 
     const store = useBookmarksStore();
     await store.fetch();
@@ -2094,6 +2110,7 @@ describe("useBookmarksStore", () => {
       await store.fetch();
 
       getBookmarksList.mockResolvedValue([row("cached", "01", "01")]);
+      downloaded("cached");
       tables(listQuery(null, { message: "network" }));
       await store.fetch();
 
@@ -2616,6 +2633,23 @@ describe("useBookmarksStore", () => {
   });
 
   describe("offline snapshot", () => {
+    test("only downloaded articles are listed, with their bodies", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      getBookmarksList.mockResolvedValue([
+        dated("saved", "02", "02", { title: "Fresh title" }),
+        dated("not-saved", "03"),
+      ]);
+      downloaded("saved");
+
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["saved"]);
+      expect(store.bookmarks[0]?.title).toBe("Fresh title");
+      expect(store.bookmarks[0]?.content_md).toBe("body saved");
+      vi.unstubAllGlobals();
+    });
+
     test("both offline stores failing leaves an empty list rather than an error", async () => {
       vi.stubGlobal("navigator", { onLine: false });
       getBookmarksList.mockRejectedValue(new Error("IndexedDB blocked"));
@@ -2636,6 +2670,7 @@ describe("useBookmarksStore", () => {
         makeBookmark({ id: "undated", created_at: "" }),
         dated("newer", "05"),
       ]);
+      downloaded("older", "undated", "newer");
 
       const store = useBookmarksStore();
       await store.fetch();
@@ -2651,6 +2686,7 @@ describe("useBookmarksStore", () => {
         dated("by-excerpt", "02", "02", { title: null, excerpt: "All about vue" }),
         dated("unrelated", "01", "01", { title: "Rust", excerpt: null }),
       ]);
+      downloaded("by-title", "by-excerpt", "unrelated");
 
       const store = useBookmarksStore();
       store.setSearchQuery("VUE");
@@ -2663,6 +2699,7 @@ describe("useBookmarksStore", () => {
     test("an INSERT while the unfiltered offline snapshot is up is shown", async () => {
       vi.stubGlobal("navigator", { onLine: false });
       getBookmarksList.mockResolvedValue([dated("cached", "01")]);
+      downloaded("cached");
       const store = useBookmarksStore();
       await store.fetch();
       vi.unstubAllGlobals();
@@ -2792,6 +2829,7 @@ describe("useBookmarksStore", () => {
     test("a failed deletions query falls back to the offline copy", async () => {
       const store = await synced();
       getBookmarksList.mockResolvedValue([dated("cached", "01")]);
+      downloaded("cached");
       routeTables(listQuery([]), listQuery(null, { message: "network" }));
 
       await store.fetch();

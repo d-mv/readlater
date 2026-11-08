@@ -61,6 +61,12 @@ async function loadMoreWhileInRange() {
   }
 }
 
+// Losing the connection swaps the list for the offline snapshot, which lists
+// only what was downloaded and can still be read.
+function onOffline() {
+  store.fetch();
+}
+
 function onOnline() {
   store.fetch();
   store.subscribeToChanges();
@@ -86,6 +92,7 @@ onMounted(() => {
   offlineCache.init();
   window.addEventListener("scroll", onScroll, { passive: true });
   window.addEventListener("online", onOnline);
+  window.addEventListener("offline", onOffline);
   document.addEventListener("visibilitychange", onVisibilityChange);
   if (typeof IntersectionObserver !== "undefined") {
     observer = new IntersectionObserver(
@@ -112,6 +119,7 @@ watch(loadMoreSentinel, (el) => {
 onUnmounted(() => {
   window.removeEventListener("scroll", onScroll);
   window.removeEventListener("online", onOnline);
+  window.removeEventListener("offline", onOffline);
   document.removeEventListener("visibilitychange", onVisibilityChange);
   observer?.disconnect();
 });

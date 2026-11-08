@@ -66,6 +66,23 @@ test("an article opened online stays readable offline", async ({ page, context, 
   await expect(article(page)).toHaveText("Words for the tunnel.");
 });
 
+test("losing the connection with the list open leaves only downloaded articles", async ({
+  page,
+  context,
+  backend,
+}) => {
+  backend.addBookmark({ title: "Online only" });
+  backend.addBookmark({ title: "Downloaded" });
+  await page.goto("/");
+  await expect(rows(page)).toHaveCount(2);
+  const toggle = row(page, "Downloaded").getByTestId("offline-toggle");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true", { timeout: 2_000 });
+
+  await goOffline(context, page);
+  await expect(rows(page).getByTestId("title")).toHaveText(["Downloaded"]);
+});
+
 test("offline, the list is rebuilt from IndexedDB and searched locally", async ({
   page,
   context,
@@ -75,6 +92,11 @@ test("offline, the list is rebuilt from IndexedDB and searched locally", async (
   backend.addBookmark({ title: "Rust ownership" });
   await page.goto("/");
   await expect(rows(page)).toHaveCount(2);
+  // Only downloaded articles are listed offline.
+  for (const title of ["Sourdough basics", "Rust ownership"]) {
+    await row(page, title).getByTestId("offline-toggle").click();
+  }
+  await expect.poll(() => offlineStoreKeys(page, "articles"), { timeout: 2_000 }).toHaveLength(2);
   await expect
     .poll(() => offlineStoreKeys(page, "bookmarksList"), { timeout: 2_000 })
     .toHaveLength(2);
