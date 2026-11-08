@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "jsr:@supabase/supabase-js@2.118.0";
-import { checkAuth } from "../_shared/checkAuth.ts";
+import { markKeyUsed, resolveCaller } from "./captureAuth.ts";
 import { detectType } from "./detectType.ts";
 import { hasAllowedScheme, isBareUrl, normalizeUrl } from "./captureLogic.ts";
 import { readyNoteRow } from "../_shared/noteRow.ts";
@@ -87,13 +87,13 @@ export async function insertReadyNote(
   return json({ status: "created", id: data.id });
 }
 
+// `ownerUserId` is the caller resolveCaller() authenticated: every row is
+// written as, and every lookup scoped to, that user.
 export async function handleCapture(
   client: SupabaseClient,
-  ownerUserId: string | undefined,
+  ownerUserId: string,
   input: { url?: unknown; title?: unknown; text?: unknown },
 ): Promise<Response> {
-  if (!ownerUserId) return serverError(corsHeaders, "capture", "OWNER_USER_ID is not set");
-
   const url = typeof input.url === "string" ? input.url.trim() : undefined;
   const title = typeof input.title === "string"
     ? input.title.slice(0, MAX_TITLE_CHARS)
@@ -116,11 +116,10 @@ export async function handleCapture(
 
 export async function handleRefresh(
   client: SupabaseClient,
-  ownerUserId: string | undefined,
+  ownerUserId: string,
   id: string,
   force: boolean,
 ): Promise<Response> {
-  if (!ownerUserId) return serverError(corsHeaders, "capture:refresh", "OWNER_USER_ID is not set");
   if (!isUuid(id)) return json("invalid bookmark id", 400);
 
   const limit = await bumpRateLimit(client, "capture", ownerUserId);
@@ -161,9 +160,12 @@ export async function handleRequest(
     return new Response(null, { headers: corsHeaders });
   }
 
-  if (!checkAuth(req.headers.get("Authorization"), env.captureKey)) {
+  const caller = await resolveCaller(client, req.headers.get("Authorization"), env);
+  if (caller.kind === "unauthorized") {
     return new Response("unauthorized", { status: 401, headers: corsHeaders });
   }
+  if (caller.kind === "error") return serverError(corsHeaders, "capture:auth", caller.cause);
+  if (caller.source === "key") await markKeyUsed(client, caller.userId);
 
   const pathSegments = new URL(req.url).pathname.split("/").filter(Boolean);
   const captureIdx = pathSegments.indexOf("capture");
@@ -175,7 +177,7 @@ export async function handleRequest(
     const parsed = await readJsonBody(req, MAX_BODY_BYTES.capture, corsHeaders);
     if (!parsed.ok && parsed.status === 413) return parsed.response;
     const force = parsed.ok && parsed.body.force === true;
-    return handleRefresh(client, env.ownerUserId, rest[0], force);
+    return handleRefresh(client, caller.userId, rest[0], force);
   }
 
   if (req.method !== "POST" || rest.length !== 0) {
@@ -184,10 +186,12 @@ export async function handleRequest(
 
   const parsed = await readJsonBody(req, MAX_BODY_BYTES.capture, corsHeaders);
   if (!parsed.ok) return parsed.response;
-  return handleCapture(client, env.ownerUserId, parsed.body);
+  return handleCapture(client, caller.userId, parsed.body);
 }
 
-// The deployed request handler, wired to the environment. Exported so the
+// The deployed request handler, wired to the environment. CAPTURE_KEY and
+// OWNER_USER_ID only serve the transition fallback (captureAuth.ts) and can
+// be removed once the owner has generated a key in Settings. Exported so the
 // tests can exercise the env wiring without binding a port.
 export function handlerFromEnv(): (req: Request) => Promise<Response> {
   const supabase = createClient(

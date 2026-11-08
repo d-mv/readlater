@@ -109,9 +109,12 @@ fidelity and phone single-pane checks are real-browser e2e tests now
   so a note/pdf can never enter the worker queue (the worker fails such rows
   today); split `processed_at`, which is both the processing lease timestamp
   and the completion time.
-- **Single-user assumption**: URL uniqueness (`20261012101000`) and tags
-  (`20261011171000`) are per user now. What still assumes one person is the
-  capture key (`OWNER_USER_ID`).
+- **Single-user assumption**: URL uniqueness (`20261012101000`), tags
+  (`20261011171000`) and capture keys (`20261108100000`, per user, rotated in
+  Settings) are per user now. `OWNER_USER_ID` survives only as the legacy
+  `CAPTURE_KEY` fallback, which the owner's first generated key retires;
+  delete both secrets after that. What still assumes one person: signup is
+  meant to be off (§8) and there is no account UI beyond sign-in.
 
 Done since this list was written: per-user rate limits on every edge
 function, request body caps and generic errors, CSP and security headers,
@@ -196,8 +199,11 @@ architecture "Keyboard shortcuts"). Bulk actions — done 2026-11-08
 read, Save offline; one `id=in.(…)` request per action, archive/unarchive/
 delete undoable as a batch; architecture "Bulk actions"). Share-link revoke
 UI — done 2026-11-08 (Settings → Shared links: every public bookmark with
-its link, copy and Revoke via `store.setPublic`). Not built: offline
-full-text search, audit log, capture-key rotation.
+its link, copy and Revoke via `store.setPublic`). Capture-key rotation — done
+2026-11-08 (Settings → Capture key: per-user `rlk_` keys, only the sha256
+stored in `capture_keys`, `rotate_capture_key()` rate-limited 10/h, shown
+once; `capture` resolves the key's user; the first key retires the env
+`CAPTURE_KEY`). Not built: offline full-text search, audit log.
 
 ---
 

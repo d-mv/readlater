@@ -23,8 +23,8 @@ afterwards only if it started it.
 - Each `NN_*.sql` file is one transaction that rolls back. `now()` is fixed
   within it, so "was bumped" checks compare an old fixture value to `now()`.
 - `00_inventory.sql` pins the exact set of public tables, functions,
-  triggers, policies, bookmarks indexes and anon/authenticated table
-  privileges: adding one to a migration fails it until it's listed there and
+  triggers, policies, bookmarks indexes and anon/authenticated table (and
+  column-only) privileges: adding one to a migration fails it until it's listed there and
   covered below.
 
 ## Coverage checklist
@@ -51,6 +51,7 @@ afterwards only if it started it.
 | `list_orphaned_storage_objects()` (min age, limit, both buckets, service_role only) | 06 |
 | `supabase_realtime` publication column list | 07 |
 | `search_vector` + `bookmarks_search_idx` (weights, websearch syntax, RLS, default config) | 07 |
+| `capture_keys` (PK/FK/unique hash, policy "owner read", column privileges: anon none, owner reads only `created_at`/`last_used_at`), `rotate_capture_key()` (grants, security definer, stored hash = sha256 of the returned key, replace, `capture-key` rate limit → PT429, user cascade) | 10 (+ column grants in 00) |
 | pg_cron/pg_net, `storage-sweep` cron job (schedule, no hard-coded URL, no-op without both Vault secrets, request shape with them) | 08 |
 
 Not testable at the SQL level: bucket MIME/size enforcement (done by the

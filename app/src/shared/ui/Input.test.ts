@@ -11,6 +11,29 @@ describe("Input", () => {
     expect(wrapper.emitted("update:modelValue")?.[0]).toEqual(["ab"]);
   });
 
+  test("readonly renders a read-only field whose text is selected on focus", async () => {
+    const wrapper = mount(Input, {
+      props: { modelValue: "secret-ish", readonly: true },
+      attachTo: document.body,
+    });
+    const input = wrapper.get("input");
+    expect(input.attributes("readonly")).toBeDefined();
+    await input.trigger("focus");
+    const el = input.element as HTMLInputElement;
+    expect([el.selectionStart, el.selectionEnd]).toEqual([0, "secret-ish".length]);
+    wrapper.unmount();
+  });
+
+  test("an editable field leaves the selection alone on focus", async () => {
+    const wrapper = mount(Input, { props: { modelValue: "abc" }, attachTo: document.body });
+    const el = wrapper.get("input").element as HTMLInputElement;
+    el.setSelectionRange(1, 1);
+    await wrapper.get("input").trigger("focus");
+    expect([el.selectionStart, el.selectionEnd]).toEqual([1, 1]);
+    expect(wrapper.get("input").attributes("readonly")).toBeUndefined();
+    wrapper.unmount();
+  });
+
   test("renders a textarea when area is set", () => {
     const wrapper = mount(Input, { props: { modelValue: "", area: true } });
     expect(wrapper.find("textarea").exists()).toBe(true);

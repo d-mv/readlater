@@ -15,7 +15,10 @@ describe("supabase client", () => {
     vi.stubEnv("VITE_SUPABASE_URL", "https://project.supabase.co");
     vi.stubEnv("VITE_SUPABASE_PUBLISHABLE_KEY", "sb_publishable_test");
 
-    const { supabase, AUTH_STORAGE_KEY } = await import("./supabase");
+    const { supabase, AUTH_STORAGE_KEY, CAPTURE_ENDPOINT } = await import("./supabase");
+
+    // Where the iOS Shortcut posts captures (Settings → Capture key).
+    expect(CAPTURE_ENDPOINT).toBe("https://project.supabase.co/functions/v1/capture");
 
     // The key supabase-js derives by default, so stored sessions stay valid.
     expect(AUTH_STORAGE_KEY).toBe("sb-project-auth-token");

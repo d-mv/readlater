@@ -9,6 +9,8 @@ export interface InputProps {
   type?: "text" | "url" | "email" | "password" | "search";
   placeholder?: string;
   required?: boolean;
+  // Shown, selectable and copyable, but not editable; focusing selects it all.
+  readonly?: boolean;
   autofocus?: boolean;
   autocomplete?: string;
   maxlength?: number;
@@ -30,6 +32,7 @@ const props = withDefaults(defineProps<InputProps>(), {
   type: "text",
   placeholder: undefined,
   required: false,
+  readonly: false,
   autofocus: false,
   autocomplete: undefined,
   maxlength: undefined,
@@ -41,6 +44,10 @@ const emit = defineEmits<InputEmits>();
 
 const base =
   "w-full h-40 rounded-sm border border-line bg-canvas px-12 py-0 text-base leading-[normal] text-ink box-border hover:bg-recessed focus:border-ink focus:bg-canvas focus:outline-none transition-colors duration-(--duration)";
+
+function onFocus(event: FocusEvent) {
+  if (props.readonly) (event.target as HTMLInputElement).select();
+}
 
 function onInput(event: Event) {
   emit("update:modelValue", (event.target as HTMLInputElement | HTMLTextAreaElement).value);
@@ -69,12 +76,14 @@ function onInput(event: Event) {
     :type="props.type"
     :placeholder="props.placeholder"
     :required="props.required"
+    :readonly="props.readonly"
     :autofocus="props.autofocus"
     :autocomplete="props.autocomplete"
     :maxlength="props.maxlength"
     :aria-label="props.ariaLabel"
     :data-testid="props.testId"
     :class="cn(base, props.class)"
+    @focus="onFocus"
     @input="onInput"
     @paste="emit('paste', $event)"
   />

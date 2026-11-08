@@ -1,3 +1,5 @@
+import { createHash, randomBytes } from "node:crypto";
+
 import type { BrowserContext, Request, Route, WebSocketRoute } from "@playwright/test";
 
 import type { Bookmark, Tag } from "../src/lib/supabase";
@@ -43,6 +45,18 @@ interface Deletion {
   bookmark_id: string;
   deleted_at: string;
 }
+
+export interface CaptureKeyRow {
+  user_id: string;
+  key_hash: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+// rotate_capture_key's limit (rate_limit_for('capture-key')).
+const CAPTURE_KEY_ROTATIONS_PER_HOUR = 10;
+// The only capture_keys columns authenticated may read (column privileges).
+const CAPTURE_KEY_READABLE = new Set(["created_at", "last_used_at"]);
 
 export type BookmarkSeed = Partial<ServerBookmark> & {
   // Tag names; created on first use.
@@ -279,6 +293,7 @@ const TABLE_COLUMNS: Record<string, ReadonlySet<string>> = {
   tags: new Set(["id", "user_id", "name", "color"]),
   bookmark_tags: new Set(["bookmark_id", "tag_id"]),
   bookmark_deletions: new Set(["bookmark_id", "user_id", "deleted_at"]),
+  capture_keys: new Set(["user_id", "key_hash", "created_at", "last_used_at"]),
 };
 // Generated columns: Postgres refuses a value for them.
 const GENERATED_COLUMNS = new Set(["url_normalized", "search_vector"]);
@@ -450,6 +465,10 @@ export class FakeBackend {
   tags: ServerTag[] = [];
   bookmarkTags: BookmarkTag[] = [];
   deletions: Deletion[] = [];
+  /** The signed-in user's capture key row (at most one), as the DB holds it. */
+  captureKeys: CaptureKeyRow[] = [];
+  /** Plaintext keys rotate_capture_key handed out, oldest first. */
+  issuedCaptureKeys: string[] = [];
   /** Storage objects by `bucket/path`. */
   storage = new Map<string, { body: Buffer; contentType: string }>();
   /** Responses for hosts other than the app and Supabase (article images, YouTube…), by URL. */
@@ -524,6 +543,19 @@ export class FakeBackend {
     seed: (index: number) => BookmarkSeed = () => ({}),
   ): ServerBookmark[] {
     return Array.from({ length: count }, (_, index) => this.addBookmark(seed(index)));
+  }
+
+  /** Seeds an existing capture key (its plaintext is never needed). */
+  addCaptureKey(fields: Partial<CaptureKeyRow> = {}): CaptureKeyRow {
+    const row: CaptureKeyRow = {
+      user_id: USER.id,
+      key_hash: createHash("sha256").update(`seeded-${this.captureKeys.length}`).digest("hex"),
+      created_at: "2026-10-01T09:00:00.000000+00:00",
+      last_used_at: null,
+      ...fields,
+    };
+    this.captureKeys = [row];
+    return row;
   }
 
   bookmark(id: string): ServerBookmark | undefined {
@@ -722,6 +754,7 @@ export class FakeBackend {
       body,
     });
     if (failed) return failed;
+    if (name === "rotate_capture_key") return this.rotateCaptureKey();
     if (name !== "get_public_bookmark") return this.notImplemented(`rpc ${name}`);
     const row = this.bookmarks.find((b) => b.id === body?.bookmark_id && b.is_public);
     if (!row) return { status: 200, body: [] };
@@ -758,6 +791,28 @@ export class FakeBackend {
     };
   }
 
+  // rotate_capture_key(): a fresh rlk_ key whose sha256 replaces the user's
+  // row; PT429 (HTTP 429) past the hourly limit, like the real function.
+  private rotateCaptureKey() {
+    if (this.issuedCaptureKeys.length >= CAPTURE_KEY_ROTATIONS_PER_HOUR) {
+      return {
+        status: 429,
+        body: { code: "PT429", message: "rate limit exceeded", details: null, hint: null },
+      };
+    }
+    const key = `rlk_${randomBytes(32).toString("base64url")}`;
+    this.issuedCaptureKeys.push(key);
+    this.captureKeys = [
+      {
+        user_id: USER.id,
+        key_hash: createHash("sha256").update(key).digest("hex"),
+        created_at: this.now(),
+        last_used_at: null,
+      },
+    ];
+    return { status: 200, body: key };
+  }
+
   private handleRest(request: Request, url: URL) {
     const table = url.pathname.slice("/rest/v1/".length);
     const method = request.method();
@@ -779,6 +834,8 @@ export class FakeBackend {
 
     const invalid = schemaError(table, url.searchParams, body);
     if (invalid) return invalid;
+    const denied = this.privilegeError(table, request.method(), url.searchParams);
+    if (denied) return denied;
 
     const headers = request.headers();
     const wantsObject = (headers["accept"] ?? "").includes("application/vnd.pgrst.object+json");
@@ -840,6 +897,21 @@ export class FakeBackend {
     return { status, body: projected };
   }
 
+  /**
+   * The 403 PostgREST answers when the authenticated role lacks a privilege:
+   * capture_keys allows SELECT of created_at / last_used_at only.
+   */
+  private privilegeError(table: string, method: string, params: URLSearchParams): RestError | null {
+    if (table !== "capture_keys") return null;
+    const selection = parseSelect(params.get("select"));
+    const readsOnlyDates =
+      !selection.star &&
+      selection.columns.every((c) => CAPTURE_KEY_READABLE.has(c)) &&
+      filterColumns(params).every((c) => CAPTURE_KEY_READABLE.has(c));
+    if ((method === "GET" || method === "HEAD") && readsOnlyDates) return null;
+    return restError(403, "42501", "permission denied for table capture_keys");
+  }
+
   private tableRows(table: string): Row[] {
     switch (table) {
       case "bookmarks":
@@ -850,6 +922,8 @@ export class FakeBackend {
         return this.bookmarkTags as unknown as Row[];
       case "bookmark_deletions":
         return this.deletions as unknown as Row[];
+      case "capture_keys":
+        return this.captureKeys as unknown as Row[];
       default:
         throw new Error(`unknown table ${table}`);
     }

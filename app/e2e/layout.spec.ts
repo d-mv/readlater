@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 
-import { article, expect, readerTitle, row, rows, test } from "./fixtures";
+import { answerNextConfirm, article, expect, readerTitle, row, rows, test } from "./fixtures";
 
 // Runs in both projects: the phone project (390px) gets the next text step up
 // below Tailwind's `sm` breakpoint (640px), the desktop one the compact sizes.
@@ -91,6 +91,11 @@ test("settings and the login screen fit the viewport", async ({ page, backend })
   await page.goto("/settings");
   await expect(page.getByTestId("export-btn")).toBeVisible();
   await expect(page.getByTestId("shared-link")).toBeVisible();
+  await expectNoHorizontalScroll(page);
+  // The one-time key panel (long unbroken key + endpoint URL) fits too.
+  answerNextConfirm(page, true);
+  await page.getByTestId("capture-key-generate").click();
+  await expect(page.getByTestId("capture-key-value")).toHaveValue(/^rlk_/);
   await expectNoHorizontalScroll(page);
 
   await page.getByTestId("sign-out-btn").click();

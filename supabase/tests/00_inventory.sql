@@ -3,10 +3,10 @@
 -- and given tests in the matching file (see README.md checklist).
 begin;
 \ir _helpers.psql
-select plan(10);
+select plan(12);
 
 select tables_are('public',
-  array['bookmarks', 'tags', 'bookmark_tags', 'bookmark_deletions', 'rate_limits']);
+  array['bookmarks', 'tags', 'bookmark_tags', 'bookmark_deletions', 'rate_limits', 'capture_keys']);
 
 select functions_are('public', array[
   'get_public_bookmark',
@@ -18,7 +18,8 @@ select functions_are('public', array[
   'bump_rate_limit_for_user',
   'bump_rate_limit',
   'list_orphaned_storage_objects',
-  'rate_limit_for'
+  'rate_limit_for',
+  'rotate_capture_key'
 ]);
 
 select triggers_are('public', 'bookmarks',
@@ -26,6 +27,7 @@ select triggers_are('public', 'bookmarks',
 select triggers_are('public', 'bookmark_tags', array['bookmark_tags_touch_bookmark']);
 select triggers_are('public', 'tags', array['tags_touch_bookmarks']);
 select triggers_are('public', 'bookmark_deletions', array[]::name[]);
+select triggers_are('public', 'capture_keys', array[]::name[]);
 
 select is(
   (select array_agg(c.relname::text order by c.relname) from pg_class c
@@ -37,7 +39,7 @@ select is(
   (select array_agg(tablename || ': ' || policyname order by tablename, policyname)
    from pg_policies where schemaname = 'public'),
   array['bookmark_deletions: owner read', 'bookmark_tags: owner access',
-        'bookmarks: owner access', 'tags: owner access']::text[],
+        'bookmarks: owner access', 'capture_keys: owner read', 'tags: owner access']::text[],
   'public policies'
 );
 
@@ -56,6 +58,21 @@ select is(
         'bookmarks: authenticated: DELETE,INSERT,SELECT,UPDATE',
         'tags: authenticated: INSERT,SELECT,UPDATE']::text[],
   'anon holds no table privileges; authenticated only what the app uses'
+);
+
+-- Column-only privileges (granted per column, with no table-level grant of
+-- the same privilege): capture_keys exposes its dates, never key_hash.
+select is(
+  (select array_agg(format('%s.%s: %s: %s', table_name, column_name, grantee, privilege_type)
+                    order by table_name, column_name, grantee, privilege_type)
+   from information_schema.column_privileges cp
+   where table_schema = 'public' and grantee in ('anon', 'authenticated')
+     and not exists (select 1 from information_schema.role_table_grants t
+                     where t.table_schema = 'public' and t.table_name = cp.table_name
+                       and t.grantee = cp.grantee and t.privilege_type = cp.privilege_type)),
+  array['capture_keys.created_at: authenticated: SELECT',
+        'capture_keys.last_used_at: authenticated: SELECT']::text[],
+  'column-level grants: only capture_keys'' dates, to authenticated'
 );
 
 select indexes_are('public', 'bookmarks', array[

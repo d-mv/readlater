@@ -57,3 +57,29 @@ javascript:(()=%3E%7Bconst%20params=new%20URLSearchParams(%7Burl:location.href,t
 The popup is 380×260; a very long title or URL scrolls inside it. To build
 it for another origin: `cd bookmarklet && APP_ORIGIN=https://… bun run build`
 (writes `bookmarklet/dist.txt`, not committed).
+
+## iOS Shortcut
+
+iOS has no PWA share target, so an iOS Shortcut posts captures to the
+`capture` edge function instead.
+
+1. In the app, open **Settings → Capture key** and tap **Generate key**
+   (later: **Generate new key**). The key (`rlk_…`) is shown **once** — copy
+   it. Generating a new key turns the previous one off straight away, and
+   your first key also turns off the server's old static `CAPTURE_KEY`.
+2. In the Shortcuts app, make a shortcut that accepts URLs and text from the
+   share sheet, with a **Get Contents of URL** action:
+   - URL: `https://<project-ref>.supabase.co/functions/v1/capture` (Settings
+     shows the exact address)
+   - Method: `POST`
+   - Header: `Authorization` = `Bearer <your key>`
+   - Request body: JSON, `url` = the shared URL — or `text` = shared text,
+     which is saved as a note (text that is just a URL is saved as a link).
+3. The answer is `{"status":"created","id":…}`, or
+   `{"status":"duplicate","existingId":…}` for a URL you already saved —
+   `POST …/capture/<existingId>/refresh` re-fetches it (`409
+   confirm_required` for an edited bookmark unless the body is
+   `{"force":true}`). A wrong or retired key gets `401`.
+
+Settings shows when the key was created and last used. If the key leaks,
+generate a new one and update the shortcut's header.

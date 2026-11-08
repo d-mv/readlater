@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1.0.19";
-import { checkAuth } from "./checkAuth.ts";
+import { bearerToken, checkAuth } from "./checkAuth.ts";
 
 Deno.test("accepts a matching bearer token", () => {
   assertEquals(checkAuth("Bearer secret123", "secret123"), true);
@@ -19,4 +19,14 @@ Deno.test("rejects a header missing the Bearer prefix", () => {
 
 Deno.test("rejects when the expected key is empty (misconfiguration)", () => {
   assertEquals(checkAuth("Bearer ", ""), false);
+});
+
+Deno.test("bearerToken: returns the token after the Bearer prefix", () => {
+  assertEquals(bearerToken("Bearer abc"), "abc");
+});
+
+Deno.test("bearerToken: no header, another scheme or an empty token is null", () => {
+  assertEquals(bearerToken(null), null);
+  assertEquals(bearerToken("Basic abc"), null);
+  assertEquals(bearerToken("Bearer "), null);
 });

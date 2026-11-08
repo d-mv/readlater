@@ -12,7 +12,7 @@ const { push, replace } = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn() })
 vi.mock("vue-router", () => ({ useRouter: () => ({ push, replace }) }));
 
 // The sections that load their own data have their own tests.
-config.global.stubs = { SharedLinksSection: true };
+config.global.stubs = { CaptureKeySection: true, SharedLinksSection: true };
 
 const { default: SettingsView } = await import("./SettingsView.vue");
 const { useDataTransferStore } = await import("../stores/dataTransfer");
@@ -41,8 +41,9 @@ describe("SettingsView", () => {
     vi.unstubAllGlobals();
   });
 
-  test("shows the shared-links section", () => {
+  test("shows the capture-key and shared-links sections", () => {
     const wrapper = mount(SettingsView);
+    expect(wrapper.findComponent({ name: "CaptureKeySection" }).exists()).toBe(true);
     expect(wrapper.findComponent({ name: "SharedLinksSection" }).exists()).toBe(true);
   });
 

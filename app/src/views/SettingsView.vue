@@ -8,6 +8,7 @@ import type { SkippedRow } from "../utils/dataTransfer";
 import Button from "../shared/ui/Button.vue";
 import IconButton from "../shared/ui/IconButton.vue";
 import Message from "../shared/ui/Message.vue";
+import CaptureKeySection from "../components/settings/CaptureKeySection.vue";
 import SharedLinksSection from "../components/settings/SharedLinksSection.vue";
 
 const router = useRouter();
@@ -155,6 +156,8 @@ async function onFileSelected(event: Event) {
         </li>
       </ul>
     </section>
+
+    <CaptureKeySection />
 
     <SharedLinksSection />
 

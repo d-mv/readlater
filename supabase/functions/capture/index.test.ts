@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert@1.0.19";
 import { quietly, stubFetch, withEnv } from "../_shared/testing.ts";
+import { sha256Hex } from "./captureAuth.ts";
 import {
   handleCapture,
   handleRefresh,
@@ -24,6 +25,10 @@ function fakeSupabase(opts: {
   existing?: { id: string; title: string | null; created_at: string } | null;
   // The refresh's content_edited lookup sees no row.
   contentLookupMissing?: boolean;
+  // capture_keys rows (service-role view) and failures of its lookup/update.
+  captureKeys?: { user_id: string; key_hash: string }[];
+  keyLookupError?: { message: string };
+  lastUsedError?: { message: string };
 }) {
   let lastUpdatedRow: Record<string, unknown> | undefined;
   let lastInsertedRow: Record<string, unknown> | undefined;
@@ -33,6 +38,33 @@ function fakeSupabase(opts: {
   const contentLookups: Record<string, string>[] = [];
   const updateFilters: Record<string, string>[] = [];
   const rpcCalls: { fn: string; args: Record<string, unknown> }[] = [];
+  const keyUpdates: { row: Record<string, unknown>; userId: string }[] = [];
+
+  const captureKeysTable = {
+    select: (_cols: string) => {
+      const filters: Record<string, string> = {};
+      const query = {
+        eq: (col: string, val: string) => {
+          filters[col] = val;
+          return query;
+        },
+        maybeSingle: () => {
+          if (opts.keyLookupError) return Promise.resolve({ data: null, error: opts.keyLookupError });
+          const row = (opts.captureKeys ?? []).find((r) =>
+            Object.entries(filters).every(([k, v]) => r[k as "user_id" | "key_hash"] === v)
+          );
+          return Promise.resolve({ data: row ? { user_id: row.user_id } : null, error: null });
+        },
+      };
+      return query;
+    },
+    update: (row: Record<string, unknown>) => ({
+      eq: (_col: string, userId: string) => {
+        keyUpdates.push({ row, userId });
+        return Promise.resolve({ error: opts.lastUsedError ?? null });
+      },
+    }),
+  };
 
   const select = (_cols: string) => {
     const filters: Record<string, string> = {};
@@ -84,7 +116,8 @@ function fakeSupabase(opts: {
     };
   };
 
-  const from = (_table: string) => ({ select, update, insert });
+  const from = (table: string) =>
+    table === "capture_keys" ? captureKeysTable : { select, update, insert };
   const rpc = (fn: string, args: Record<string, unknown>) => {
     rpcCalls.push({ fn, args });
     return Promise.resolve(opts.rateLimit ?? { data: true, error: null });
@@ -93,6 +126,7 @@ function fakeSupabase(opts: {
     from,
     rpc,
     rpcCalls,
+    keyUpdates,
     lookups,
     contentLookups,
     updateFilters,
@@ -293,14 +327,6 @@ Deno.test("handleRequest: refresh with no body is an unconfirmed refresh", async
 // deno-lint-ignore no-explicit-any
 const asClient = (s: unknown) => s as any;
 
-Deno.test("handleCapture: missing OWNER_USER_ID is a generic 500 that touches nothing", async () => {
-  const supabase = fakeSupabase({});
-  const res = await quietly(() => handleCapture(asClient(supabase), undefined, { text: "a note" }));
-  assertEquals(res.status, 500);
-  assertEquals(await res.json(), "internal error");
-  assertEquals(supabase.rpcCalls, []);
-});
-
 Deno.test("handleCapture: a url over the cap is a 400", async () => {
   const supabase = fakeSupabase({});
   const url = "https://example.com/" + "a".repeat(MAX_URL_CHARS);
@@ -391,14 +417,6 @@ Deno.test("handleCapture: any other URL insert failure is a generic 500 without 
   assertEquals(res.status, 500);
   assertEquals(await res.json(), "internal error");
   assertEquals(supabase.lookups, []);
-});
-
-Deno.test("handleRefresh: missing OWNER_USER_ID is a generic 500 that touches nothing", async () => {
-  const supabase = fakeSupabase({});
-  const res = await quietly(() => handleRefresh(asClient(supabase), undefined, BOOKMARK_ID, true));
-  assertEquals(res.status, 500);
-  assertEquals(supabase.rpcCalls, []);
-  assertEquals(supabase.lastUpdatedRow, undefined);
 });
 
 Deno.test("handleRefresh: a failed rate-limit RPC is a 500, not a pass", async () => {
@@ -531,6 +549,8 @@ Deno.test(
   "handlerFromEnv: captures as OWNER_USER_ID through a service-role client",
   withEnv(deployedEnv, async () => {
     const net = stubFetch({
+      // No stored key matches, and the owner has none: the env key is accepted.
+      "/rest/v1/capture_keys": () => Response.json([]),
       "/rest/v1/rpc/bump_rate_limit_for_user": () => Response.json(true),
       "/rest/v1/bookmarks": () => Response.json({ id: "n1" }, { status: 201 }),
     });
@@ -540,11 +560,13 @@ Deno.test(
       assertEquals(await res.json(), { status: "created", id: "n1" });
 
       assertEquals(net.calls.map((c) => `${c.method} ${c.path}`), [
+        "GET /rest/v1/capture_keys",
+        "GET /rest/v1/capture_keys",
         "POST /rest/v1/rpc/bump_rate_limit_for_user",
         "POST /rest/v1/bookmarks",
       ]);
       for (const call of net.calls) assertEquals(call.headers.get("apikey"), "service-role-key");
-      assertEquals(JSON.parse(net.calls[1].body!).user_id, OWNER);
+      assertEquals(JSON.parse(net.calls[3].body!).user_id, OWNER);
     } finally {
       net.restore();
     }
@@ -552,15 +574,104 @@ Deno.test(
 );
 
 Deno.test(
-  "handlerFromEnv: refuses every caller when CAPTURE_KEY is unset",
+  "handlerFromEnv: without CAPTURE_KEY only stored keys are accepted",
   withEnv({ ...deployedEnv, CAPTURE_KEY: undefined }, async () => {
-    const net = stubFetch({});
+    const net = stubFetch({ "/rest/v1/capture_keys": () => Response.json([]) });
     try {
       const res = await handlerFromEnv()(captureRequest(JSON.stringify({ text: "a note" })));
       assertEquals(res.status, 401);
-      assertEquals(net.calls, []);
+      assertEquals(net.calls.map((c) => `${c.method} ${c.path}`), ["GET /rest/v1/capture_keys"]);
     } finally {
       net.restore();
     }
   }),
 );
+
+// ─── per-user capture keys ─────────────────────────────────────────────────
+
+const KEY_USER = "key-user-2";
+const DB_KEY = "rlk_generated-key";
+
+function keyRequest(token: string, body: BodyInit = JSON.stringify({ text: "a note" })): Request {
+  return new Request("http://localhost/functions/v1/capture", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body,
+  });
+}
+
+Deno.test("handleRequest: a stored key captures as that key's user and records its use", async () => {
+  const supabase = fakeSupabase({ captureKeys: [{ user_id: KEY_USER, key_hash: await sha256Hex(DB_KEY) }] });
+  const res = await handleRequest(keyRequest(DB_KEY), asClient(supabase), env);
+
+  assertEquals(res.status, 200);
+  assertEquals(supabase.lastInsertedRow?.user_id, KEY_USER);
+  // The rate limit is the resolved user's, not OWNER_USER_ID's.
+  assertEquals(supabase.rpcCalls, [{
+    fn: "bump_rate_limit_for_user",
+    args: { p_user_id: KEY_USER, p_action: "capture" },
+  }]);
+  assertEquals(supabase.keyUpdates.length, 1);
+  assertEquals(supabase.keyUpdates[0].userId, KEY_USER);
+  assertEquals(typeof supabase.keyUpdates[0].row.last_used_at, "string");
+});
+
+Deno.test("handleRequest: a failed last_used_at write doesn't fail the capture", async () => {
+  const supabase = fakeSupabase({
+    captureKeys: [{ user_id: KEY_USER, key_hash: await sha256Hex(DB_KEY) }],
+    lastUsedError: { message: "update failed" },
+  });
+  const res = await quietly(() => handleRequest(keyRequest(DB_KEY), asClient(supabase), env));
+  assertEquals(res.status, 200);
+  assertEquals(supabase.lastInsertedRow?.user_id, KEY_USER);
+});
+
+Deno.test("handleRequest: refresh with a stored key is scoped to that key's user", async () => {
+  const supabase = fakeSupabase({ captureKeys: [{ user_id: KEY_USER, key_hash: await sha256Hex(DB_KEY) }] });
+  const req = new Request(`http://localhost/functions/v1/capture/${BOOKMARK_ID}/refresh`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${DB_KEY}` },
+    body: JSON.stringify({ force: true }),
+  });
+  const res = await handleRequest(req, asClient(supabase), env);
+  assertEquals(res.status, 200);
+  assertEquals(supabase.updateFilters, [{ id: BOOKMARK_ID, user_id: KEY_USER }]);
+});
+
+Deno.test("handleRequest: the env key works as OWNER_USER_ID while the owner has no key, without a last-used write", async () => {
+  const supabase = fakeSupabase({ captureKeys: [{ user_id: KEY_USER, key_hash: await sha256Hex(DB_KEY) }] });
+  const res = await handleRequest(captureRequest(JSON.stringify({ text: "a note" })), asClient(supabase), env);
+  assertEquals(res.status, 200);
+  assertEquals(supabase.lastInsertedRow?.user_id, OWNER);
+  assertEquals(supabase.keyUpdates, []);
+});
+
+Deno.test("handleRequest: the env key is a 401 once the owner has generated a key", async () => {
+  const supabase = fakeSupabase({ captureKeys: [{ user_id: OWNER, key_hash: await sha256Hex(DB_KEY) }] });
+  const res = await handleRequest(captureRequest(JSON.stringify({ text: "a note" })), asClient(supabase), env);
+  assertEquals(res.status, 401);
+  assertEquals(await res.text(), "unauthorized");
+  assertEquals(supabase.lastInsertedRow, undefined);
+  assertEquals(supabase.rpcCalls, []);
+});
+
+Deno.test("handleRequest: the env key with OWNER_USER_ID unset is a generic 500 that touches nothing", async () => {
+  const supabase = fakeSupabase({});
+  const res = await quietly(() =>
+    handleRequest(captureRequest(JSON.stringify({ text: "a note" })), asClient(supabase), {
+      captureKey: "k3y",
+      ownerUserId: undefined,
+    })
+  );
+  assertEquals(res.status, 500);
+  assertEquals(await res.json(), "internal error");
+  assertEquals(supabase.rpcCalls, []);
+});
+
+Deno.test("handleRequest: a failed key lookup is a generic 500, not a 401 or a pass", async () => {
+  const supabase = fakeSupabase({ keyLookupError: { message: "relation capture_keys blew up" } });
+  const res = await quietly(() => handleRequest(keyRequest(DB_KEY), asClient(supabase), env));
+  assertEquals(res.status, 500);
+  assertEquals(await res.json(), "internal error");
+  assertEquals(supabase.lastInsertedRow, undefined);
+});

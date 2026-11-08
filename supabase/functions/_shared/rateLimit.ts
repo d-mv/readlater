@@ -12,8 +12,8 @@ export type RateLimitOutcome = "allowed" | "limited" | "error";
 
 // JWT-authed functions: bump_rate_limit keys the counter on auth.uid() of the
 // caller's own session. Service-role callers (capture, which authenticates
-// with CAPTURE_KEY and writes as OWNER_USER_ID) pass userId and go through
-// bump_rate_limit_for_user, which only service_role may execute.
+// with a per-user capture key and writes as that key's user) pass userId and
+// go through bump_rate_limit_for_user, which only service_role may execute.
 export async function bumpRateLimit(
   supabase: SupabaseClient,
   action: RateLimitedAction,

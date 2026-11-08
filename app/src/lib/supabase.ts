@@ -14,6 +14,10 @@ if (!url || !publishableKey) {
 // the server.
 export const AUTH_STORAGE_KEY = `sb-${new URL(url).hostname.split(".")[0]}-auth-token`;
 
+// The capture edge function the iOS Shortcut posts to, with a capture key
+// from Settings as its bearer.
+export const CAPTURE_ENDPOINT = `${url}/functions/v1/capture`;
+
 export const supabase = createClient(url, publishableKey, {
   auth: { storageKey: AUTH_STORAGE_KEY },
 });

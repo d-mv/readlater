@@ -49,10 +49,10 @@ select ok(
 
 select results_eq(
   $$select a, (public.rate_limit_for(a)).max_calls, (public.rate_limit_for(a)).time_window
-    from unnest(array['capture', 'translate', 'snippet', 'file-import', 'pdf-import']) a$$,
+    from unnest(array['capture', 'translate', 'snippet', 'file-import', 'pdf-import', 'capture-key']) a$$,
   $$values ('capture', 120, interval '1 hour'), ('translate', 20, interval '1 hour'),
            ('snippet', 30, interval '1 hour'), ('file-import', 30, interval '1 hour'),
-           ('pdf-import', 30, interval '1 hour')$$,
+           ('pdf-import', 30, interval '1 hour'), ('capture-key', 10, interval '1 hour')$$,
   'per-action limits'
 );
 

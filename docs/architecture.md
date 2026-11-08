@@ -16,7 +16,7 @@ flowchart TD
     BM["Bookmarklet popup (/capture), Save click"] -->|store.add, session| Client[PWA client insert]
     ST["Share target (/share-target), Save click"] -->|store.add / store.addNote, session| Client
     Dlg["Add dialog (URL mode)"] -->|store.add, session| Client
-    Short[iOS Shortcut] -->|POST url/text, CAPTURE_KEY| Cap[capture edge function]
+    Short[iOS Shortcut] -->|POST url/text, per-user capture key| Cap[capture edge function]
     Snip["Add dialog (Snippet mode)"] -->|HTML/text, JWT| Snippet[snippet edge function]
     File["Add dialog (File mode)"] -->|base64, JWT| FileFn[file-import / pdf-import edge functions]
     Client -->|url| Pending[(status=pending)]
@@ -46,7 +46,7 @@ Independently replaceable pieces:
 | Component | Role | Stack |
 |---|---|---|
 | Bookmarklet | Popup-opener, no logic of its own | `javascript:` URL, built by `bookmarklet/build.ts` |
-| `capture` edge function | `CAPTURE_KEY`-authed insert/dedupe for url/text captures from non-browser callers (iOS Shortcut); `POST /capture/:id/refresh` | Deno (Supabase Edge Functions) |
+| `capture` edge function | Capture-key-authed insert/dedupe for url/text captures from non-browser callers (iOS Shortcut), written as the key's user; `POST /capture/:id/refresh` | Deno (Supabase Edge Functions) |
 | `snippet` edge function | JWT-authed HTML→Markdown insert for pasted snippets | Deno |
 | `file-import` / `pdf-import` edge functions | JWT-authed Markdown/Word → note, PDF → stored original + extracted text | Deno (`npm:mammoth`, `npm:unpdf`) |
 | `translate` edge function | JWT-authed DeepL translation of the row's own `content_md` (loaded server-side), cached on the row | Deno |
@@ -173,6 +173,24 @@ create table rate_limits (
 -- bump_rate_limit(p_action) → boolean: the same, keyed on the caller's own
 --   auth.uid(); execute: authenticated. Callers never supply the limit.
 
+-- iOS Shortcut capture keys (20261108100000): one per user, only the sha256
+-- (hex) of the key is stored. Owner may read the dates, never the hash.
+create table capture_keys (
+  user_id      uuid primary key references auth.users(id) on delete cascade,
+  key_hash     text not null unique,
+  created_at   timestamptz not null default now(),
+  last_used_at timestamptz
+);
+create policy "owner read" on capture_keys for select to authenticated
+  using (user_id = (select auth.uid()));
+grant select (created_at, last_used_at) on capture_keys to authenticated;  -- column privileges
+-- rotate_capture_key() → text: security definer, search_path '', execute:
+--   authenticated (revoked from public/anon). Bumps the 'capture-key' rate
+--   limit (10/h; over it raises SQLSTATE PT429 → HTTP 429), generates
+--   'rlk_' + base64url(gen_random_bytes(32)), upserts its sha256 for
+--   auth.uid() (created_at = now(), last_used_at = null) and returns the
+--   plaintext — the only time it exists anywhere.
+
 -- Table privileges (20261012100000_minimal_table_grants): anon holds none;
 -- authenticated holds exactly what the app and RLS-scoped functions use.
 revoke all on bookmarks, tags, bookmark_tags, bookmark_deletions, rate_limits
@@ -293,7 +311,11 @@ flattened base schema (tables, indexes, replica identity, RLS,
 `20261012100000_minimal_table_grants`,
 `20261012101000_bookmarks_url_unique_per_user` and
 `20261012102000_schedule_storage_sweep` (pg_cron + pg_net, Vault-driven
-nightly sweep, §5). New changes go in new migration
+nightly sweep, §5), `20261022100000_rate_limits_server_side`,
+`20261022110000_tag_touch_and_user_delete`,
+`20261022120000_url_normalized_keeps_path_case` and
+`20261108100000_capture_keys` (per-user capture keys, `rotate_capture_key`,
+`capture-key` rate limit). New changes go in new migration
 files.
 
 ## 3. Capture paths
@@ -304,7 +326,7 @@ Seven ways in, all funneling into the same `bookmarks` table:
 |---|---|---|---|
 | Bookmarklet | `bookmarklet/source.js` → `/capture` popup route, Save click | Existing PWA Supabase session | `store.add()`, same path as the in-app dialog |
 | PWA share-target (Chrome/Android only) | `/share-target` (manifest `share_target`), Save click → `store.add()` / `store.addNote()` | Existing PWA Supabase session | url (or text that is a bare URL) → `pending`; free text → `note`, `ready` |
-| iOS Shortcut | `POST` to the `capture` edge fn | `CAPTURE_KEY` bearer | url → `pending`; free text → `note`, `ready` |
+| iOS Shortcut | `POST` to the `capture` edge fn | Per-user capture key bearer (Settings → Capture key) | url → `pending`; free text → `note`, `ready` |
 | Add dialog — URL mode | `AddBookmarkDialog.vue` | Supabase session (client insert) | `pending` |
 | Add dialog — Snippet mode | `AddBookmarkDialog.vue` → `snippet` edge fn | JWT (session) | `note`, `ready` |
 | Add dialog — File mode (.md/.markdown/.docx) | `AddBookmarkDialog.vue` → `file-import` edge fn | JWT (session) | `note`, `ready` |
@@ -344,7 +366,7 @@ visible popup rather than an inline toast.
 **Share-target.** Chrome-on-Android registers the PWA as an OS share target
 (`app/vite.config.ts` → `VitePWA({ manifest: { share_target } })`); WebKit/
 Safari has never implemented it, so iOS has no equivalent — the bookmarklet,
-or a one-tap iOS Shortcut POSTing to `capture` with the `CAPTURE_KEY` bearer,
+or a one-tap iOS Shortcut POSTing to `capture` with a capture-key bearer,
 covers that case instead. `ShareTargetView.vue` reads `url`/`text` from the
 query string (the shared `title` is ignored; the worker fills it) and saves
 through the store under the PWA's own session: a `url` (or `text` that
@@ -361,8 +383,8 @@ Snippet mode is a single textarea; on paste it reads both
 `text/html` and `text/plain` from the clipboard. If HTML was captured,
 `store.addSnippet()` calls the `snippet` edge function (JWT-authed, runs the
 insert under the user's own session/RLS — deliberately not layered onto
-`capture`, which authenticates non-browser callers via the static
-`CAPTURE_KEY` and hardcodes the owner id):
+`capture`, which authenticates non-browser callers with a capture key and
+writes through the service-role client):
 ```ts
 const converted = html ? createTurndownService().turndown(html) : ""; // _shared/turndown.ts
 const content = resolveContent(converted, text); // trimmed Markdown, else trimmed plain text
@@ -467,15 +489,34 @@ Separate trust levels, kept distinct on purpose:
 
 | Actor | Mechanism | Why |
 |---|---|---|
-| iOS Shortcut | `capture` edge fn, static `CAPTURE_KEY` bearer (constant-time compare, `_shared/checkAuth.ts`); the function then writes with the service-role key as `OWNER_USER_ID` | No browser session to lean on; intentionally weak — personal, single-user, low-value target |
+| iOS Shortcut | `capture` edge fn, per-user capture key bearer (`capture/captureAuth.ts`): sha256 of the token looked up in `capture_keys`; the function then writes with the service-role key as that row's `user_id`. Transition fallback: the legacy `CAPTURE_KEY` secret (constant-time compare, `_shared/checkAuth.ts`) as `OWNER_USER_ID`, only while that owner has no `capture_keys` row | No browser session to lean on; a key per user, rotatable from Settings, stored only as a hash |
 | Bookmarklet popup, share target, Add dialog (all modes), reader actions (edit, translate) | PWA's own Supabase session (JWT) | Browser-facing, already logged in — client inserts and the snippet/file-import/pdf-import/translate functions all run under the user's own RLS rather than the shared capture key |
 | VPS worker | Supabase `service_role` (`SUPABASE_SECRET_KEY`) | Needs unconditional read/write on every row; bypasses RLS by design, never reaches a browser |
 | Public view (`/s/:id`) | Supabase anon key + `get_public_bookmark` RPC | No session at all; scoped to a single exact-id match, not a table policy |
 | `storage-sweep` | Bearer must equal the service-role key (constant-time compare, `verify_jwt = false`) | Meant for a pg_cron job, never the app |
 
-`service_role` leaking means full database read/write/delete; `CAPTURE_KEY`
-leaking means someone can insert junk rows. Different blast radius, kept on
-separate secrets. RLS (`user_id = (select auth.uid())`) stays on even
+`service_role` leaking means full database read/write/delete; a capture key
+leaking means someone can insert junk rows into that one user's list (and
+re-queue their bookmarks) until it is rotated. Different blast radius, kept
+on separate secrets.
+
+**Capture keys.** Settings → Capture key calls `rotate_capture_key()`, which
+returns a new `rlk_…` key (32 random bytes, base64url) once and stores only
+its sha256; the previous key stops working at once. `capture` resolves every
+request (`resolveCaller`, `capture/captureAuth.ts`): no `Bearer` token, an
+empty one or one over 256 chars → 401 without a lookup; otherwise the token
+is hashed (SHA-256, hex — the same digest the migration computes) and
+`capture_keys` is queried by `key_hash` with the service-role client. A hit
+is the caller: captures, duplicate lookups, `POST /capture/:id/refresh` and
+the `capture` rate limit all use that `user_id`, and `last_used_at` is set
+(best effort — a failed write is logged and the capture still succeeds). A
+miss falls back to the legacy secret: the token must equal `CAPTURE_KEY`
+(constant-time) **and** `OWNER_USER_ID` must have no `capture_keys` row —
+so the owner's first generated key retires the static one; after that both
+secrets can be deleted. Anything else is the same plain `401 unauthorized`
+as before; a failed lookup is a generic 500 (never a pass). Every
+well-formed token costs the same hash + indexed lookup; only a token that
+already equals the legacy secret takes the extra owner check. RLS (`user_id = (select auth.uid())`) stays on even
 though there's only one user — it costs nothing and bounds a compromised
 PWA session to "your own rows".
 
@@ -490,7 +531,7 @@ go through `serverError()`, which logs the cause and answers a generic
 the caller. `rateLimit.ts`: per-user fixed windows, with the limits defined and
 enforced in Postgres (`rate_limit_for`) — capture 120/h, translate 20/h, snippet, file-import and pdf-import 30/h each
 (JWT functions call `bump_rate_limit` as the user; `capture` calls
-`bump_rate_limit_for_user` for `OWNER_USER_ID`); over the limit → 429, an
+`bump_rate_limit_for_user` for the user its key resolved to); over the limit → 429, an
 RPC failure → 500 (never "allowed"). `turndown.ts` (Turndown with the
 worker's linked-image rule), `noteRow.ts`, `file.ts`, `checkAuth.ts`.
 Imports are pinned to exact versions (`jsr:@supabase/supabase-js@2.110.8`,
@@ -1007,7 +1048,23 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   the share dialog's write, so a loaded list row updates too — and drops the
   row on success (the error is shown and the row kept otherwise). Loading,
   error (with Try again) and empty states; a load generation keeps a late
-  read or revoke from overwriting a newer one. **Sign out** lives here too (§7).
+  read or revoke from overwriting a newer one. **Capture key**
+  (`components/settings/CaptureKeySection.vue` +
+  `composables/useCaptureKey.ts`): reads only `created_at, last_used_at`
+  from `capture_keys` (the column privileges refuse anything else) and shows
+  "No key yet" (with a note that the first key turns the server's static key
+  off) or the created / last-used dates. **Generate key / Generate new key**
+  asks first (`window.confirm`: "The old key stops working; update your iOS
+  Shortcut."), calls `rotate_capture_key`, and shows the plaintext once in a
+  read-only, labelled field (selected on focus) with a copy button, "Copy it
+  now — it won't be shown again" and a short how-to: the `Get Contents of
+  URL` action posts JSON `{url}` / `{text}` to `CAPTURE_ENDPOINT`
+  (`lib/supabase.ts`, `<VITE_SUPABASE_URL>/functions/v1/capture`) with header
+  `Authorization: Bearer <key>`. The plaintext lives only in a ref in the
+  composable — never localStorage/IndexedDB — and is dropped on **Done**, on
+  the next rotation and when the section unmounts (leaving Settings). A
+  `PT429` answer reads "Too many new keys in the last hour". **Sign out**
+  lives here too (§7).
 - **Sharing** (`ShareDialog.vue`) — toggle bound to `bookmark.is_public`
   (`store.setPublic()`), a read-only `/s/:id` link with copy button and
   `navigator.share()` where available. First-time enabling a share gets a
@@ -1222,8 +1279,10 @@ Contabo VPS, `deploy.toml` (`type = "node-monorepo"`), domain
   `security_opt: ["seccomp=<path>/seccomp-chromium.json"]` (a copy of
   `worker/seccomp-chromium.json` on the server), which Chromium's sandbox
   needs.
-- Edge functions — Supabase-hosted; secrets `CAPTURE_KEY`, `OWNER_USER_ID`
-  (capture) and `DEEPL_API_KEY` (translate). `verify_jwt` is on for snippet,
+- Edge functions — Supabase-hosted; secrets `DEEPL_API_KEY` (translate) and,
+  only until the owner has generated a capture key in Settings, the legacy
+  `CAPTURE_KEY` + `OWNER_USER_ID` (capture's transition fallback; delete
+  both once a key exists — the first key already retires them). `verify_jwt` is on for snippet,
   translate, file-import and pdf-import, off for capture and storage-sweep,
   which check their own bearer (`supabase/config.toml`).
 - Storage sweep schedule — one-time, per project, in the SQL editor (never
@@ -1256,7 +1315,11 @@ Cache policy: `/assets/` immutable for a year; `index.html`, `sw.js` and
 
 **Deploy order:** backend first — `sb db push --linked` (migrations), then
 `sb functions deploy --project-ref egkakmlkerlmsigoegoe` — then the app and
-worker images. The app depends on the new schema and functions (e.g. it
+worker images. For capture keys that order matters: the `capture` function
+reads `capture_keys` (it answers 500 until the migration exists), and the
+app's Settings section calls `rotate_capture_key`. Until the owner generates
+a key the Shortcut keeps working with `CAPTURE_KEY`; generating it retires
+that secret, so update the Shortcut's header with the new key right away. The app depends on the new schema and functions (e.g. it
 sends `translate` only a `bookmark_id`), not the other way round. (`sb` is
 the per-project Supabase CLI wrapper; `supabase.id` names the profile.)
 
