@@ -147,6 +147,18 @@
     outline-offset: 2px;
   }
 
+  /* A bar fixed to the bottom of the screen (the list's selection bar marks
+     itself data-bottom-bar) is this tall above the safe-area inset: the page
+     pads its end by it, so the last rows can scroll clear, and toasts rise
+     above it instead of covering it. */
+  :root {
+    --bottom-bar-height: 0px;
+  }
+
+  :root:has([data-bottom-bar]) {
+    --bottom-bar-height: 104px;
+  }
+
   html {
     font-size: 62.5%;
   }

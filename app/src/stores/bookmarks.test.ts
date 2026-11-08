@@ -2701,6 +2701,28 @@ describe("useBookmarksStore", () => {
       vi.unstubAllGlobals();
     });
 
+    test("offlineSnapshot says when the list is the offline copy, until a fetch succeeds", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      getBookmarksList.mockResolvedValue([dated("cached", "01")]);
+      downloaded("cached");
+      const store = useBookmarksStore();
+      expect(store.offlineSnapshot).toBe(false);
+
+      await store.fetch();
+      expect(store.offlineSnapshot).toBe(true);
+
+      vi.unstubAllGlobals();
+      from.mockReturnValue({ select: () => listQuery([dated("cached", "01")]) });
+      await store.fetch();
+      expect(store.offlineSnapshot).toBe(false);
+
+      vi.stubGlobal("navigator", { onLine: false });
+      await store.fetch();
+      store.reset();
+      expect(store.offlineSnapshot).toBe(false);
+      vi.unstubAllGlobals();
+    });
+
     test("an INSERT while the unfiltered offline snapshot is up is shown", async () => {
       vi.stubGlobal("navigator", { onLine: false });
       getBookmarksList.mockResolvedValue([dated("cached", "01")]);
@@ -3836,6 +3858,229 @@ describe("useBookmarksStore", () => {
       const store = useBookmarksStore();
 
       expect(await store.unarchive("elsewhere")).toEqual({ error: null });
+    });
+  });
+
+  describe("several rows at once", () => {
+    const row = (id: string, created: string, extra: Partial<Bookmark> = {}) =>
+      makeBookmark({ id, created_at: `2026-10-${created}T00:00:00Z`, ...extra });
+    const fiveRows = () => [
+      row("e", "05"),
+      row("d", "04"),
+      row("c", "03"),
+      row("b", "02"),
+      row("a", "01"),
+    ];
+
+    /** List reads answer `rows`; writes resolve with `error`, filtered by `in` (or `eq`). */
+    function backend(rows: Bookmark[], error: unknown = null) {
+      const filter = () => ({
+        in: vi.fn().mockResolvedValue({ error }),
+        eq: vi.fn().mockResolvedValue({ error }),
+      });
+      const updates: { patch: unknown; filter: ReturnType<typeof filter> }[] = [];
+      const deletes: ReturnType<typeof filter>[] = [];
+      from.mockImplementation((table: string) => ({
+        select: () => listQuery(table === "bookmark_deletions" ? [] : rows),
+        update: (patch: unknown) => {
+          const f = filter();
+          updates.push({ patch, filter: f });
+          return f;
+        },
+        delete: () => {
+          const f = filter();
+          deletes.push(f);
+          return f;
+        },
+      }));
+      return { updates, deletes };
+    }
+
+    const ids = (store: ReturnType<typeof useBookmarksStore>) => store.bookmarks.map((b) => b.id);
+
+    test("archive sends one request for every id and evicts each offline copy", async () => {
+      const { updates } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(await store.archive("b", "d")).toEqual({ error: null });
+
+      expect(updates).toHaveLength(1);
+      expect(updates[0]!.patch).toEqual({ archived: true });
+      expect(updates[0]!.filter.in).toHaveBeenCalledWith("id", ["b", "d"]);
+      expect(updates[0]!.filter.eq).not.toHaveBeenCalled();
+      expect(store.bookmarks.filter((b) => b.archived).map((b) => b.id)).toEqual(["d", "b"]);
+      expect(removeCachedBookmark.mock.calls).toEqual([["b"], ["d"]]);
+    });
+
+    test("a refused archive changes no row", async () => {
+      backend(fiveRows(), { message: "down" });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect((await store.archive("b", "d")).error).toBeTruthy();
+
+      expect(store.bookmarks.some((b) => b.archived)).toBe(false);
+      expect(removeCachedBookmark).not.toHaveBeenCalled();
+    });
+
+    test("unarchive brings every id back in one request", async () => {
+      const { updates } = backend(fiveRows().map((b) => ({ ...b, archived: true })));
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(await store.unarchive("a", "c")).toEqual({ error: null });
+
+      expect(updates).toHaveLength(1);
+      expect(updates[0]!.filter.in).toHaveBeenCalledWith("id", ["a", "c"]);
+      expect(store.bookmarks.filter((b) => !b.archived).map((b) => b.id)).toEqual(["c", "a"]);
+    });
+
+    test("markRead stamps every id with the same read_at in one request", async () => {
+      const { updates } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(await store.markRead("a", "e")).toEqual({ error: null });
+
+      expect(updates).toHaveLength(1);
+      const { read_at } = updates[0]!.patch as { read_at: string };
+      expect(updates[0]!.filter.in).toHaveBeenCalledWith("id", ["a", "e"]);
+      expect(store.bookmarks.filter((b) => b.read_at === read_at).map((b) => b.id)).toEqual([
+        "e",
+        "a",
+      ]);
+    });
+
+    test("a refused markRead leaves every row unread", async () => {
+      backend(fiveRows(), { message: "down" });
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect((await store.markRead("a", "e")).error).toBeTruthy();
+
+      expect(store.bookmarks.every((b) => b.read_at === null)).toBe(true);
+    });
+
+    test("a write for no ids sends nothing", async () => {
+      const { updates } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      expect(await store.archive()).toEqual({ error: null });
+      expect(await store.unarchive()).toEqual({ error: null });
+      expect(await store.markRead()).toEqual({ error: null });
+
+      expect(updates).toHaveLength(0);
+    });
+
+    test("remove stages every id; commit sends one delete and cleans up each row", async () => {
+      const { deletes } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+
+      store.remove("d", "b", "a");
+      expect(ids(store)).toEqual(["e", "c"]);
+      expect(deletes).toHaveLength(0);
+
+      expect(await store.commitRemove()).toEqual({ error: null });
+      expect(deletes).toHaveLength(1);
+      expect(deletes[0]!.in).toHaveBeenCalledWith("id", ["d", "b", "a"]);
+      expect(deleteBookmarkMeta.mock.calls.map(([id]) => id).sort()).toEqual(["a", "b", "d"]);
+      expect(removeCachedBookmark.mock.calls.map(([id]) => id).sort()).toEqual(["a", "b", "d"]);
+    });
+
+    test("undoRemove puts every staged row back at its old position", async () => {
+      const { deletes } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("a", "d", "b");
+
+      store.undoRemove("a", "d", "b");
+      await store.commitRemove();
+
+      expect(ids(store)).toEqual(["e", "d", "c", "b", "a"]);
+      expect(deletes).toHaveLength(0);
+    });
+
+    test("a refused delete puts every row back where it was", async () => {
+      backend(fiveRows(), { message: "down" });
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("e", "c", "a");
+
+      expect((await store.commitRemove()).error).toBeTruthy();
+
+      expect(ids(store)).toEqual(["e", "d", "c", "b", "a"]);
+    });
+
+    test("a row of the batch deleted elsewhere drops out of it; the rest still go", async () => {
+      const { deletes } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+      store.remove("d", "b");
+
+      emitRealtime({ eventType: "DELETE", old: { id: "d" } });
+      await store.commitRemove();
+
+      expect(deletes[0]!.eq).toHaveBeenCalledWith("id", "b");
+    });
+
+    test("when every row of the batch was deleted elsewhere nothing is sent", async () => {
+      const { deletes } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+      store.remove("d", "b");
+
+      emitRealtime({ eventType: "DELETE", old: { id: "d" } });
+      emitRealtime({ eventType: "DELETE", old: { id: "b" } });
+      store.undoRemove("d", "b");
+      await store.commitRemove();
+
+      expect(deletes).toHaveLength(0);
+      expect(ids(store)).toEqual(["e", "c", "a"]);
+    });
+
+    test("a Realtime DELETE of a row that isn't staged leaves the batch alone", async () => {
+      const { deletes } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.subscribeToChanges();
+      store.remove("d", "b");
+
+      emitRealtime({ eventType: "DELETE", old: { id: "e" } });
+      await store.commitRemove();
+
+      expect(deletes[0]!.in).toHaveBeenCalledWith("id", ["d", "b"]);
+    });
+
+    test("undoing part of a batch restores only those rows", async () => {
+      const { deletes } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("d", "b");
+
+      store.undoRemove("b");
+      await store.commitRemove();
+
+      expect(ids(store)).toEqual(["e", "c", "b", "a"]);
+      expect(deletes[0]!.eq).toHaveBeenCalledWith("id", "d");
+    });
+
+    test("staging ids already being removed adds only the new ones", async () => {
+      const { deletes } = backend(fiveRows());
+      const store = useBookmarksStore();
+      await store.fetch();
+      store.remove("d");
+
+      store.remove("d", "b");
+      await vi.waitFor(() => expect(deletes).toHaveLength(1));
+      await store.commitRemove();
+
+      expect(deletes[0]!.eq).toHaveBeenCalledWith("id", "d");
+      expect(deletes[1]!.eq).toHaveBeenCalledWith("id", "b");
     });
   });
 

@@ -3,13 +3,16 @@ import { computed, onMounted, onUnmounted } from "vue";
 import Toast, { type ToastTone } from "../../shared/ui/Toast.vue";
 import { useUndoStore, type UndoNotice } from "../../stores/undo";
 
-// The undo toast for archive and delete. Mounted once in App.vue, so it
+// The undo toast for archive, unarchive and delete (one row or a bulk
+// selection). Mounted once in App.vue, so it
 // survives the reader → list navigation that follows either action.
 const undo = useUndoStore();
 
+// "Archived" for one row, "3 archived" for a bulk selection.
 function messageOf(notice: UndoNotice): string {
   if (notice.kind === "failed") return notice.message;
-  return notice.kind === "archived" ? "Archived" : "Deleted";
+  const { kind, ids } = notice;
+  return ids.length === 1 ? kind.charAt(0).toUpperCase() + kind.slice(1) : `${ids.length} ${kind}`;
 }
 const tone = computed<ToastTone>(() => (undo.notice?.kind === "failed" ? "danger" : "default"));
 const actionLabel = computed(() =>

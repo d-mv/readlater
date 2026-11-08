@@ -8,13 +8,22 @@ withDefaults(
     bookmarks: Bookmark[];
     cachedIds?: Set<string>;
     missingImageCounts?: ReadonlyMap<string, number>;
+    // Selection mode (bulk actions): rows toggle in and out of selectedIds.
+    selecting?: boolean;
+    selectedIds?: ReadonlySet<string>;
   }>(),
-  { cachedIds: () => new Set(), missingImageCounts: () => new Map() },
+  {
+    cachedIds: () => new Set(),
+    missingImageCounts: () => new Map(),
+    selecting: false,
+    selectedIds: () => new Set(),
+  },
 );
 
 const emit = defineEmits<{
   open: [id: string];
   toggleOffline: [id: string];
+  toggleSelect: [id: string];
 }>();
 </script>
 
@@ -29,8 +38,11 @@ const emit = defineEmits<{
       :bookmark="bookmark"
       :is-cached="cachedIds.has(bookmark.id)"
       :missing-images="missingImageCounts.get(bookmark.id) ?? 0"
+      :selecting="selecting"
+      :selected="selectedIds.has(bookmark.id)"
       @open="emit('open', $event)"
       @toggle-offline="emit('toggleOffline', $event)"
+      @toggle-select="emit('toggleSelect', $event)"
     />
   </div>
 </template>

@@ -10,6 +10,8 @@ import {
   IconPhotoOff,
   IconWorld,
   IconLanguageHiragana,
+  IconSquare,
+  IconSquareCheckFilled,
 } from "@tabler/icons-vue";
 import type { Bookmark } from "../../lib/supabase";
 import { listRowMeta } from "../../utils/format";
@@ -22,14 +24,23 @@ const props = withDefaults(
     isCached?: boolean;
     // Images the offline copy couldn't save (CORS-blocked hot links etc.).
     missingImages?: number;
+    // The list's selection mode: a tap toggles `selected` instead of opening.
+    selecting?: boolean;
+    selected?: boolean;
   }>(),
-  { isCached: false, missingImages: 0 },
+  { isCached: false, missingImages: 0, selecting: false, selected: false },
 );
 
 const emit = defineEmits<{
   open: [id: string];
   toggleOffline: [id: string];
+  toggleSelect: [id: string];
 }>();
+
+function onActivate() {
+  if (props.selecting) emit("toggleSelect", props.bookmark.id);
+  else emit("open", props.bookmark.id);
+}
 
 const iconComponent = computed(() =>
   props.bookmark.type === "youtube" ? IconBrandYoutube : IconFileText,
@@ -43,7 +54,8 @@ const isFailed = computed(() => props.bookmark.status === "failed");
 const isUnread = computed(() => !props.bookmark.archived && !isRead.value);
 // Saving offline is offered only for what's still to be read, but an existing
 // offline copy stays removable after the item is read or archived.
-const showOfflineToggle = computed(() => isUnread.value || props.isCached);
+// Selection mode puts its own control on every row; the offline toggle waits.
+const showOfflineToggle = computed(() => !props.selecting && (isUnread.value || props.isCached));
 const isIncomplete = computed(() => props.isCached && props.missingImages > 0);
 const offlineTitle = computed(() => {
   if (!props.isCached) return "Save offline";
@@ -65,16 +77,35 @@ const displayTitle = computed(() => {
 <template>
   <div
     data-testid="row"
-    class="flex w-full items-center gap-4 border-t border-line px-16 first-of-type:border-t-0 transition-colors duration-(--duration) hover:bg-raised"
+    :data-selected="(selecting && selected) || undefined"
+    :class="
+      cn(
+        'flex w-full items-center gap-4 border-t border-line px-16 first-of-type:border-t-0 transition-colors duration-(--duration) hover:bg-raised',
+        selecting && selected && 'bg-raised',
+      )
+    "
   >
+    <!-- While selecting, the same button is the row's checkbox: a toggle
+         (aria-pressed) named by the title, so j/k and Tab still land on it. -->
     <button
       data-testid="row-open"
       class="flex min-w-0 flex-1 cursor-pointer items-center gap-12 border-0 bg-transparent px-0 py-14 text-left [font:inherit]"
       type="button"
-      @click="emit('open', bookmark.id)"
+      :aria-pressed="selecting ? selected : undefined"
+      :aria-label="selecting ? displayTitle : undefined"
+      @click="onActivate"
     >
       <span class="flex size-20 shrink-0 items-center justify-center text-ink-muted">
-        <IconLoader2 v-if="isPending" :size="16" class="animate-spin text-ink-muted" />
+        <span
+          v-if="selecting"
+          data-testid="row-check"
+          :data-checked="selected || undefined"
+          class="flex text-ink"
+        >
+          <IconSquareCheckFilled v-if="selected" :size="18" />
+          <IconSquare v-else :size="18" class="text-ink-muted" />
+        </span>
+        <IconLoader2 v-else-if="isPending" :size="16" class="animate-spin text-ink-muted" />
         <IconAlertTriangle v-else-if="isFailed" :size="16" class="text-danger" />
         <component :is="iconComponent" v-else :size="16" class="text-ink-muted" />
       </span>

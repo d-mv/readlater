@@ -32,7 +32,7 @@ describe("useUndoStore", () => {
 
     expect(await undo.archive("1")).toEqual({ error: null });
     expect(bookmarks.archive).toHaveBeenCalledWith("1");
-    expect(undo.notice).toEqual({ kind: "archived", id: "1" });
+    expect(undo.notice).toEqual({ kind: "archived", ids: ["1"] });
 
     vi.advanceTimersByTime(UNDO_WINDOW_MS - 1);
     expect(undo.notice).not.toBeNull();
@@ -73,7 +73,7 @@ describe("useUndoStore", () => {
     undo.remove("1");
 
     expect(bookmarks.remove).toHaveBeenCalledWith("1");
-    expect(undo.notice).toEqual({ kind: "deleted", id: "1" });
+    expect(undo.notice).toEqual({ kind: "deleted", ids: ["1"] });
     // Committing whatever was staged before is a no-op here.
     bookmarks.commitRemove.mockClear();
     vi.advanceTimersByTime(UNDO_WINDOW_MS - 1);
@@ -117,7 +117,7 @@ describe("useUndoStore", () => {
     await undo.archive("2");
 
     expect(bookmarks.commitRemove).toHaveBeenCalledTimes(1);
-    expect(undo.notice).toEqual({ kind: "archived", id: "2" });
+    expect(undo.notice).toEqual({ kind: "archived", ids: ["2"] });
   });
 
   test("flush sends a waiting delete at once and drops its notice", async () => {
@@ -137,7 +137,7 @@ describe("useUndoStore", () => {
 
     await undo.flush();
 
-    expect(undo.notice).toEqual({ kind: "archived", id: "1" });
+    expect(undo.notice).toEqual({ kind: "archived", ids: ["1"] });
   });
 
   test("undo with nothing on offer does nothing", async () => {
@@ -172,5 +172,76 @@ describe("useUndoStore", () => {
 
     expect(undo.notice).toBeNull();
     expect(bookmarks.commitRemove).not.toHaveBeenCalled();
+  });
+  test("several rows are archived as one action, and one undo brings them all back", async () => {
+    const undo = useUndoStore();
+
+    expect(await undo.archive("1", "2", "3")).toEqual({ error: null });
+    expect(bookmarks.archive).toHaveBeenCalledWith("1", "2", "3");
+    expect(undo.notice).toEqual({ kind: "archived", ids: ["1", "2", "3"] });
+
+    await undo.undo();
+    expect(bookmarks.unarchive).toHaveBeenCalledWith("1", "2", "3");
+  });
+
+  test("several rows are deleted as one action, and one undo brings them all back", async () => {
+    const undo = useUndoStore();
+
+    undo.remove("1", "2");
+    expect(bookmarks.remove).toHaveBeenCalledWith("1", "2");
+    expect(undo.notice).toEqual({ kind: "deleted", ids: ["1", "2"] });
+
+    await undo.undo();
+    expect(bookmarks.undoRemove).toHaveBeenCalledWith("1", "2");
+  });
+
+  test("an unarchive offers undo, which archives the rows again", async () => {
+    const undo = useUndoStore();
+
+    expect(await undo.unarchive("1", "2")).toEqual({ error: null });
+    expect(bookmarks.unarchive).toHaveBeenCalledWith("1", "2");
+    expect(undo.notice).toEqual({ kind: "unarchived", ids: ["1", "2"] });
+
+    await undo.undo();
+    expect(bookmarks.archive).toHaveBeenCalledWith("1", "2");
+    expect(undo.notice).toBeNull();
+  });
+
+  test("an unarchive commits a delete still waiting", async () => {
+    const undo = useUndoStore();
+    undo.remove("1");
+    bookmarks.commitRemove.mockClear();
+
+    await undo.unarchive("2");
+
+    expect(bookmarks.commitRemove).toHaveBeenCalledTimes(1);
+  });
+
+  test("a refused unarchive shows no notice and reports the error", async () => {
+    bookmarks.unarchive.mockResolvedValue({ error: FAILED });
+    const undo = useUndoStore();
+
+    expect(await undo.unarchive("1")).toEqual({ error: FAILED });
+    expect(undo.notice).toBeNull();
+  });
+
+  test("a refused re-archive (undoing an unarchive) says so", async () => {
+    const undo = useUndoStore();
+    await undo.unarchive("1");
+    bookmarks.archive.mockResolvedValue({ error: FAILED });
+
+    await undo.undo();
+
+    expect(undo.notice).toEqual({ kind: "failed", message: FAILED });
+  });
+
+  test("fail shows a write that didn't happen, for the undo window", () => {
+    const undo = useUndoStore();
+
+    undo.fail(FAILED);
+    expect(undo.notice).toEqual({ kind: "failed", message: FAILED });
+
+    vi.advanceTimersByTime(UNDO_WINDOW_MS);
+    expect(undo.notice).toBeNull();
   });
 });

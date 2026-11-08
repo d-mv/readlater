@@ -191,7 +191,10 @@ Undo, delete deferred 5 s; architecture "Undo for archive and delete"; an
 undone archive doesn't restore the evicted offline copy). Sort options —
 done 2026-11-08 (newest/oldest first, per device; architecture "Sort").
 Keyboard shortcuts — done 2026-11-08 (list and reader, `?` for help;
-architecture "Keyboard shortcuts"). Not built: bulk actions, offline
+architecture "Keyboard shortcuts"). Bulk actions — done 2026-11-08
+(Select in the list header, `x`/Escape; Archive or Unarchive, Delete, Mark
+read, Save offline; one `id=in.(…)` request per action, archive/unarchive/
+delete undoable as a batch; architecture "Bulk actions"). Not built: offline
 full-text search, audit log, capture-key rotation, share-link revoke UI.
 
 ---

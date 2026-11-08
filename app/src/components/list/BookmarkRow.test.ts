@@ -200,4 +200,55 @@ describe("BookmarkRow", () => {
     );
     expect(wrapper.find('[data-testid="images-not-cached"]').exists()).toBe(false);
   });
+
+  describe("while selecting", () => {
+    const selecting = (extra: Record<string, unknown> = {}) =>
+      mount(BookmarkRow, {
+        props: { bookmark: makeBookmark({ id: "abc" }), selecting: true, ...extra },
+      });
+    const open = (wrapper: ReturnType<typeof selecting>) =>
+      wrapper.find('[data-testid="row-open"]');
+
+    test("a tap toggles the row's selection instead of opening it", async () => {
+      const wrapper = selecting();
+
+      await open(wrapper).trigger("click");
+
+      expect(wrapper.emitted("toggleSelect")).toEqual([["abc"]]);
+      expect(wrapper.emitted("open")).toBeUndefined();
+    });
+
+    test("the row is a toggle named by its title, pressed when selected", () => {
+      const wrapper = selecting({ selected: true });
+
+      expect(open(wrapper).attributes("aria-pressed")).toBe("true");
+      expect(open(wrapper).attributes("aria-label")).toBe(
+        "A short history of the readability algorithm",
+      );
+      expect(wrapper.find('[data-testid="row"]').attributes("data-selected")).toBe("true");
+      expect(wrapper.find('[data-testid="row-check"]').attributes("data-checked")).toBe("true");
+    });
+
+    test("an unselected row shows an empty check", () => {
+      const wrapper = selecting();
+
+      expect(open(wrapper).attributes("aria-pressed")).toBe("false");
+      expect(wrapper.find('[data-testid="row"]').attributes("data-selected")).toBeUndefined();
+      expect(wrapper.find('[data-testid="row-check"]').attributes("data-checked")).toBeUndefined();
+    });
+
+    test("the offline toggle steps aside", () => {
+      const wrapper = selecting({ isCached: true });
+
+      expect(wrapper.find('[data-testid="offline-toggle"]').exists()).toBe(false);
+    });
+
+    test("outside selection the row is a plain button", () => {
+      const wrapper = mount(BookmarkRow, { props: { bookmark: makeBookmark() } });
+
+      expect(open(wrapper).attributes("aria-pressed")).toBeUndefined();
+      expect(open(wrapper).attributes("aria-label")).toBeUndefined();
+      expect(wrapper.find('[data-testid="row-check"]').exists()).toBe(false);
+    });
+  });
 });

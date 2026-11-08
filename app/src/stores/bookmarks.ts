@@ -205,6 +205,25 @@ function delay(ms: number): Promise<null> {
   return new Promise((resolve) => setTimeout(() => resolve(null), ms));
 }
 
+// A row whose delete is staged, with its place in the list to undo it into.
+interface StagedRow {
+  id: string;
+  row: Bookmark | undefined;
+  index: number;
+}
+
+// The rows a write targets. One id stays `id=eq.…`, the request a single
+// row's write always was; several go in one `id=in.(…)` — a bulk action is
+// one request, never one per row.
+interface IdFilterable<T> {
+  eq(column: "id", value: string): T;
+  in(column: "id", values: readonly string[]): T;
+}
+
+function whereIds<T>(query: IdFilterable<T>, ids: readonly string[]): T {
+  return ids.length === 1 ? query.eq("id", ids[0]!) : query.in("id", ids);
+}
+
 export type BookmarkFilter = "all" | "archived";
 
 // The list's order. Both page by the same (created_at, id) keyset, one
@@ -229,11 +248,13 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
   const activeTagIds = ref<string[]>([]);
   const sort = shallowRef<ListSort>(readStoredSort());
 
-  // Deletes the user can still take back (the undo toast): the row is off the
-  // list at once, but the server delete and the offline-copy eviction wait for
-  // commitRemove(). At most one is staged; `removing` also holds a delete
-  // that is in flight, until the server answers.
-  let stagedRemoval: { id: string; row: Bookmark | undefined; index: number } | null = null;
+  // A delete the user can still take back (the undo toast): the rows are off
+  // the list at once, but the server delete and the offline-copy eviction
+  // wait for commitRemove(). One batch (one row, or a bulk selection) is
+  // staged at a time, each row with the index it had, to put it back there;
+  // `removing` also holds ids whose delete is in flight, until the server
+  // answers.
+  let stagedRemoval: StagedRow[] | null = null;
   const removing = new Set<string>();
   // Bumped by reset(): a delete answering after it belongs to a list that's gone.
   let removalEpoch = 0;
@@ -323,6 +344,14 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     | { kind: "offline"; query: string };
   let listSession: ListSession = { kind: "recent", cursor: null, watermark: null };
   let listGeneration = 0;
+  // Whether the list is the offline snapshot: read-only, so the list's bulk
+  // actions (which all write to the server) are off.
+  const offlineSnapshot = shallowRef(false);
+
+  function setSession(next: ListSession) {
+    listSession = next;
+    offlineSnapshot.value = next.kind === "offline";
+  }
 
   // The order `bookmarks` is held in. A paged window has its own; a search
   // or the offline snapshot follows the chosen sort (setSort re-sorts them).
@@ -432,7 +461,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // Downloaded articles outside the window carry metadata of unknown age;
       // leave them for loadMore() rather than show them stale.
       bookmarks.value = withoutRemoving(snapshot).filter((b) => inWindow(b, cursor, state.hasMore));
-      listSession = { kind: "recent", cursor, watermark };
+      setSession({ kind: "recent", cursor, watermark });
       hasMore.value = state.hasMore;
     }
 
@@ -446,7 +475,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     // these tombstones, so this is their only chance.
     const gone = new Set(deleted.map((d) => d.bookmark_id));
     // Deleted elsewhere already: nothing left to send, nothing to undo.
-    if (stagedRemoval && gone.has(stagedRemoval.id)) dropStagedRemoval(stagedRemoval.id);
+    for (const id of gone) dropStagedRemoval(id);
     const offlineCache = useOfflineCacheStore();
     await Promise.all(
       [...gone].map((id) =>
@@ -474,7 +503,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     for (const d of deleted) watermark = latest(watermark, d.deleted_at);
 
     bookmarks.value = withoutRemoving([...byId.values()]).sort(byCreatedAtDesc);
-    listSession = { kind: "recent", cursor, watermark };
+    setSession({ kind: "recent", cursor, watermark });
     persistOfflineList();
     return true;
   }
@@ -510,7 +539,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
         const page = await queryBookmarks({ limit, order });
         if (!isCurrent()) return;
         bookmarks.value = withoutRemoving(page);
-        listSession = { kind: "oldest", cursor: cursorOf(page.at(-1)) };
+        setSession({ kind: "oldest", cursor: cursorOf(page.at(-1)) });
         hasMore.value = page.length === limit;
         return;
       }
@@ -526,12 +555,12 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // the user picked should hold for every list they look at.
       bookmarks.value = withoutRemoving(query && order === "oldest" ? [...page].reverse() : page);
       if (query) {
-        listSession = { kind: "search", query };
+        setSession({ kind: "search", query });
         hasMore.value = false;
       } else {
         let watermark: string | null = null;
         for (const row of page) watermark = latest(watermark, row.updated_at);
-        listSession = { kind: "recent", cursor: cursorOf(page.at(-1)), watermark };
+        setSession({ kind: "recent", cursor: cursorOf(page.at(-1)), watermark });
         hasMore.value = page.length === PAGE_SIZE;
         persistOfflineList();
       }
@@ -559,7 +588,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
               b.title?.toLowerCase().includes(needle) || b.excerpt?.toLowerCase().includes(needle),
           )
         : offlineRows;
-      listSession = { kind: "offline", query };
+      setSession({ kind: "offline", query });
       hasMore.value = false;
     } finally {
       if (isCurrent()) loading.value = false;
@@ -598,10 +627,11 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // page-1 change Realtime missed; the next delta just re-reads this
       // page's recently changed rows instead.
       const cursor = cursorOf(page.at(-1)) ?? session.cursor;
-      listSession =
+      setSession(
         session.kind === "recent"
           ? { kind: "recent", cursor, watermark: session.watermark }
-          : { kind: "oldest", cursor };
+          : { kind: "oldest", cursor },
+      );
       hasMore.value = page.length === PAGE_SIZE;
       persistOfflineList();
     } catch {
@@ -701,7 +731,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       // DELETE — the only event type left.
       const id = (payload.old as { id?: string }).id;
       // Deleted elsewhere while staged here: nothing left to send or undo.
-      if (id && stagedRemoval?.id === id) dropStagedRemoval(id);
+      if (id) dropStagedRemoval(id);
       if (id) bookmarks.value = bookmarks.value.filter((b) => b.id !== id);
     }
     persistOfflineList();
@@ -741,7 +771,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     removalEpoch += 1;
     persistAgain = false;
     listGeneration += 1;
-    listSession = { kind: "recent", cursor: null, watermark: null };
+    setSession({ kind: "recent", cursor: null, watermark: null });
     bookmarks.value = [];
     filter.value = "all";
     loading.value = false;
@@ -1165,13 +1195,24 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return writeResult(null);
   }
 
-  async function markRead(id: string): Promise<WriteResult> {
-    const read_at = new Date().toISOString();
-    const { error } = await supabase.from("bookmarks").update({ read_at }).eq("id", id);
+  // One update for every id (a bulk selection is still one request), applied
+  // to the loaded rows once the server accepted it.
+  async function updateRows(
+    ids: readonly string[],
+    patch: Partial<Pick<Bookmark, "archived" | "read_at">>,
+  ): Promise<WriteResult> {
+    if (ids.length === 0) return writeResult(null);
+    const { error } = await whereIds(supabase.from("bookmarks").update(patch), ids);
     if (error) return writeResult(error);
-    const bookmark = bookmarks.value.find((b) => b.id === id);
-    if (bookmark) bookmark.read_at = read_at;
+    const wanted = new Set(ids);
+    for (const bookmark of bookmarks.value) {
+      if (wanted.has(bookmark.id)) Object.assign(bookmark, patch);
+    }
     return writeResult(null);
+  }
+
+  async function markRead(...ids: string[]): Promise<WriteResult> {
+    return updateRows(ids, { read_at: new Date().toISOString() });
   }
 
   async function markUnread(id: string): Promise<WriteResult> {
@@ -1182,86 +1223,97 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     return writeResult(null);
   }
 
-  async function archive(id: string): Promise<WriteResult> {
-    const { error } = await supabase.from("bookmarks").update({ archived: true }).eq("id", id);
-    if (error) return writeResult(error);
-    const bookmark = bookmarks.value.find((b) => b.id === id);
-    if (bookmark) bookmark.archived = true;
-    await useOfflineCacheStore()
-      .removeCachedBookmark(id)
-      .catch(() => {});
-    return writeResult(null);
+  async function archive(...ids: string[]): Promise<WriteResult> {
+    const result = await updateRows(ids, { archived: true });
+    if (result.error) return result;
+    const offlineCache = useOfflineCacheStore();
+    await Promise.all(ids.map((id) => offlineCache.removeCachedBookmark(id).catch(() => {})));
+    return result;
   }
 
   // The undo toast's way back from archive().
-  async function unarchive(id: string): Promise<WriteResult> {
-    const { error } = await supabase.from("bookmarks").update({ archived: false }).eq("id", id);
-    if (error) return writeResult(error);
-    const bookmark = bookmarks.value.find((b) => b.id === id);
-    if (bookmark) bookmark.archived = false;
-    return writeResult(null);
+  async function unarchive(...ids: string[]): Promise<WriteResult> {
+    return updateRows(ids, { archived: false });
   }
 
-  // Optimistic, unlike the other writes: the row leaves the list at once and
-  // the server hears of it only at commitRemove() — the undo toast's window
+  // Optimistic, unlike the other writes: the rows leave the list at once and
+  // the server hears of them only at commitRemove() — the undo toast's window
   // (stores/undo.ts). A delete still staged from before is committed now:
-  // one undo at a time.
-  function remove(id: string): void {
-    if (removing.has(id)) return;
+  // one undo at a time. Ids already being removed are left as they are.
+  function remove(...ids: string[]): void {
+    const fresh = [...new Set(ids)].filter((id) => !removing.has(id));
+    if (fresh.length === 0) return;
     if (stagedRemoval) void commitRemove();
-    const index = bookmarks.value.findIndex((b) => b.id === id);
-    const row = index === -1 ? undefined : bookmarks.value[index];
-    bookmarks.value = bookmarks.value.filter((b) => b.id !== id);
-    stagedRemoval = { id, row, index };
-    removing.add(id);
+    stagedRemoval = fresh.map((id) => {
+      const index = bookmarks.value.findIndex((b) => b.id === id);
+      return { id, row: index === -1 ? undefined : bookmarks.value[index], index };
+    });
+    const gone = new Set(fresh);
+    bookmarks.value = bookmarks.value.filter((b) => !gone.has(b.id));
+    for (const id of fresh) removing.add(id);
   }
 
-  // Puts a row whose delete didn't happen back where it was.
-  function restore(removal: { id: string; row: Bookmark | undefined; index: number }) {
-    const { id, row, index } = removal;
-    if (!row || bookmarks.value.some((b) => b.id === id)) return;
-    bookmarks.value.splice(Math.min(index, bookmarks.value.length), 0, row);
+  // Puts rows whose delete didn't happen back where they were. Each index is
+  // the row's place in the list before the batch left it, so inserting in
+  // ascending index order rebuilds that list; rows of the batch that stay
+  // away (`away`, still staged) no longer take up the places before them.
+  function restore(rows: readonly StagedRow[], away: readonly StagedRow[] = []) {
+    const back = rows
+      .filter((s) => s.row && !bookmarks.value.some((b) => b.id === s.id))
+      .sort((a, b) => a.index - b.index);
+    if (back.length === 0) return;
+    for (const { row, index } of back) {
+      const at = index - away.filter((a) => a.index < index).length;
+      bookmarks.value.splice(Math.min(at, bookmarks.value.length), 0, row!);
+    }
     persistOfflineList();
   }
 
+  // A staged row that is gone already (deleted elsewhere, or undone).
   function dropStagedRemoval(id: string) {
+    if (!stagedRemoval?.some((s) => s.id === id)) return;
     removing.delete(id);
-    stagedRemoval = null;
+    const rest = stagedRemoval.filter((s) => s.id !== id);
+    stagedRemoval = rest.length > 0 ? rest : null;
   }
 
-  // Undo: the staged delete never reaches the server.
-  function undoRemove(id: string): void {
-    const staged = stagedRemoval;
-    if (staged?.id !== id) return;
-    dropStagedRemoval(id);
-    restore(staged);
+  // Undo: these staged deletes never reach the server.
+  function undoRemove(...ids: string[]): void {
+    const wanted = new Set(ids);
+    const back = (stagedRemoval ?? []).filter((s) => wanted.has(s.id));
+    for (const { id } of back) dropStagedRemoval(id);
+    restore(back, stagedRemoval ?? []);
   }
 
-  // Sends the staged delete, if any. A refused delete puts the row back
-  // where it was.
+  // Sends the staged delete, if any — one request for the whole batch. A
+  // refused delete puts the rows back where they were.
   async function commitRemove(): Promise<WriteResult> {
     const staged = stagedRemoval;
     if (!staged) return writeResult(null);
     stagedRemoval = null;
-    const { id, row } = staged;
+    const ids = staged.map((s) => s.id);
     const epoch = removalEpoch;
-    const { error } = await supabase.from("bookmarks").delete().eq("id", id);
-    removing.delete(id);
+    const { error } = await whereIds(supabase.from("bookmarks").delete(), ids);
+    for (const id of ids) removing.delete(id);
     if (error) {
       if (epoch === removalEpoch) restore(staged);
       return writeResult(error);
     }
-    if (row) {
+    for (const { row } of staged) {
+      if (!row) continue;
       try {
         removeStorageObjects(row);
       } catch {
         // Best-effort: the server-side orphan sweep is the backstop.
       }
     }
-    await offlineDb.deleteBookmarkMeta(id).catch(() => {});
-    await useOfflineCacheStore()
-      .removeCachedBookmark(id)
-      .catch(() => {});
+    const offlineCache = useOfflineCacheStore();
+    await Promise.all(
+      ids.map(async (id) => {
+        await offlineDb.deleteBookmarkMeta(id).catch(() => {});
+        await offlineCache.removeCachedBookmark(id).catch(() => {});
+      }),
+    );
     return writeResult(null);
   }
 
@@ -1333,6 +1385,7 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
     searchQuery,
     activeTagIds,
     sort,
+    offlineSnapshot,
     visibleBookmarks,
     unreadCount,
     allTags,

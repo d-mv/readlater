@@ -5,11 +5,13 @@ import { useBookmarksStore, type WriteResult } from "./bookmarks";
 // How long the toast offers Undo. A delete reaches the server only after it.
 export const UNDO_WINDOW_MS = 5000;
 
-// What the toast shows: an action that can still be taken back, or a write
-// that didn't happen (a delete or an undo the server refused).
+// What the toast shows: an action that can still be taken back — on one row
+// or a bulk selection, taken back as a whole — or a write that didn't happen
+// (a delete, a bulk action or an undo the server refused).
 export type UndoNotice =
-  | { kind: "archived"; id: string }
-  | { kind: "deleted"; id: string }
+  | { kind: "archived"; ids: string[] }
+  | { kind: "unarchived"; ids: string[] }
+  | { kind: "deleted"; ids: string[] }
   | { kind: "failed"; message: string };
 
 // The undo toast (components/UndoToast.vue) and the actions it can take
@@ -35,33 +37,55 @@ export const useUndoStore = defineStore("undo", () => {
   }
 
   async function commit(): Promise<void> {
-    const { error } = await useBookmarksStore().commitRemove();
-    if (error) show({ kind: "failed", message: error });
+    reportFailure(await useBookmarksStore().commitRemove());
   }
 
-  async function archive(id: string): Promise<WriteResult> {
-    const result = await useBookmarksStore().archive(id);
+  function reportFailure({ error }: WriteResult): void {
+    if (error) fail(error);
+  }
+
+  async function archive(...ids: string[]): Promise<WriteResult> {
+    const result = await useBookmarksStore().archive(...ids);
     if (result.error === null) {
       void commit();
-      show({ kind: "archived", id });
+      show({ kind: "archived", ids });
     }
     return result;
   }
 
-  function remove(id: string): void {
+  // The Archived tab's bulk action; undo archives the rows again.
+  async function unarchive(...ids: string[]): Promise<WriteResult> {
+    const result = await useBookmarksStore().unarchive(...ids);
+    if (result.error === null) {
+      void commit();
+      show({ kind: "unarchived", ids });
+    }
+    return result;
+  }
+
+  function remove(...ids: string[]): void {
     void commit();
-    useBookmarksStore().remove(id);
-    show({ kind: "deleted", id });
+    useBookmarksStore().remove(...ids);
+    show({ kind: "deleted", ids });
+  }
+
+  // A write that didn't happen, shown in the toast's danger tone.
+  function fail(message: string): void {
+    show({ kind: "failed", message });
   }
 
   async function undo(): Promise<void> {
     const current = notice.value;
     hide();
+    const store = useBookmarksStore();
     if (current?.kind === "deleted") {
-      useBookmarksStore().undoRemove(current.id);
-    } else if (current?.kind === "archived") {
-      const { error } = await useBookmarksStore().unarchive(current.id);
-      if (error) show({ kind: "failed", message: error });
+      store.undoRemove(...current.ids);
+    } else if (current?.kind === "archived" || current?.kind === "unarchived") {
+      reportFailure(
+        current.kind === "archived"
+          ? await store.unarchive(...current.ids)
+          : await store.archive(...current.ids),
+      );
     }
   }
 
@@ -77,7 +101,7 @@ export const useUndoStore = defineStore("undo", () => {
     hide();
   }
 
-  return { notice, archive, remove, undo, flush, reset };
+  return { notice, archive, unarchive, remove, fail, undo, flush, reset };
 });
 
 // Dev-server HMR wiring (see bookmarks.ts).

@@ -3,19 +3,23 @@ let savedScrollPosition = 0;
 </script>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { IconSettings } from "@tabler/icons-vue";
 import { useBookmarksStore } from "../stores/bookmarks";
 import { useOfflineCacheStore } from "../stores/offlineCache";
 import StatusTabs from "../components/list/StatusTabs.vue";
 import SortToggle from "../components/list/SortToggle.vue";
+import SelectToggle from "../components/list/SelectToggle.vue";
+import SelectionBar from "../components/list/SelectionBar.vue";
 import BookmarkList from "../components/list/BookmarkList.vue";
 import AddBookmarkDialog from "../components/list/AddBookmarkDialog.vue";
 import TagFilterBar from "../components/list/TagFilterBar.vue";
 import ThemeToggle from "../components/ThemeToggle.vue";
 import ShortcutsHelp, { type ShortcutHelpItem } from "../components/ShortcutsHelp.vue";
 import { useKeyboardShortcuts } from "../composables/useKeyboardShortcuts";
+import { useListSelection } from "../composables/useListSelection";
+import { offersSaveOffline, useBulkActions } from "../composables/useBulkActions";
 import IconButton from "../shared/ui/IconButton.vue";
 import Input from "../shared/ui/Input.vue";
 import Button from "../shared/ui/Button.vue";
@@ -131,7 +135,73 @@ function onOpen(id: string) {
   router.push({ name: "reader", params: { id } });
 }
 
+// Selection mode (bulk actions) covers the rows as listed: a new tab, tag
+// filter or search is a different list, so it ends there — and with the
+// route, since the view goes with it.
+const {
+  active: selecting,
+  selected,
+  allSelected,
+  start: startSelecting,
+  stop: stopSelection,
+  toggle: toggleSelected,
+  selectAll,
+} = useListSelection(() => store.visibleBookmarks);
+const bulk = useBulkActions();
+const selectToggle = useTemplateRef<InstanceType<typeof SelectToggle>>("selectToggle");
+
+const selectedIds = computed(() => new Set(selected.value.map((b) => b.id)));
+const markReadCount = computed(() => selected.value.filter((b) => b.read_at === null).length);
+const saveOfflineCount = computed(
+  () => selected.value.filter((b) => offersSaveOffline(b, offlineCache.isCached(b.id))).length,
+);
+
+// Focus that was on the bar (Cancel, an action) goes with it; it lands back
+// on the Select toggle rather than the top of the page.
+async function stopSelecting() {
+  if (!selecting.value) return;
+  stopSelection();
+  await nextTick();
+  if (document.activeElement === document.body) selectToggle.value!.focus();
+}
+
+function onSelectChange(active: boolean) {
+  if (active) startSelecting();
+  else void stopSelecting();
+}
+
+async function finishWith(write: Promise<boolean>) {
+  // A refused write changes nothing: the selection stays for a retry.
+  if (await write) await stopSelecting();
+}
+
+function onBulkArchive() {
+  return finishWith(bulk.archive(selected.value));
+}
+
+function onBulkUnarchive() {
+  return finishWith(bulk.unarchive(selected.value));
+}
+
+function onBulkMarkRead() {
+  return finishWith(bulk.markRead(selected.value));
+}
+
+function onBulkDelete() {
+  bulk.remove(selected.value);
+  void stopSelecting();
+}
+
+// Downloads run on after selection ends; each row's offline icon shows its
+// copy once saved, and the toast reports any that couldn't be.
+function onBulkSaveOffline() {
+  const rows = selected.value;
+  void stopSelecting();
+  void bulk.saveOffline(rows);
+}
+
 function onChangeFilter(filter: BookmarkFilter) {
+  void stopSelecting();
   savedScrollPosition = 0;
   window.scrollTo(0, 0);
   store.setFilter(filter);
@@ -164,6 +234,7 @@ const searchInput = ref("");
 // on submit (Enter), not on every keystroke. Clearing the box restores the
 // full list immediately.
 function onSearchSubmit() {
+  void stopSelecting();
   savedScrollPosition = 0;
   window.scrollTo(0, 0);
   store.setSearchQuery(searchInput.value.trim());
@@ -174,6 +245,7 @@ function onSearchInput() {
   savedScrollPosition = 0;
   window.scrollTo(0, 0);
   if (searchInput.value.trim() === "" && store.searchQuery !== "") {
+    void stopSelecting();
     store.setSearchQuery("");
     store.fetch();
   }
@@ -181,6 +253,7 @@ function onSearchInput() {
 
 // Tag filtering is resolved client-side against the loaded list — no query.
 function onToggleTag(tagId: string) {
+  void stopSelecting();
   savedScrollPosition = 0;
   window.scrollTo(0, 0);
   const next = store.activeTagIds.includes(tagId)
@@ -202,6 +275,8 @@ const SHORTCUTS: ShortcutHelpItem[] = [
   { keys: ["o", "Enter"], label: "Open item" },
   { keys: ["/"], label: "Search" },
   { keys: ["a"], label: "Add" },
+  { keys: ["x"], label: "Select item" },
+  { keys: ["Esc"], label: "Leave selection" },
   { keys: ["?"], label: "Show shortcuts" },
 ];
 
@@ -231,12 +306,20 @@ function openFocusedRow() {
   buttons[focusedRow(buttons)]?.click();
 }
 
+// The rows render visibleBookmarks in order, so a row's index is its row's.
+function toggleFocusedRow() {
+  const row = store.visibleBookmarks[focusedRow(rowButtons())];
+  if (row) toggleSelected(row.id);
+}
+
 useKeyboardShortcuts({
   j: () => moveRowFocus(1),
   ArrowDown: () => moveRowFocus(1),
   k: () => moveRowFocus(-1),
   ArrowUp: () => moveRowFocus(-1),
   o: openFocusedRow,
+  x: toggleFocusedRow,
+  Escape: stopSelecting,
   "/": () =>
     listRoot.value!.querySelector<HTMLInputElement>('[data-testid="search-input"]')!.focus(),
   a: () => addDialog.value?.open(),
@@ -245,7 +328,10 @@ useKeyboardShortcuts({
 </script>
 
 <template>
-  <main ref="listRoot" class="mx-auto min-h-screen max-w-640 bg-canvas sm:border-x sm:border-line">
+  <main
+    ref="listRoot"
+    class="mx-auto min-h-screen max-w-640 bg-canvas pb-(--bottom-bar-height) sm:border-x sm:border-line"
+  >
     <div class="flex items-center justify-between px-16 pt-16 pb-4">
       <h1 class="m-0 font-sans text-md font-medium tracking-tight text-ink">Read Later</h1>
       <div class="flex items-center gap-12">
@@ -279,13 +365,22 @@ useKeyboardShortcuts({
       @change="onChangeFilter"
     >
       <SortToggle :sort="store.sort" @change="onChangeSort" />
+      <SelectToggle
+        ref="selectToggle"
+        :active="selecting"
+        :disabled="!selecting && store.visibleBookmarks.length === 0"
+        @change="onSelectChange"
+      />
     </StatusTabs>
     <BookmarkList
       :bookmarks="store.visibleBookmarks"
       :cached-ids="offlineCache.cachedIds"
       :missing-image-counts="offlineCache.missingImageCounts"
+      :selecting="selecting"
+      :selected-ids="selectedIds"
       @open="onOpen"
       @toggle-offline="onToggleOffline"
+      @toggle-select="toggleSelected"
     />
     <!-- Rendered whenever older pages exist, even if this tab shows nothing
          yet: an empty Archive tab still has to page further back. The button
@@ -296,6 +391,23 @@ useKeyboardShortcuts({
         Load more
       </Button>
     </div>
+    <SelectionBar
+      v-if="selecting"
+      :count="selected.length"
+      :archived-tab="store.filter === 'archived'"
+      :offline="store.offlineSnapshot"
+      :busy="bulk.busy.value"
+      :mark-read-count="markReadCount"
+      :save-offline-count="saveOfflineCount"
+      :all-selected="allSelected"
+      @archive="onBulkArchive"
+      @unarchive="onBulkUnarchive"
+      @delete="onBulkDelete"
+      @mark-read="onBulkMarkRead"
+      @save-offline="onBulkSaveOffline"
+      @select-all="selectAll"
+      @cancel="stopSelecting"
+    />
     <ShortcutsHelp v-if="showShortcuts" :shortcuts="SHORTCUTS" @close="showShortcuts = false" />
   </main>
 </template>

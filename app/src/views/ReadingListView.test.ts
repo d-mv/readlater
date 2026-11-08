@@ -625,4 +625,273 @@ describe("ReadingListView", () => {
       expect(wrapper.find('[data-testid="shortcuts-help"]').exists()).toBe(false);
     });
   });
+
+  describe("selection and bulk actions", () => {
+    const row = (id: string, extra: Record<string, unknown> = {}) =>
+      ({
+        id,
+        title: `Row ${id}`,
+        type: "article",
+        status: "ready",
+        archived: false,
+        read_at: null,
+        tags: [],
+        url: null,
+        content_md: `body ${id}`,
+        ...extra,
+      }) as never;
+
+    async function setup(rows = [row("1"), row("2"), row("3")]) {
+      const { useUndoStore } = await import("../stores/undo");
+      const { useOfflineCacheStore } = await import("../stores/offlineCache");
+      const wrapper = mount(ReadingListView, { attachTo: document.body });
+      const store = useBookmarksStore();
+      await vi.waitFor(() => expect(store.loading).toBe(false));
+      await flushPromises();
+      store.bookmarks = rows;
+      await flushPromises();
+      return { wrapper, store, undo: useUndoStore(), offlineCache: useOfflineCacheStore() };
+    }
+
+    const bar = (wrapper: ReturnType<typeof mount>) =>
+      wrapper.find('[data-testid="selection-bar"]');
+    const rowButtons = (wrapper: ReturnType<typeof mount>) =>
+      wrapper.findAll('[data-testid="row-open"]');
+    const selectToggle = (wrapper: ReturnType<typeof mount>) =>
+      wrapper.get('[data-testid="select-toggle"]');
+
+    async function select(wrapper: ReturnType<typeof mount>, ...indexes: number[]) {
+      if (!bar(wrapper).exists()) await selectToggle(wrapper).trigger("click");
+      for (const i of indexes) await rowButtons(wrapper)[i]!.trigger("click");
+    }
+
+    async function click(wrapper: ReturnType<typeof mount>, testId: string) {
+      await wrapper.get(`[data-testid="${testId}"]`).trigger("click");
+      await flushPromises();
+    }
+
+    function press(key: string) {
+      document.body.dispatchEvent(
+        new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }),
+      );
+    }
+
+    test("Select turns rows into toggles; a tap selects instead of opening", async () => {
+      const { wrapper } = await setup();
+
+      await select(wrapper, 0, 2);
+
+      expect(pushMock).not.toHaveBeenCalled();
+      expect(selectToggle(wrapper).attributes("aria-pressed")).toBe("true");
+      expect(wrapper.get('[data-testid="selection-count"]').text()).toBe("2 selected");
+      expect(rowButtons(wrapper).map((b) => b.attributes("aria-pressed"))).toEqual([
+        "true",
+        "false",
+        "true",
+      ]);
+    });
+
+    test("select all picks every listed row; Cancel leaves and focus returns to Select", async () => {
+      const { wrapper } = await setup();
+      await select(wrapper);
+
+      await click(wrapper, "select-all");
+      expect(wrapper.get('[data-testid="selection-count"]').text()).toBe("3 selected");
+      (wrapper.get('[data-testid="selection-cancel"]').element as HTMLElement).focus();
+      await click(wrapper, "selection-cancel");
+
+      expect(bar(wrapper).exists()).toBe(false);
+      expect(rowButtons(wrapper)[0]!.attributes("aria-pressed")).toBeUndefined();
+      expect(document.activeElement).toBe(selectToggle(wrapper).element);
+    });
+
+    test("pressing Select again leaves selection mode", async () => {
+      const { wrapper } = await setup();
+      await select(wrapper, 1);
+
+      await selectToggle(wrapper).trigger("click");
+      await flushPromises();
+
+      expect(bar(wrapper).exists()).toBe(false);
+    });
+
+    test("Select is off with nothing listed", async () => {
+      const { wrapper } = await setup([]);
+
+      expect(selectToggle(wrapper).attributes("disabled")).toBeDefined();
+    });
+
+    test("archive sends the selected ids through the undo store, then selection ends", async () => {
+      const { wrapper, undo } = await setup();
+      const archive = vi.spyOn(undo, "archive").mockResolvedValue({ error: null });
+      await select(wrapper, 0, 2);
+
+      await click(wrapper, "bulk-archive");
+
+      expect(archive).toHaveBeenCalledWith("1", "3");
+      expect(bar(wrapper).exists()).toBe(false);
+    });
+
+    test("a refused archive keeps the selection for a retry and says why", async () => {
+      const { wrapper, undo } = await setup();
+      vi.spyOn(undo, "archive").mockResolvedValue({ error: "Couldn't save the change." });
+      await select(wrapper, 0);
+
+      await click(wrapper, "bulk-archive");
+
+      expect(bar(wrapper).exists()).toBe(true);
+      expect(undo.notice).toEqual({ kind: "failed", message: "Couldn't save the change." });
+      undo.reset();
+    });
+
+    test("on the Archived tab the bar unarchives", async () => {
+      const { wrapper, store, undo } = await setup([
+        row("1", { archived: true }),
+        row("2", { archived: true }),
+      ]);
+      store.setFilter("archived");
+      await flushPromises();
+      const unarchive = vi.spyOn(undo, "unarchive").mockResolvedValue({ error: null });
+      await select(wrapper, 0, 1);
+
+      await click(wrapper, "bulk-unarchive");
+
+      expect(unarchive).toHaveBeenCalledWith("1", "2");
+      expect(bar(wrapper).exists()).toBe(false);
+    });
+
+    test("mark read marks the selected unread rows", async () => {
+      const { wrapper, store } = await setup([
+        row("1"),
+        row("2", { read_at: "2026-11-01T00:00:00Z" }),
+      ]);
+      const markRead = vi.spyOn(store, "markRead").mockResolvedValue({ error: null });
+      await select(wrapper, 0, 1);
+
+      await click(wrapper, "bulk-mark-read");
+
+      expect(markRead).toHaveBeenCalledWith("1");
+      expect(bar(wrapper).exists()).toBe(false);
+    });
+
+    test("delete stages the selected rows through the undo store", async () => {
+      const { wrapper, undo } = await setup();
+      const remove = vi.spyOn(undo, "remove").mockImplementation(() => {});
+      await select(wrapper, 1, 2);
+
+      await click(wrapper, "bulk-delete");
+
+      expect(remove).toHaveBeenCalledWith("2", "3");
+      expect(bar(wrapper).exists()).toBe(false);
+    });
+
+    test("save offline downloads the eligible rows once selection has ended", async () => {
+      const { wrapper, offlineCache } = await setup([
+        row("1"),
+        row("2", { read_at: "2026-11-01T00:00:00Z" }),
+      ]);
+      const cache = vi.spyOn(offlineCache, "cacheBookmark").mockResolvedValue(undefined);
+      await select(wrapper, 0, 1);
+      expect(wrapper.get('[data-testid="bulk-save-offline"]').attributes("disabled")).toBe(
+        undefined,
+      );
+
+      await click(wrapper, "bulk-save-offline");
+
+      expect(bar(wrapper).exists()).toBe(false);
+      expect(cache.mock.calls.map(([b]) => b.id)).toEqual(["1"]);
+    });
+
+    test("the offline snapshot turns the actions off", async () => {
+      const { wrapper, store } = await setup();
+      store.offlineSnapshot = true;
+      await select(wrapper, 0);
+
+      expect(wrapper.find('[data-testid="selection-offline"]').exists()).toBe(true);
+      expect(wrapper.get('[data-testid="bulk-archive"]').attributes("disabled")).toBeDefined();
+    });
+
+    test.each([
+      [
+        "a tab switch",
+        (w: ReturnType<typeof mount>) =>
+          w.findComponent({ name: "StatusTabs" }).vm.$emit("change", "archived"),
+      ],
+      [
+        "a tag toggle",
+        (w: ReturnType<typeof mount>) =>
+          w.findComponent({ name: "TagFilterBar" }).vm.$emit("toggle", "tag-1"),
+      ],
+      [
+        "a search",
+        (w: ReturnType<typeof mount>) => w.get('[data-testid="search-form"]').trigger("submit"),
+      ],
+    ])("%s ends selection", async (_name, act) => {
+      const { wrapper, store } = await setup();
+      vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+      await select(wrapper, 0);
+
+      await act(wrapper);
+      await flushPromises();
+
+      expect(bar(wrapper).exists()).toBe(false);
+    });
+
+    test("clearing the search ends selection", async () => {
+      const { wrapper, store } = await setup();
+      vi.spyOn(store, "fetch").mockResolvedValue(undefined);
+      const search = wrapper.get('input[data-testid="search-input"]');
+      await search.setValue("x");
+      await wrapper.get('[data-testid="search-form"]').trigger("submit");
+      await select(wrapper, 0);
+
+      await search.setValue("");
+      await flushPromises();
+
+      expect(bar(wrapper).exists()).toBe(false);
+    });
+
+    test("x selects the focused row (starting selection), and again deselects it", async () => {
+      const { wrapper } = await setup();
+
+      press("x");
+      await flushPromises();
+      expect(bar(wrapper).exists()).toBe(false);
+
+      press("j");
+      press("j");
+      press("x");
+      await flushPromises();
+      expect(wrapper.get('[data-testid="selection-count"]').text()).toBe("1 selected");
+      expect(rowButtons(wrapper)[1]!.attributes("aria-pressed")).toBe("true");
+
+      press("x");
+      await flushPromises();
+      expect(wrapper.get('[data-testid="selection-count"]').text()).toBe("0 selected");
+    });
+
+    test("Escape leaves selection mode, keeping focus on the row", async () => {
+      const { wrapper } = await setup();
+      press("j");
+      press("x");
+      await flushPromises();
+
+      press("Escape");
+      await flushPromises();
+
+      expect(bar(wrapper).exists()).toBe(false);
+      expect(document.activeElement).toBe(rowButtons(wrapper)[0]!.element);
+    });
+
+    test("the shortcuts list x and Escape", async () => {
+      const { wrapper } = await setup();
+
+      press("?");
+      await flushPromises();
+
+      const help = wrapper.get('[data-testid="shortcuts-help"]').text();
+      expect(help).toContain("Select item");
+      expect(help).toContain("Leave selection");
+    });
+  });
 });

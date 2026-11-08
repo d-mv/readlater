@@ -38,7 +38,7 @@ describe("UndoToast", () => {
 
   test("an archive offers Undo", async () => {
     const wrapper = mount(UndoToast);
-    undo.notice = { kind: "archived", id: "1" };
+    undo.notice = { kind: "archived", ids: ["1"] };
     await nextTick();
 
     expect(card(wrapper).text()).toContain("Archived");
@@ -48,10 +48,24 @@ describe("UndoToast", () => {
 
   test("a delete offers Undo", async () => {
     const wrapper = mount(UndoToast);
-    undo.notice = { kind: "deleted", id: "1" };
+    undo.notice = { kind: "deleted", ids: ["1"] };
     await nextTick();
 
     expect(card(wrapper).text()).toContain("Deleted");
+    expect(action(wrapper).text()).toBe("Undo");
+  });
+
+  test.each([
+    ["archived", ["1", "2", "3"], "3 archived"],
+    ["deleted", ["1", "2"], "2 deleted"],
+    ["unarchived", ["1"], "Unarchived"],
+    ["unarchived", ["1", "2"], "2 unarchived"],
+  ] as const)("a bulk %s notice counts its rows (%j → %s)", async (kind, ids, text) => {
+    const wrapper = mount(UndoToast);
+    undo.notice = { kind, ids: [...ids] };
+    await nextTick();
+
+    expect(wrapper.find('[data-testid="undo-toast-message"]').text()).toBe(text);
     expect(action(wrapper).text()).toBe("Undo");
   });
 

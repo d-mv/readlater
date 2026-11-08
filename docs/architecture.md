@@ -826,14 +826,18 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   end), so the global `:focus-visible` ring shows it and Tab continues from
   there; Enter (the button's own) or `o` opens the focused row; `/` focuses
   search; `a` opens the Add dialog (`AddBookmarkDialog` exposes `open`);
-  `?` opens `components/ShortcutsHelp.vue` (shared `Dialog`). Reader:
+  `x` selects the focused row and Escape leaves selection (**Bulk
+  actions**); `?` opens `components/ShortcutsHelp.vue` (shared `Dialog`). Reader:
   `Escape`/`u` back to the list, `e` archive through `stores/undo.ts` (same
   path as the menu, so the Undo toast appears), `m` mark read/unread (only
   once the article is ready, like the menu), `?` help. The reader's
   shortcuts are off while editing, so a stray key outside the editor can't
   leave or archive the draft. Nothing is announced beyond the focus move.
 - **Undo for archive and delete** — `stores/undo.ts` owns one notice at a
-  time, shown by `components/undo/UndoToast.vue` (mounted once in `App.vue`,
+  time (for one row or a bulk batch, see **Bulk actions**: the store's
+  `archive`/`unarchive`/`remove` and the bookmarks store's
+  `archive`/`unarchive`/`markRead`/`remove`/`undoRemove` take any number
+  of ids; the toast reads "Archived" for one, "3 archived" for a batch), shown by `components/undo/UndoToast.vue` (mounted once in `App.vue`,
   so it outlives the reader → list navigation; built on the shared
   `shared/ui/Toast.vue`, an always-present `role="status"` live region) for
   `UNDO_WINDOW_MS` = 5 s. The reader menu's Archive / Delete go through it.
@@ -857,7 +861,40 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   commits a staged delete first (bounded to 3 s, while the session still
   works); `bookmarks.reset()` otherwise drops it, because every other reset
   runs with the session already gone (expired, other tab, another user) —
-  the row then simply stays on the server.
+  the row then simply stays on the server. A staged batch is one
+  `stagedRemoval` list (each row with its old index): undo puts every row
+  back where it was, a refused commit too, and a row of it deleted
+  elsewhere drops out while the rest still go.
+- **Bulk actions** — "Select" (`components/list/SelectToggle.vue`, an
+  `IconButton` with `aria-pressed`, next to the sort toggle) turns the list
+  into selection mode (`composables/useListSelection.ts`, local to the view,
+  so leaving the route ends it; a tab switch, tag toggle, search or
+  clearing the search ends it too; the sort doesn't). Each row's open
+  button becomes its checkbox — a toggle with `aria-pressed`, named by the
+  title, so `j`/`k` and Tab still reach it — and the offline toggle steps
+  aside. `x` toggles the focused row (starting selection), Escape leaves.
+  The selection is the picked ids still in `visibleBookmarks`: a row
+  archived, deleted or filtered out drops out of the count.
+  `components/list/SelectionBar.vue` (a `section` "Selection", fixed to the
+  bottom above the safe-area inset, z-40) shows "N selected" (polite live
+  text), Select all (loaded rows) and Cancel, and four actions: Archive
+  (Unarchive on the Archived tab), Mark read (the unread ones), Save offline
+  (unread rows without a copy — the row toggle's rule) and Delete.
+  `composables/useBulkActions.ts` runs them: every server write is one
+  request with `id=in.(…)` (one id stays `id=eq.…`, `whereIds()` in the
+  bookmarks store), local rows change only once it's accepted; Archive,
+  Unarchive and Delete go through the undo store — one toast, one Undo for
+  the batch (unarchive's undo archives again), Delete staged exactly like a
+  single delete (one DELETE on commit, flushed on pagehide/hidden and before
+  Sign out); archive and delete evict the offline copies. A refused write
+  keeps the selection and shows the error in the toast (danger). Save
+  offline ends selection at once and downloads in the background, three at
+  a time, loading each body with `fetchOne()` first (the list has none);
+  rows it couldn't save are counted in one toast error. On the offline
+  snapshot (`store.offlineSnapshot`) every action is disabled, the bar
+  saying why (`aria-describedby`). The bar sets `--bottom-bar-height`
+  (`main.css`, via `:root:has([data-bottom-bar])`): the list pads its end
+  by it and the undo toast (`shared/ui/Toast.vue`) rises above the bar.
 - **Live updates** — `store.subscribeToChanges()` opens one Realtime
   `postgres_changes` channel (RLS-scoped, no body columns in the payload).
   INSERT prepends (unless already listed), UPDATE merges into a loaded row

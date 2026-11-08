@@ -82,4 +82,19 @@ describe("BookmarkList", () => {
     });
     expect(wrapper.find('[data-testid="images-not-cached"]').exists()).toBe(true);
   });
+
+  test("in selection mode rows toggle and show which are selected", async () => {
+    const wrapper = mount(BookmarkList, {
+      props: {
+        bookmarks: [makeBookmark({ id: "a" }), makeBookmark({ id: "b" })],
+        selecting: true,
+        selectedIds: new Set(["b"]),
+      },
+    });
+    const rows = wrapper.findAll('[data-testid="row"]');
+
+    expect(rows.map((r) => r.attributes("data-selected"))).toEqual([undefined, "true"]);
+    await rows[0]!.find('[data-testid="row-open"]').trigger("click");
+    expect(wrapper.emitted("toggleSelect")).toEqual([["a"]]);
+  });
 });

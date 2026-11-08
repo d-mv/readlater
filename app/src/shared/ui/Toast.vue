@@ -45,13 +45,14 @@ const actionTestId = computed(() => part("action"));
   <!-- The live region stays in the DOM while closed: screen readers only
        announce changes to a region they already know about. It ignores the
        pointer so the page under it stays usable; only the card takes clicks.
-       Sits above the home indicator (safe-area inset). -->
+       Sits above the home indicator (safe-area inset), and above a bar
+       fixed to the bottom while one is up (--bottom-bar-height, main.css). -->
   <div
     role="status"
     aria-live="polite"
     aria-atomic="true"
     :data-testid="props.testId"
-    class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center px-16 pb-[calc(16px+env(safe-area-inset-bottom))]"
+    class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center px-16 pb-[calc(16px+var(--bottom-bar-height,0px)+env(safe-area-inset-bottom))]"
   >
     <div
       v-if="props.open"

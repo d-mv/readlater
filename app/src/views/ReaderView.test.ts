@@ -675,7 +675,7 @@ describe("ReaderView", () => {
       await wrapper.find('[data-testid="delete-item"]').trigger("click");
 
       expect(pushMock).toHaveBeenCalledWith({ name: "list" });
-      expect(useUndoStore().notice).toEqual({ kind: "deleted", id: "1" });
+      expect(useUndoStore().notice).toEqual({ kind: "deleted", ids: ["1"] });
       expect(useBookmarksStore().bookmarks.some((b) => b.id === "1")).toBe(false);
       expect(deleteFn).not.toHaveBeenCalled();
       useUndoStore().reset();
@@ -1019,7 +1019,7 @@ describe("ReaderView", () => {
 
       expect(archive).toHaveBeenCalledWith("1");
       expect(pushMock).toHaveBeenCalledWith({ name: "list" });
-      expect(useUndoStore().notice).toEqual({ kind: "archived", id: "1" });
+      expect(useUndoStore().notice).toEqual({ kind: "archived", ids: ["1"] });
       useUndoStore().reset();
     });
 
@@ -1687,7 +1687,7 @@ describe("ReaderView", () => {
       await flushPromises();
 
       expect(archive).toHaveBeenCalledWith("1");
-      expect(useUndoStore().notice).toEqual({ kind: "archived", id: "1" });
+      expect(useUndoStore().notice).toEqual({ kind: "archived", ids: ["1"] });
       expect(pushMock).toHaveBeenCalledWith({ name: "list" });
       useUndoStore().reset();
     });
