@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2.118.0";
 import { bearerToken, checkAuth } from "../_shared/checkAuth.ts";
 
-// Who a capture request is from. The iOS Shortcut sends a per-user key made
+// Who a capture request is from. A capture client sends a per-user key made
 // by rotate_capture_key() (Settings → Capture key); capture_keys stores only
 // its sha256, so the token is hashed and looked up with the service-role
 // client, and that row's user_id is who the capture is written as.

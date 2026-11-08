@@ -17,7 +17,7 @@ describe("supabase client", () => {
 
     const { supabase, AUTH_STORAGE_KEY, CAPTURE_ENDPOINT } = await import("./supabase");
 
-    // Where the iOS Shortcut posts captures (Settings → Capture key).
+    // Where capture clients post captures (Settings → Capture key).
     expect(CAPTURE_ENDPOINT).toBe("https://project.supabase.co/functions/v1/capture");
 
     // The key supabase-js derives by default, so stored sessions stay valid.

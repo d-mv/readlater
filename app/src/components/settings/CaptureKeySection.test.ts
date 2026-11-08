@@ -118,7 +118,7 @@ describe("CaptureKeySection", () => {
     await get(wrapper, "capture-key-generate").trigger("click");
     expect(confirm).toHaveBeenCalledOnce();
     expect(confirm.mock.calls[0]![0]).toMatch(
-      /The old key stops working; update your iOS Shortcut/,
+      /The old key stops working; update it wherever you use it/,
     );
     expect(rpc).not.toHaveBeenCalled();
   });

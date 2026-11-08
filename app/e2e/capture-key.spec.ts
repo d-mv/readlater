@@ -23,7 +23,7 @@ test("the first key: generated once, shown read-only, and only its hash is store
   const field = section.getByLabel("Your new key");
   await expect(field).toHaveValue(/^rlk_[A-Za-z0-9_-]{43}$/);
   await expect(field).not.toBeEditable();
-  expect(confirmText).toContain("The old key stops working; update your iOS Shortcut");
+  expect(confirmText).toContain("The old key stops working; update it wherever you use it");
   const key = await field.inputValue();
   expect(backend.issuedCaptureKeys).toEqual([key]);
   expect(backend.captureKeys).toHaveLength(1);

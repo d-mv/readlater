@@ -24,7 +24,7 @@ const fieldId = useId();
 const newKeyPanel = useTemplateRef<HTMLElement>("newKeyPanel");
 
 const CONFIRM_TEXT =
-  "Generate a new capture key?\n\nThe old key stops working; update your iOS Shortcut.";
+  "Generate a new capture key?\n\nThe old key stops working; update it wherever you use it.";
 
 const COPIED_MS = 2000;
 const copied = shallowRef(false);
@@ -62,8 +62,8 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
   >
     <h2 :id="headingId" class="label m-0 mb-12">Capture key</h2>
     <p class="m-0 mb-16 text-sm leading-[1.5] text-ink-muted">
-      The iOS Shortcut saves to Read Later with this key. Generating a new one replaces the old key
-      straight away.
+      Anything that posts to the capture endpoint saves to Read Later with this key. Generating a
+      new one replaces the old key straight away.
     </p>
 
     <Message v-if="state.status === 'loading'" test-id="capture-key-loading">

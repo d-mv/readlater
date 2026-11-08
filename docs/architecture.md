@@ -2,7 +2,7 @@
 
 Personal read-it-later app, single owner, self-hosted. Capture a link (or a
 snippet, a raw note, or a Markdown/Word/PDF file) via bookmarklet / PWA
-share-target / iOS Shortcut / in-app dialog, parse it into clean markdown on
+share-target / capture client / in-app dialog, parse it into clean markdown on
 a VPS worker, read it later in a Vue 3 PWA.
 
 This is the current-state reference — kept in sync with the code, including
@@ -16,7 +16,7 @@ flowchart TD
     BM["Bookmarklet popup (/capture), Save click"] -->|store.add, session| Client[PWA client insert]
     ST["Share target (/share-target), Save click"] -->|store.add / store.addNote, session| Client
     Dlg["Add dialog (URL mode)"] -->|store.add, session| Client
-    Short[iOS Shortcut] -->|POST url/text, per-user capture key| Cap[capture edge function]
+    Short[Capture client] -->|POST url/text, per-user capture key| Cap[capture edge function]
     Snip["Add dialog (Snippet mode)"] -->|HTML/text, JWT| Snippet[snippet edge function]
     File["Add dialog (File mode)"] -->|base64, JWT| FileFn[file-import / pdf-import edge functions]
     Client -->|url| Pending[(status=pending)]
@@ -46,7 +46,7 @@ Independently replaceable pieces:
 | Component | Role | Stack |
 |---|---|---|
 | Bookmarklet | Popup-opener, no logic of its own | `javascript:` URL, built by `bookmarklet/build.ts` |
-| `capture` edge function | Capture-key-authed insert/dedupe for url/text captures from non-browser callers (iOS Shortcut), written as the key's user; `POST /capture/:id/refresh` | Deno (Supabase Edge Functions) |
+| `capture` edge function | Capture-key-authed insert/dedupe for url/text captures from non-browser callers (capture client), written as the key's user; `POST /capture/:id/refresh` | Deno (Supabase Edge Functions) |
 | `snippet` edge function | JWT-authed HTML→Markdown insert for pasted snippets | Deno |
 | `file-import` / `pdf-import` edge functions | JWT-authed Markdown/Word → note, PDF → stored original + extracted text | Deno (`npm:mammoth`, `npm:unpdf`) |
 | `translate` edge function | JWT-authed DeepL translation of the row's own `content_md` (loaded server-side), cached on the row | Deno |
@@ -173,7 +173,7 @@ create table rate_limits (
 -- bump_rate_limit(p_action) → boolean: the same, keyed on the caller's own
 --   auth.uid(); execute: authenticated. Callers never supply the limit.
 
--- iOS Shortcut capture keys (20261108100000): one per user, only the sha256
+-- Capture keys (20261108100000): one per user, only the sha256
 -- (hex) of the key is stored. Owner may read the dates, never the hash.
 create table capture_keys (
   user_id      uuid primary key references auth.users(id) on delete cascade,
@@ -326,7 +326,7 @@ Seven ways in, all funneling into the same `bookmarks` table:
 |---|---|---|---|
 | Bookmarklet | `bookmarklet/source.js` → `/capture` popup route, Save click | Existing PWA Supabase session | `store.add()`, same path as the in-app dialog |
 | PWA share-target (Chrome/Android only) | `/share-target` (manifest `share_target`), Save click → `store.add()` / `store.addNote()` | Existing PWA Supabase session | url (or text that is a bare URL) → `pending`; free text → `note`, `ready` |
-| iOS Shortcut | `POST` to the `capture` edge fn | Per-user capture key bearer (Settings → Capture key) | url → `pending`; free text → `note`, `ready` |
+| capture client | `POST` to the `capture` edge fn | Per-user capture key bearer (Settings → Capture key) | url → `pending`; free text → `note`, `ready` |
 | Add dialog — URL mode | `AddBookmarkDialog.vue` | Supabase session (client insert) | `pending` |
 | Add dialog — Snippet mode | `AddBookmarkDialog.vue` → `snippet` edge fn | JWT (session) | `note`, `ready` |
 | Add dialog — File mode (.md/.markdown/.docx) | `AddBookmarkDialog.vue` → `file-import` edge fn | JWT (session) | `note`, `ready` |
@@ -365,9 +365,8 @@ visible popup rather than an inline toast.
 
 **Share-target.** Chrome-on-Android registers the PWA as an OS share target
 (`app/vite.config.ts` → `VitePWA({ manifest: { share_target } })`); WebKit/
-Safari has never implemented it, so iOS has no equivalent — the bookmarklet,
-or a one-tap iOS Shortcut POSTing to `capture` with a capture-key bearer,
-covers that case instead. `ShareTargetView.vue` reads `url`/`text` from the
+Safari has never implemented it — there the bookmarklet, or a capture
+client POSTing to `capture` with a capture-key bearer, covers that case. `ShareTargetView.vue` reads `url`/`text` from the
 query string (the shared `title` is ignored; the worker fills it) and saves
 through the store under the PWA's own session: a `url` (or `text` that
 `isBareUrl()` accepts) goes to `store.add()` — which rejects anything not
@@ -375,8 +374,8 @@ http(s) —
 anything else to `store.addNote()` — again only after a Save click, since the
 manifest's share target is `method: "GET"` and so just as reachable from a
 cross-site link as `/capture`. A successful save routes to the list. The
-`capture` edge function is only reached by non-browser callers (the iOS
-Shortcut).
+`capture` edge function is only reached by non-browser callers (capture
+clients).
 
 **Snippet paste.** `AddBookmarkDialog.vue` has a URL/Snippet mode switch.
 Snippet mode is a single textarea; on paste it reads both
@@ -475,7 +474,7 @@ user's row with the same URL could match.
   working. The Add dialog's "Add anyway" does the same `store.refresh(id)`.
   The dialog keeps its lifecycle in one `Phase` value plus an epoch, so a
   save still in flight when the dialog is closed can't land in a reopened one.
-- **Edge path** (`capture`, iOS Shortcut): responds
+- **Edge path** (`capture`, capture client): responds
   `{ status: 'duplicate', existingId, existingTitle, existingSavedAt }`;
   continuing calls `POST /capture/:id/refresh`.
 
@@ -489,7 +488,7 @@ Separate trust levels, kept distinct on purpose:
 
 | Actor | Mechanism | Why |
 |---|---|---|
-| iOS Shortcut | `capture` edge fn, per-user capture key bearer (`capture/captureAuth.ts`): sha256 of the token looked up in `capture_keys`; the function then writes with the service-role key as that row's `user_id`. Transition fallback: the legacy `CAPTURE_KEY` secret (constant-time compare, `_shared/checkAuth.ts`) as `OWNER_USER_ID`, only while that owner has no `capture_keys` row | No browser session to lean on; a key per user, rotatable from Settings, stored only as a hash |
+| capture client | `capture` edge fn, per-user capture key bearer (`capture/captureAuth.ts`): sha256 of the token looked up in `capture_keys`; the function then writes with the service-role key as that row's `user_id`. Transition fallback: the legacy `CAPTURE_KEY` secret (constant-time compare, `_shared/checkAuth.ts`) as `OWNER_USER_ID`, only while that owner has no `capture_keys` row | No browser session to lean on; a key per user, rotatable from Settings, stored only as a hash |
 | Bookmarklet popup, share target, Add dialog (all modes), reader actions (edit, translate) | PWA's own Supabase session (JWT) | Browser-facing, already logged in — client inserts and the snippet/file-import/pdf-import/translate functions all run under the user's own RLS rather than the shared capture key |
 | VPS worker | Supabase `service_role` (`SUPABASE_SECRET_KEY`) | Needs unconditional read/write on every row; bypasses RLS by design, never reaches a browser |
 | Public view (`/s/:id`) | Supabase anon key + `get_public_bookmark` RPC | No session at all; scoped to a single exact-id match, not a table policy |
@@ -1054,8 +1053,8 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   from `capture_keys` (the column privileges refuse anything else) and shows
   "No key yet" (with a note that the first key turns the server's static key
   off) or the created / last-used dates. **Generate key / Generate new key**
-  asks first (`window.confirm`: "The old key stops working; update your iOS
-  Shortcut."), calls `rotate_capture_key`, and shows the plaintext once in a
+  asks first (`window.confirm`: "The old key stops working; update it wherever you
+  use it."), calls `rotate_capture_key`, and shows the plaintext once in a
   read-only, labelled field (selected on focus) with a copy button, "Copy it
   now — it won't be shown again" and a short how-to: the `Get Contents of
   URL` action posts JSON `{url}` / `{text}` to `CAPTURE_ENDPOINT`

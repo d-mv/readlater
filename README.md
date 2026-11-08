@@ -1,7 +1,7 @@
 # Read Later
 
 Personal read-it-later app: capture a link (bookmarklet, PWA share-target,
-iOS Shortcut, a pasted snippet, or an uploaded Markdown/Word/PDF file), get
+the capture endpoint, a pasted snippet, or an uploaded Markdown/Word/PDF file), get
 it parsed into clean markdown on a self-hosted worker, read it later in a
 Vue 3 PWA — offline-capable, with tags, full-text search, DeepL translation,
 and optional public sharing per bookmark. Single owner; Supabase (Postgres,
@@ -58,23 +58,22 @@ The popup is 380×260; a very long title or URL scrolls inside it. To build
 it for another origin: `cd bookmarklet && APP_ORIGIN=https://… bun run build`
 (writes `bookmarklet/dist.txt`, not committed).
 
-## iOS Shortcut
+## Capture endpoint
 
-iOS has no PWA share target, so an iOS Shortcut posts captures to the
-`capture` edge function instead.
+Anything that can send an HTTP request (a shortcut, a script, another app)
+can save to Read Later through the `capture` edge function.
 
-1. In the app, open **Settings → Capture key** and tap **Generate key**
+1. In the app, open **Settings → Capture key** and choose **Generate key**
    (later: **Generate new key**). The key (`rlk_…`) is shown **once** — copy
    it. Generating a new key turns the previous one off straight away, and
    your first key also turns off the server's old static `CAPTURE_KEY`.
-2. In the Shortcuts app, make a shortcut that accepts URLs and text from the
-   share sheet, with a **Get Contents of URL** action:
+2. Send:
    - URL: `https://<project-ref>.supabase.co/functions/v1/capture` (Settings
      shows the exact address)
    - Method: `POST`
    - Header: `Authorization` = `Bearer <your key>`
-   - Request body: JSON, `url` = the shared URL — or `text` = shared text,
-     which is saved as a note (text that is just a URL is saved as a link).
+   - Body: JSON, `url` = a URL — or `text` = free text, which is saved as a
+     note (text that is just a URL is saved as a link).
 3. The answer is `{"status":"created","id":…}`, or
    `{"status":"duplicate","existingId":…}` for a URL you already saved —
    `POST …/capture/<existingId>/refresh` re-fetches it (`409
@@ -82,4 +81,4 @@ iOS has no PWA share target, so an iOS Shortcut posts captures to the
    `{"force":true}`). A wrong or retired key gets `401`.
 
 Settings shows when the key was created and last used. If the key leaks,
-generate a new one and update the shortcut's header.
+generate a new one and update the key wherever you use it.
