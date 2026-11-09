@@ -158,6 +158,21 @@ function placeholderBookmark(article: offlineDb.CachedArticle): Bookmark {
   };
 }
 
+// Offline search: Postgres full-text search can't run against the downloaded
+// copies, so every word of the query must appear (case-insensitively) in the
+// title, excerpt or downloaded text — like the online search, several words
+// narrow the result rather than having to stand next to each other.
+function matchesOffline(query: string): (b: Bookmark) => boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  return (b) => {
+    const text = [b.title, b.excerpt, b.content_md, b.translated_content_md]
+      .filter(Boolean)
+      .join("\n")
+      .toLowerCase();
+    return words.every((word) => text.includes(word));
+  };
+}
+
 async function loadOfflineBookmarks(): Promise<Bookmark[]> {
   const [metaList, cachedArticles] = await Promise.all([
     offlineDb.getBookmarksList().catch(() => []),
@@ -573,21 +588,12 @@ export const useBookmarksStore = defineStore("bookmarks", () => {
       if (!auth.userId) return;
       const offlineBookmarks = await loadOfflineBookmarks();
       if (!isCurrent()) return;
-      const needle = query.toLowerCase();
-      // Postgres full-text search doesn't run against the cached copy — fall
-      // back to a plain substring match over title/excerpt (content_md isn't
-      // cached in list metadata, so offline search can't reach article bodies).
       // The snapshot comes newest first (undated rows last); oldest first is
       // that reversed.
       const offlineRows = withoutRemoving(
         order === "oldest" ? offlineBookmarks.reverse() : offlineBookmarks,
       );
-      bookmarks.value = needle
-        ? offlineRows.filter(
-            (b) =>
-              b.title?.toLowerCase().includes(needle) || b.excerpt?.toLowerCase().includes(needle),
-          )
-        : offlineRows;
+      bookmarks.value = query ? offlineRows.filter(matchesOffline(query)) : offlineRows;
       setSession({ kind: "offline", query });
       hasMore.value = false;
     } finally {

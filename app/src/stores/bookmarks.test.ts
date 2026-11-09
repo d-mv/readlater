@@ -2701,6 +2701,37 @@ describe("useBookmarksStore", () => {
       vi.unstubAllGlobals();
     });
 
+    test("an offline search reaches the downloaded text and translation, every word required", async () => {
+      vi.stubGlobal("navigator", { onLine: false });
+      getBookmarksList.mockResolvedValue([
+        dated("in-body", "04", "04", { title: "Bread", excerpt: null }),
+        dated("in-translation", "03", "03", { title: "Brot", excerpt: null }),
+        dated("one-word", "02", "02", { title: "Sourdough", excerpt: null }),
+        dated("none", "01", "01", { title: "Rust", excerpt: null }),
+      ]);
+      getAllArticles.mockResolvedValue(
+        [
+          ["in-body", "A sourdough STARTER needs flour.", null],
+          ["in-translation", "Ein Sauerteig.", "Your sourdough starter, explained."],
+          ["one-word", "No match here.", null],
+          ["none", "Ownership.", null],
+        ].map(([id, content_md, translated_content_md]) => ({
+          id,
+          content_md,
+          translated_content_md,
+          images: [],
+          cachedAt: "2026-01-01T00:00:00Z",
+        })),
+      );
+
+      const store = useBookmarksStore();
+      store.setSearchQuery("starter  sourdough");
+      await store.fetch();
+
+      expect(store.bookmarks.map((b) => b.id)).toEqual(["in-body", "in-translation"]);
+      vi.unstubAllGlobals();
+    });
+
     test("offlineSnapshot says when the list is the offline copy, until a fetch succeeds", async () => {
       vi.stubGlobal("navigator", { onLine: false });
       getBookmarksList.mockResolvedValue([dated("cached", "01")]);

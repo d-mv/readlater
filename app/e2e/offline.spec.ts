@@ -89,7 +89,7 @@ test("offline, the list is rebuilt from IndexedDB and searched locally", async (
   backend,
 }) => {
   backend.addBookmark({ title: "Sourdough basics" });
-  backend.addBookmark({ title: "Rust ownership" });
+  backend.addBookmark({ title: "Rust ownership", content_md: "The borrow checker explained." });
   await page.goto("/");
   await expect(rows(page)).toHaveCount(2);
   // Only downloaded articles are listed offline.
@@ -106,9 +106,12 @@ test("offline, the list is rebuilt from IndexedDB and searched locally", async (
   const search = page.getByTestId("search-input");
   await search.fill("sourdough");
   await search.press("Enter");
-  // Postgres full-text search isn't available; a substring match over the
-  // cached titles stands in.
+  // Postgres full-text search isn't available; a word match over the
+  // downloaded copies stands in — titles and article text alike.
   await expect(rows(page).getByTestId("title")).toHaveText(["Sourdough basics"]);
+  await search.fill("borrow checker");
+  await search.press("Enter");
+  await expect(rows(page).getByTestId("title")).toHaveText(["Rust ownership"]);
   await search.fill("");
   await expect(rows(page)).toHaveCount(2);
   expect(backend.callsTo("rest").length).toBe(restCallsBefore);
