@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { domainFromUrl, listRowMeta, readerByline, shortDate } from "./format";
+import { domainFromUrl, listRowMeta, readerByline, shortDate, shortDateTime } from "./format";
 
 describe("domainFromUrl", () => {
   test("strips protocol and www", () => {
@@ -68,5 +68,13 @@ describe("shortDate", () => {
     expect(text).toMatch(/2026/);
     expect(text).toMatch(/\b3\b/);
     expect(text).not.toMatch(/10:00|:/);
+  });
+});
+
+describe("shortDateTime", () => {
+  test("formats an ISO timestamp with the date and the time of day", () => {
+    const text = shortDateTime("2026-11-03T10:00:00Z");
+    expect(text).toMatch(/2026/);
+    expect(text).toMatch(/:/);
   });
 });

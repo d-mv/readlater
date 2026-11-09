@@ -90,8 +90,8 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
           </span>
         </template>
         <template v-else>
-          No key yet. Until you generate one, the Shortcut can keep using the server's built-in key
-          (if one is set up); your first key turns that key off.
+          No key yet. Until you generate one, captures can keep using the server's built-in key (if
+          one is set up); your first key turns that key off.
         </template>
       </p>
       <Button test-id="capture-key-generate" :disabled="rotating" @click="onGenerate">
@@ -134,19 +134,18 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
         data-testid="capture-key-howto"
         class="m-0 mt-12 list-decimal pl-18 text-sm leading-[1.6] text-ink-muted"
       >
-        <li>In the Shortcuts app, open your Read Later shortcut.</li>
         <li>
-          In its <span class="text-ink">Get Contents of URL</span> action, the URL is
+          Send a POST request to
           <code class="font-mono text-xs break-all text-ink">{{ CAPTURE_ENDPOINT }}</code
-          >, method POST.
+          >.
         </li>
         <li>
           Set the header <code class="font-mono text-xs text-ink">Authorization</code> to
           <code class="font-mono text-xs text-ink">Bearer</code>, a space, then the key.
         </li>
         <li>
-          The request body is JSON with <code class="font-mono text-xs text-ink">url</code> (or
-          <code class="font-mono text-xs text-ink">text</code> for a note).
+          Send JSON with <code class="font-mono text-xs text-ink">url</code> (or
+          <code class="font-mono text-xs text-ink">text</code> for a note) as the body.
         </li>
       </ol>
 

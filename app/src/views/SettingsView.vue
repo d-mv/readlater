@@ -10,6 +10,7 @@ import IconButton from "../shared/ui/IconButton.vue";
 import Message from "../shared/ui/Message.vue";
 import CaptureKeySection from "../components/settings/CaptureKeySection.vue";
 import SharedLinksSection from "../components/settings/SharedLinksSection.vue";
+import SecurityActivitySection from "../components/settings/SecurityActivitySection.vue";
 
 const router = useRouter();
 const store = useDataTransferStore();
@@ -160,6 +161,8 @@ async function onFileSelected(event: Event) {
     <CaptureKeySection />
 
     <SharedLinksSection />
+
+    <SecurityActivitySection />
 
     <section class="mb-16 rounded-sm border border-line bg-raised p-20">
       <h2 class="label m-0 mb-12">Account</h2>

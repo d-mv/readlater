@@ -46,6 +46,14 @@ interface Deletion {
   deleted_at: string;
 }
 
+export interface SecurityEventRow {
+  id: number;
+  user_id: string;
+  kind: string;
+  detail: Record<string, string | null>;
+  created_at: string;
+}
+
 export interface CaptureKeyRow {
   user_id: string;
   key_hash: string;
@@ -294,6 +302,7 @@ const TABLE_COLUMNS: Record<string, ReadonlySet<string>> = {
   bookmark_tags: new Set(["bookmark_id", "tag_id"]),
   bookmark_deletions: new Set(["bookmark_id", "user_id", "deleted_at"]),
   capture_keys: new Set(["user_id", "key_hash", "created_at", "last_used_at"]),
+  security_events: new Set(["id", "user_id", "kind", "detail", "created_at"]),
 };
 // Generated columns: Postgres refuses a value for them.
 const GENERATED_COLUMNS = new Set(["url_normalized", "search_vector"]);
@@ -467,6 +476,8 @@ export class FakeBackend {
   deletions: Deletion[] = [];
   /** The signed-in user's capture key row (at most one), as the DB holds it. */
   captureKeys: CaptureKeyRow[] = [];
+  /** The signed-in user's security_events (the DB's triggers write them; tests seed them). */
+  securityEvents: SecurityEventRow[] = [];
   /** Plaintext keys rotate_capture_key handed out, oldest first. */
   issuedCaptureKeys: string[] = [];
   /** Storage objects by `bucket/path`. */
@@ -555,6 +566,20 @@ export class FakeBackend {
       ...fields,
     };
     this.captureKeys = [row];
+    return row;
+  }
+
+  /** Seeds a security_events row, as a database trigger would have written it. */
+  addSecurityEvent(fields: Partial<SecurityEventRow> = {}): SecurityEventRow {
+    const row: SecurityEventRow = {
+      id: this.securityEvents.length + 1,
+      user_id: USER.id,
+      kind: "sign_in",
+      detail: {},
+      created_at: this.now(),
+      ...fields,
+    };
+    this.securityEvents.push(row);
     return row;
   }
 
@@ -924,6 +949,8 @@ export class FakeBackend {
         return this.deletions as unknown as Row[];
       case "capture_keys":
         return this.captureKeys as unknown as Row[];
+      case "security_events":
+        return this.securityEvents as unknown as Row[];
       default:
         throw new Error(`unknown table ${table}`);
     }

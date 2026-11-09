@@ -43,3 +43,8 @@ export function shortDate(iso: string): string {
     day: "numeric",
   });
 }
+
+// "Nov 3, 2026, 14:05" (in the viewer's locale) for a stored timestamp.
+export function shortDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}

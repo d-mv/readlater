@@ -80,7 +80,7 @@ function onOnline() {
 }
 
 // iOS suspends a backgrounded PWA and its Realtime socket with it, so changes
-// made meanwhile (a capture from the Shortcut, the worker finishing a parse)
+// made meanwhile (a capture from another client, the worker finishing a parse)
 // never arrive. Catch up when the app comes back — a cheap delta sync, but
 // throttled since app switching can toggle visibility in quick succession.
 let lastVisibleRefetch = Date.now();

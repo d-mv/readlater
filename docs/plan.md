@@ -203,7 +203,11 @@ its link, copy and Revoke via `store.setPublic`). Capture-key rotation — done
 2026-11-08 (Settings → Capture key: per-user `rlk_` keys, only the sha256
 stored in `capture_keys`, `rotate_capture_key()` rate-limited 10/h, shown
 once; `capture` resolves the key's user; the first key retires the env
-`CAPTURE_KEY`). Not built: offline full-text search, audit log.
+`CAPTURE_KEY`). Offline search over article text — done 2026-11-09 (every
+word must appear in a downloaded copy's title, excerpt, text or translation).
+Security activity log — done 2026-11-09 (Settings → Security activity:
+sign-ins, new capture keys, sharing changes and deletes, written by triggers
+into `security_events`, kept 90 days).
 
 ---
 

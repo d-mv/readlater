@@ -12,8 +12,8 @@ select has_extension('pg_net');
 
 select is(
   (select array_agg(jobname order by jobname) from cron.job),
-  array['storage-sweep']::text[],
-  'storage-sweep is the only scheduled job'
+  array['security-events-prune', 'storage-sweep']::text[],
+  'the scheduled jobs: storage-sweep and the security-events prune'
 );
 select results_eq(
   $$select schedule, active, username::text, database::text from cron.job where jobname = 'storage-sweep'$$,

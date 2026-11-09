@@ -3,10 +3,11 @@
 -- and given tests in the matching file (see README.md checklist).
 begin;
 \ir _helpers.psql
-select plan(12);
+select plan(14);
 
 select tables_are('public',
-  array['bookmarks', 'tags', 'bookmark_tags', 'bookmark_deletions', 'rate_limits', 'capture_keys']);
+  array['bookmarks', 'tags', 'bookmark_tags', 'bookmark_deletions', 'rate_limits', 'capture_keys',
+        'security_events']);
 
 select functions_are('public', array[
   'get_public_bookmark',
@@ -19,15 +20,22 @@ select functions_are('public', array[
   'bump_rate_limit',
   'list_orphaned_storage_objects',
   'rate_limit_for',
-  'rotate_capture_key'
+  'rotate_capture_key',
+  'security_events_sign_in',
+  'security_events_capture_key',
+  'security_events_bookmark'
 ]);
 
 select triggers_are('public', 'bookmarks',
-  array['bookmarks_touch_updated_at', 'bookmarks_record_deletion', 'bookmarks_reset_retry']);
+  array['bookmarks_touch_updated_at', 'bookmarks_record_deletion', 'bookmarks_reset_retry',
+        'security_events_bookmark_shared', 'security_events_bookmark_sharing',
+        'security_events_bookmark_deleted']);
 select triggers_are('public', 'bookmark_tags', array['bookmark_tags_touch_bookmark']);
 select triggers_are('public', 'tags', array['tags_touch_bookmarks']);
 select triggers_are('public', 'bookmark_deletions', array[]::name[]);
-select triggers_are('public', 'capture_keys', array[]::name[]);
+select triggers_are('public', 'capture_keys', array['security_events_capture_key']);
+select triggers_are('public', 'security_events', array[]::name[]);
+select triggers_are('auth', 'sessions', array['security_events_sign_in']);
 
 select is(
   (select array_agg(c.relname::text order by c.relname) from pg_class c
@@ -39,7 +47,8 @@ select is(
   (select array_agg(tablename || ': ' || policyname order by tablename, policyname)
    from pg_policies where schemaname = 'public'),
   array['bookmark_deletions: owner read', 'bookmark_tags: owner access',
-        'bookmarks: owner access', 'capture_keys: owner read', 'tags: owner access']::text[],
+        'bookmarks: owner access', 'capture_keys: owner read', 'security_events: owner read',
+        'tags: owner access']::text[],
   'public policies'
 );
 
@@ -56,6 +65,7 @@ select is(
   array['bookmark_deletions: authenticated: SELECT',
         'bookmark_tags: authenticated: DELETE,INSERT,SELECT,UPDATE',
         'bookmarks: authenticated: DELETE,INSERT,SELECT,UPDATE',
+        'security_events: authenticated: SELECT',
         'tags: authenticated: INSERT,SELECT,UPDATE']::text[],
   'anon holds no table privileges; authenticated only what the app uses'
 );

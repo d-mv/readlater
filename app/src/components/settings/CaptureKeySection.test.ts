@@ -123,7 +123,7 @@ describe("CaptureKeySection", () => {
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  test("a generated key is shown once, read-only, with copy and the Shortcut how-to", async () => {
+  test("a generated key is shown once, read-only, with copy and the capture how-to", async () => {
     info({ data: USED, error: null });
     let finish!: (value: { data: unknown; error: unknown }) => void;
     rpc.mockReturnValue(new Promise((resolve) => (finish = resolve)));
@@ -152,6 +152,8 @@ describe("CaptureKeySection", () => {
     expect(howTo).toContain("https://project.supabase.co/functions/v1/capture");
     expect(howTo).toContain("Authorization");
     expect(howTo).toContain("Bearer");
+    expect(howTo).toContain("POST");
+    expect(howTo).not.toMatch(/Shortcut|iOS/);
     expect(get(wrapper, "capture-key-status").text()).toMatch(/Never used/);
   });
 

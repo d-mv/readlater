@@ -199,6 +199,31 @@ grant select, insert, update, delete on bookmarks to authenticated;
 grant select, insert, update on tags to authenticated;          -- upsert; no client deletes tags
 grant select, insert, update, delete on bookmark_tags to authenticated;
 grant select on bookmark_deletions to authenticated;            -- tombstones: trigger-written
+grant select on security_events to authenticated;               -- trigger-written, see below
+
+-- Security activity (20261109100000): what happened to an account, for the
+-- owner's Settings list. Written only by triggers, never by a client; kept 90
+-- days (pg_cron 'security-events-prune', 03:47 UTC).
+create table security_events (
+  id         bigint generated always as identity primary key,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  kind       text not null,  -- sign_in | capture_key_rotated | link_shared
+                             -- | link_unshared | bookmark_deleted
+  detail     jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+create policy "owner read" on security_events for select to authenticated
+  using (user_id = (select auth.uid()));
+-- Triggers (security definer, search_path ''):
+--   auth.sessions insert → sign_in {user_agent, ip}. A new session is a
+--     sign-in (refreshes keep theirs). Supabase's auth.audit_log_entries
+--     isn't written on this project. A failure only logs a warning: it must
+--     never block signing in.
+--   capture_keys insert / update of key_hash → capture_key_rotated.
+--   bookmarks: inserted public, or is_public changed → link_shared /
+--     link_unshared; deleted → bookmark_deleted (skipped when the delete
+--     cascades from removing the user). Detail {bookmark_id, title}, title
+--     falling back to the URL.
 
 -- Returns public-safe columns only (no user_id, pdf_path, url, status,
 -- error_message, progress, translation, …).
@@ -315,7 +340,8 @@ nightly sweep, §5), `20261022100000_rate_limits_server_side`,
 `20261022110000_tag_touch_and_user_delete`,
 `20261022120000_url_normalized_keeps_path_case` and
 `20261108100000_capture_keys` (per-user capture keys, `rotate_capture_key`,
-`capture-key` rate limit). New changes go in new migration
+`capture-key` rate limit) and `20261109100000_security_events` (security
+activity log, its triggers and 90-day prune). New changes go in new migration
 files.
 
 ## 3. Capture paths
@@ -1056,14 +1082,20 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   asks first (`window.confirm`: "The old key stops working; update it wherever you
   use it."), calls `rotate_capture_key`, and shows the plaintext once in a
   read-only, labelled field (selected on focus) with a copy button, "Copy it
-  now — it won't be shown again" and a short how-to: the `Get Contents of
-  URL` action posts JSON `{url}` / `{text}` to `CAPTURE_ENDPOINT`
+  now — it won't be shown again" and a short how-to: POST JSON `{url}` / `{text}` to `CAPTURE_ENDPOINT`
   (`lib/supabase.ts`, `<VITE_SUPABASE_URL>/functions/v1/capture`) with header
   `Authorization: Bearer <key>`. The plaintext lives only in a ref in the
   composable — never localStorage/IndexedDB — and is dropped on **Done**, on
   the next rotation and when the section unmounts (leaving Settings). A
-  `PT429` answer reads "Too many new keys in the last hour". **Sign out**
-  lives here too (§7).
+  `PT429` answer reads "Too many new keys in the last hour". **Security
+  activity** (`components/settings/SecurityActivitySection.vue` +
+  `composables/useSecurityEvents.ts`): one RLS-scoped read of the newest 50
+  `security_events` (`id, kind, detail, created_at`), each shown as a line —
+  "Signed in · Firefox on Linux · 203.0.113.7" (`describeDevice` reads the
+  browser and OS from the user agent), "New capture key generated",
+  "Shared / Stopped sharing / Deleted “title”" — with its date and time.
+  Loading, error (with Try again) and empty states. **Sign out** lives here
+  too (§7).
 - **Sharing** (`ShareDialog.vue`) — toggle bound to `bookmark.is_public`
   (`store.setPublic()`), a read-only `/s/:id` link with copy button and
   `navigator.share()` where available. First-time enabling a share gets a
@@ -1081,7 +1113,10 @@ Vue 3 + Pinia, Tailwind CSS v4 (set up like kairos-v2's client, see *Styling* be
   run on submit (Enter) / clear only, not per keystroke. An empty query is
   skipped client-side (an empty `websearch_to_tsquery` matches nothing) and
   falls back to the normal list query. A search loads its whole result set
-  unpaged, in the chosen sort (see **Sort**).
+  unpaged, in the chosen sort (see **Sort**). Offline (or with no session),
+  the search runs over the downloaded copies instead: every word of the
+  query must appear, case-insensitively, in the title, excerpt, downloaded
+  text or translation (`matchesOffline`, `stores/bookmarks.ts`).
 - **Dialogs and labels** — `shared/ui/Dialog.vue` is a native `<dialog>`
   opened with `showModal()` (page inert behind it, Escape closes, focus goes
   back to the opener). The search and tag inputs carry `aria-label`s.

@@ -1,5 +1,5 @@
 -- capture_keys table, policy "owner read", column privileges, and
--- rotate_capture_key(). The iOS Shortcut's per-user bearer: only its sha256
+-- rotate_capture_key(). A capture client's per-user bearer: only its sha256
 -- is stored, and the hash never reaches a client role.
 begin;
 \ir _helpers.psql

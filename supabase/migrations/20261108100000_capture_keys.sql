@@ -1,4 +1,4 @@
--- Per-user capture keys for the iOS Shortcut, replacing the single static
+-- Per-user capture keys for capture clients, replacing the single static
 -- CAPTURE_KEY secret (which also hardcoded who captures land as:
 -- OWNER_USER_ID).
 --
